@@ -86,84 +86,109 @@ type whisperXInvocation struct {
 	TranscriptionProfileName string
 }
 
-// Transcribe runs WhisperX transcription.
+// Transcribe runs WhisperX transcription for a single request. It is a batch
+// of one; see TranscribeBatch.
+func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progress ...ProgressFunc) (*TranscribeResult, error) {
+	results, err := s.TranscribeBatch(ctx, []TranscribeRequest{req}, progress...)
+	if err != nil {
+		return nil, err
+	}
+	return results[0], nil
+}
+
+// TranscribeBatch runs WhisperX transcription for several requests in ONE
+// wrapper invocation, so uvx resolution, torch import, and model load are
+// paid once per batch instead of once per file. Every request must resolve
+// to the same model; languages may vary (the wrapper caches per-language
+// models). Results are returned in request order. A failure of any request
+// fails the whole batch, matching the previous serial-loop behavior where
+// the first failure aborted the stage.
 //
 // Steps:
-//  1. Extract audio via FFmpeg.
-//  2. Run WhisperX via uvx.
-//  3. Read SRT, count segments, parse duration.
-//  4. Return result.
+//  1. Extract each request's audio via FFmpeg.
+//  2. Run WhisperX once via uvx over all extracted files.
+//  3. Read each SRT, count segments, parse duration.
 //
-// If progress is non-nil, it is called at the start and end of each phase.
-func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progress ...ProgressFunc) (*TranscribeResult, error) {
+// If progress is non-nil, it is called at the start and end of each phase
+// (once per phase for the whole batch).
+func (s *Service) TranscribeBatch(ctx context.Context, reqs []TranscribeRequest, progress ...ProgressFunc) ([]*TranscribeResult, error) {
+	if len(reqs) == 0 {
+		return nil, fmt.Errorf("transcribe batch: no requests")
+	}
 	var onProgress ProgressFunc
 	if len(progress) > 0 {
 		onProgress = progress[0]
 	}
 
-	model := req.Model
+	model := reqs[0].Model
 	if model == "" {
 		model = s.model
 	}
-
-	// Ensure output directory exists.
-	if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create output dir: %w", err)
+	for _, req := range reqs[1:] {
+		m := req.Model
+		if m == "" {
+			m = s.model
+		}
+		if m != model {
+			return nil, fmt.Errorf("transcribe batch: mixed models %q and %q", model, m)
+		}
 	}
 
-	// Extract audio via FFmpeg.
+	// Extract audio for every request via FFmpeg.
 	if onProgress != nil {
 		onProgress(PhaseExtract, 0)
 	}
-	wavPath := filepath.Join(req.OutputDir, "audio.wav")
-	ffmpegArgs := []string{
-		"-i", req.InputPath,
-		"-map", fmt.Sprintf("0:a:%d", req.AudioIndex),
-		"-ac", "1",
-		"-ar", "16000",
-		"-c:a", "pcm_s16le",
-		"-vn", "-sn", "-dn",
-		"-y",
-		wavPath,
-	}
-
-	s.logger.Info("extracting audio for transcription",
-		transcriptionLogFields(req,
-			"event_type", "transcription_extract",
-			"input", req.InputPath,
-			"output_dir", req.OutputDir,
-		)...,
-	)
 	extractStart := time.Now()
-	ffmpegCmd := exec.CommandContext(ctx, "ffmpeg", ffmpegArgs...)
-	if output, err := ffmpegCmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("ffmpeg audio extraction: %w: %s", err, output)
+	wavPaths := make([]string, len(reqs))
+	for i, req := range reqs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create output dir: %w", err)
+		}
+		wavPath := filepath.Join(req.OutputDir, "audio.wav")
+		wavPaths[i] = wavPath
+		ffmpegArgs := []string{
+			"-i", req.InputPath,
+			"-map", fmt.Sprintf("0:a:%d", req.AudioIndex),
+			"-ac", "1",
+			"-ar", "16000",
+			"-c:a", "pcm_s16le",
+			"-vn", "-sn", "-dn",
+			"-y",
+			wavPath,
+		}
+		s.logger.Info("extracting audio for transcription",
+			transcriptionLogFields(req,
+				"event_type", "transcription_extract",
+				"input", req.InputPath,
+				"output_dir", req.OutputDir,
+			)...,
+		)
+		ffmpegCmd := exec.CommandContext(ctx, "ffmpeg", ffmpegArgs...)
+		if output, err := ffmpegCmd.CombinedOutput(); err != nil {
+			return nil, fmt.Errorf("ffmpeg audio extraction (%s): %w: %s", req.InputPath, err, output)
+		}
 	}
 	extractTime := time.Since(extractStart)
-	s.logger.Info("audio extraction completed",
-		transcriptionLogFields(req,
-			"event_type", "transcription_extract_complete",
-			"output", wavPath,
-			"duration_ms", extractTime.Milliseconds(),
-		)...,
-	)
 	if onProgress != nil {
 		onProgress(PhaseExtract, extractTime)
 	}
 
-	// Run WhisperX via the embedded wrapper.
+	// Run WhisperX once via the embedded wrapper.
 	if onProgress != nil {
 		onProgress(PhaseTranscribe, 0)
 	}
-	invocation := s.buildWhisperXInvocation(wavPath, req.OutputDir, model, req.Language)
+	invocation := s.buildWhisperXInvocation(wavPaths, reqs, model)
 	s.logger.Info("running WhisperX transcription",
-		transcriptionLogFields(req,
+		transcriptionLogFields(reqs[0],
 			"event_type", "transcription_whisperx",
 			"decision_type", "transcription_profile",
 			"decision_result", invocation.TranscriptionProfileName,
 			"decision_reason", fmt.Sprintf("vad_method=%s device=%s compute_type=%s condition_on_previous_text=%t batch_size=%d chunk_size=%d", s.vadMethod, invocation.Device, invocation.ComputeType, invocation.ConditionOnPreviousText, whisperXBatchSize, whisperXVADChunkSize),
 			"model", model,
-			"language", req.Language,
+			"batch_files", len(reqs),
 		)...,
 	)
 	transcribeStart := time.Now()
@@ -177,42 +202,45 @@ func (s *Service) Transcribe(ctx context.Context, req TranscribeRequest, progres
 		onProgress(PhaseTranscribe, transcribeTime)
 	}
 
-	// Find canonical WhisperX outputs. WhisperX names them after the input wav.
-	srtPath := filepath.Join(req.OutputDir, "audio.srt")
-	if _, err := os.Stat(srtPath); err != nil {
-		return nil, fmt.Errorf("srt output not found at %s: %w", srtPath, err)
-	}
-	jsonPath := filepath.Join(req.OutputDir, "audio.json")
-	if _, err := os.Stat(jsonPath); err != nil {
-		return nil, fmt.Errorf("json output not found at %s: %w", jsonPath, err)
+	// Collect canonical WhisperX outputs per request.
+	results := make([]*TranscribeResult, len(reqs))
+	for i, req := range reqs {
+		srtPath := filepath.Join(req.OutputDir, "audio.srt")
+		if _, err := os.Stat(srtPath); err != nil {
+			return nil, fmt.Errorf("srt output not found at %s: %w", srtPath, err)
+		}
+		jsonPath := filepath.Join(req.OutputDir, "audio.json")
+		if _, err := os.Stat(jsonPath); err != nil {
+			return nil, fmt.Errorf("json output not found at %s: %w", jsonPath, err)
+		}
+
+		segments, duration, err := analyzeSRT(srtPath)
+		if err != nil {
+			return nil, fmt.Errorf("analyze srt: %w", err)
+		}
+
+		results[i] = &TranscribeResult{
+			SRTPath:        srtPath,
+			JSONPath:       jsonPath,
+			Duration:       duration,
+			Segments:       segments,
+			ExtractTime:    extractTime,
+			TranscribeTime: transcribeTime,
+		}
+
+		s.logger.Info("WhisperX transcription completed",
+			transcriptionLogFields(req,
+				"event_type", "transcription_whisperx_complete",
+				"segments", segments,
+				"content_duration_s", duration,
+				"duration_ms", transcribeTime.Milliseconds(),
+				"srt_path", srtPath,
+				"json_path", jsonPath,
+			)...,
+		)
 	}
 
-	segments, duration, err := analyzeSRT(srtPath)
-	if err != nil {
-		return nil, fmt.Errorf("analyze srt: %w", err)
-	}
-
-	result := &TranscribeResult{
-		SRTPath:        srtPath,
-		JSONPath:       jsonPath,
-		Duration:       duration,
-		Segments:       segments,
-		ExtractTime:    extractTime,
-		TranscribeTime: transcribeTime,
-	}
-
-	s.logger.Info("WhisperX transcription completed",
-		transcriptionLogFields(req,
-			"event_type", "transcription_whisperx_complete",
-			"segments", segments,
-			"content_duration_s", duration,
-			"duration_ms", transcribeTime.Milliseconds(),
-			"srt_path", srtPath,
-			"json_path", jsonPath,
-		)...,
-	)
-
-	return result, nil
+	return results, nil
 }
 
 func transcriptionLogFields(req TranscribeRequest, fields ...any) []any {
@@ -230,7 +258,7 @@ func transcriptionLogFields(req TranscribeRequest, fields ...any) []any {
 	return append(out, fields...)
 }
 
-func (s *Service) buildWhisperXInvocation(wavPath, outputDir, model, language string) whisperXInvocation {
+func (s *Service) buildWhisperXInvocation(wavPaths []string, reqs []TranscribeRequest, model string) whisperXInvocation {
 	device := "cpu"
 	computeType := "int8"
 	if s.cudaEnabled {
@@ -240,10 +268,17 @@ func (s *Service) buildWhisperXInvocation(wavPath, outputDir, model, language st
 	args := []string{
 		"--from", whisperXPackage,
 		"python", "-c", whisperXWrapperScript,
-		"--audio", wavPath,
-		"--output-dir", outputDir,
+	}
+	// --audio/--output-dir/--language repeat together, one triple per request.
+	for i, req := range reqs {
+		args = append(args,
+			"--audio", wavPaths[i],
+			"--output-dir", req.OutputDir,
+			"--language", req.Language,
+		)
+	}
+	args = append(args,
 		"--model", model,
-		"--language", language,
 		"--vad-method", s.vadMethod,
 		"--device", device,
 		"--compute-type", computeType,
@@ -253,7 +288,7 @@ func (s *Service) buildWhisperXInvocation(wavPath, outputDir, model, language st
 		"--vad-offset", fmt.Sprintf("%.3f", whisperXVADOffset),
 		"--condition-on-previous-text", "false",
 		"--transcription-profile-name", transcriptionProfileID,
-	}
+	)
 	env := append(os.Environ(), "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1")
 	if s.hfToken != "" {
 		args = append(args, "--hf-token", s.hfToken)

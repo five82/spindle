@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -317,35 +318,25 @@ func (h *Handler) detectCommentary(
 		"candidate_tracks", candidateCount,
 	)
 
-	// Examine each non-primary audio track. The primary fingerprint is shared
-	// across candidates so similarity checks do not transcribe the same primary
-	// audio repeatedly.
-	primaryCache := primaryFingerprintCache{}
-	candidateNumber := 0
+	// Language filter first: it needs only ffprobe tags and decides which
+	// candidates are worth transcribing at all.
+	type candidateTrack struct {
+		audioIndex int
+		stream     ffprobe.Stream
+	}
+	var candidates []candidateTrack
 	for _, as := range audioStreams {
 		if as.audioIndex == primaryAudioIdx {
 			continue
 		}
-		candidateNumber++
-		idx := as.absIndex
-		message := fmt.Sprintf("Phase 1/3 - Commentary detection (candidate %d/%d: similarity check)", candidateNumber, candidateCount)
-		_ = sess.Progress(commentaryCandidatePercent(candidateNumber, candidateCount, 0), message, stage.WithActiveEpisode(epKey))
-		logger.Info("commentary candidate analysis started",
-			"event_type", "commentary_candidate_start",
-			"episode_key", epKey,
-			"candidate_number", candidateNumber,
-			"candidate_count", candidateCount,
-			"audio_index", as.audioIndex,
-			"stream_index", idx,
-		)
-		stream := result.Streams[idx]
+		stream := result.Streams[as.absIndex]
 		rawLang, allowed := allowedAudioLanguage(stream.Tags)
 		if !allowed {
 			logger.Info("track excluded by language",
 				"decision_type", "audio_language_filter",
 				"decision_result", "excluded",
 				"decision_reason", fmt.Sprintf("language=%s is not english or unknown", rawLang),
-				"track_index", idx,
+				"track_index", as.absIndex,
 				"audio_index", as.audioIndex,
 			)
 			excluded = append(excluded, ripspec.ExcludedTrackRef{
@@ -354,39 +345,101 @@ func (h *Handler) detectCommentary(
 			})
 			continue
 		}
+		candidates = append(candidates, candidateTrack{audioIndex: as.audioIndex, stream: stream})
+	}
+	if len(candidates) == 0 {
+		_ = sess.Progress(40, "Phase 1/3 - Commentary detection complete (no candidates)", stage.WithActiveEpisode(epKey))
+		return comms, excluded
+	}
 
-		// Stereo similarity check: compare transcription fingerprints of
-		// the primary and candidate tracks.
-		if h.transcriber != nil {
-			sim, simErr := h.stereoSimilarity(ctx, logger, path, itemID, primaryAudioIdx, as.audioIndex, fingerprint, epKey, &primaryCache)
-			if simErr != nil {
-				logger.Warn("stereo similarity check failed",
-					"event_type", "commentary_detection_failed",
-					"error_hint", "stereo similarity computation error",
-					"impact", "skipping similarity filter for track",
-					"error", simErr,
-					"track_index", idx,
-				)
-			} else if sim >= h.cfg.Commentary.SimilarityThreshold {
-				logger.Info("track excluded as stereo downmix",
+	// Primary fingerprint: reuse the shared transcript artifact when episode
+	// identification already produced one; otherwise transcribe the primary
+	// once and record it as the artifact so subtitle generation can reuse it.
+	primaryFP := h.primaryFingerprint(ctx, sess, path, primaryAudioIdx, epKey)
+
+	// Transcribe ALL candidates in one WhisperX invocation. Each candidate is
+	// transcribed exactly once; the same transcript feeds both the stereo
+	// similarity filter and LLM classification.
+	_ = sess.Progress(10, fmt.Sprintf("Phase 1/3 - Commentary detection (transcribing %d candidates, batched)", len(candidates)), stage.WithActiveEpisode(epKey))
+	candidateText := make(map[int]string, len(candidates))
+	if h.transcriber != nil {
+		reqs := make([]transcription.TranscribeRequest, len(candidates))
+		for i, c := range candidates {
+			reqs[i] = transcription.TranscribeRequest{
+				InputPath:  path,
+				AudioIndex: c.audioIndex,
+				Language:   "en",
+				OutputDir:  tempOutputDir(fingerprint, epKey, c.audioIndex),
+				ItemID:     itemID,
+				EpisodeKey: epKey,
+				Purpose:    "commentary_candidate",
+			}
+		}
+		results, err := h.transcriber.TranscribeBatch(ctx, reqs)
+		if err != nil {
+			logger.Warn("candidate transcription batch failed",
+				"event_type", "commentary_detection_failed",
+				"error_hint", "whisperx batch transcription error",
+				"impact", "candidates will be conservatively preserved as commentary",
+				"error", err,
+				"candidate_count", len(candidates),
+			)
+		} else {
+			for i, c := range candidates {
+				text, readErr := os.ReadFile(results[i].SRTPath)
+				if readErr != nil {
+					logger.Warn("failed to read candidate transcript",
+						"event_type", "commentary_detection_failed",
+						"error_hint", "could not read srt file",
+						"impact", "track will be conservatively preserved as commentary",
+						"error", readErr,
+						"audio_index", c.audioIndex,
+					)
+					continue
+				}
+				candidateText[c.audioIndex] = string(text)
+			}
+		}
+	}
+
+	for i, c := range candidates {
+		candidateNumber := i + 1
+		text, transcribed := candidateText[c.audioIndex]
+
+		// Stereo similarity filter: compare transcript fingerprints so a
+		// stereo downmix of the primary is excluded before LLM classification.
+		if transcribed && primaryFP != nil {
+			if fp := textutil.NewFingerprint(text); fp != nil {
+				sim := textutil.CosineSimilarity(primaryFP, fp)
+				logger.Info("stereo similarity check completed",
 					"decision_type", logs.DecisionCommentaryStereoFilter,
-					"decision_result", "excluded",
-					"decision_reason", fmt.Sprintf("similarity %.3f >= threshold %.3f", sim, h.cfg.Commentary.SimilarityThreshold),
-					"track_index", idx,
+					"decision_result", "measured",
+					"decision_reason", fmt.Sprintf("similarity %.3f", sim),
+					"episode_key", epKey,
+					"primary_audio_index", primaryAudioIdx,
+					"candidate_audio_index", c.audioIndex,
+					"similarity", sim,
 				)
-				excluded = append(excluded, ripspec.ExcludedTrackRef{
-					Index:      as.audioIndex,
-					Reason:     "stereo downmix of primary",
-					Similarity: sim,
-				})
-				continue
+				if sim >= h.cfg.Commentary.SimilarityThreshold {
+					logger.Info("track excluded as stereo downmix",
+						"decision_type", logs.DecisionCommentaryStereoFilter,
+						"decision_result", "excluded",
+						"decision_reason", fmt.Sprintf("similarity %.3f >= threshold %.3f", sim, h.cfg.Commentary.SimilarityThreshold),
+						"audio_index", c.audioIndex,
+					)
+					excluded = append(excluded, ripspec.ExcludedTrackRef{
+						Index:      c.audioIndex,
+						Reason:     "stereo downmix of primary",
+						Similarity: sim,
+					})
+					continue
+				}
 			}
 		}
 
-		// LLM classification via transcription.
-		message = fmt.Sprintf("Phase 1/3 - Commentary detection (candidate %d/%d: LLM classification)", candidateNumber, candidateCount)
+		message := fmt.Sprintf("Phase 1/3 - Commentary detection (candidate %d/%d: LLM classification)", candidateNumber, candidateCount)
 		_ = sess.Progress(commentaryCandidatePercent(candidateNumber, candidateCount, 0.6), message, stage.WithActiveEpisode(epKey))
-		ref := h.classifyTrack(ctx, logger, path, itemID, as.audioIndex, stream, fingerprint, epKey)
+		ref := h.classifyTrack(ctx, logger, c.audioIndex, c.stream, epKey, text, transcribed)
 		if ref != nil {
 			comms = append(comms, *ref)
 		}
@@ -404,167 +457,124 @@ func commentaryCandidatePercent(candidateNumber, candidateCount int, fraction fl
 	return 5 + (35 * (completed + fraction) / float64(candidateCount))
 }
 
-type primaryFingerprintCache struct {
-	loaded      bool
-	fingerprint *textutil.Fingerprint
-}
-
-func (c *primaryFingerprintCache) get(load func() (*textutil.Fingerprint, error)) (*textutil.Fingerprint, error) {
-	if c.loaded {
-		return c.fingerprint, nil
-	}
-	fp, err := load()
-	if err != nil {
-		return nil, err
-	}
-	c.loaded = true
-	c.fingerprint = fp
-	return fp, nil
-}
-
-// stereoSimilarity computes the cosine similarity between transcription
-// fingerprints of two audio tracks. This detects stereo downmixes of the
-// primary audio. The primary fingerprint is cached across candidates.
-func (h *Handler) stereoSimilarity(
+// primaryFingerprint returns the transcript fingerprint of the primary audio
+// track. It reuses the shared per-episode transcript artifact when one exists
+// (recorded by episode identification); otherwise it transcribes the primary
+// once into the staging transcripts directory and records the artifact so
+// subtitle generation can reuse it. Returns nil (logged) on failure --
+// callers then skip the similarity filter, matching the previous behavior.
+func (h *Handler) primaryFingerprint(
 	ctx context.Context,
-	logger *slog.Logger,
+	sess *stage.Session,
 	path string,
-	itemID int64,
-	primaryIdx, candidateIdx int,
-	fingerprint, epKey string,
-	primaryCache *primaryFingerprintCache,
-) (float64, error) {
-	logger.Info("stereo similarity check started",
-		"event_type", "commentary_stereo_check_start",
-		"decision_type", logs.DecisionCommentaryStereoFilter,
-		"decision_result", "started",
-		"decision_reason", fmt.Sprintf("primary_audio_index=%d candidate_audio_index=%d", primaryIdx, candidateIdx),
-		"episode_key", epKey,
-		"primary_audio_index", primaryIdx,
-		"candidate_audio_index", candidateIdx,
-	)
-	primaryFP, err := primaryCache.get(func() (*textutil.Fingerprint, error) {
-		primaryResult, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
-			InputPath:  path,
-			AudioIndex: primaryIdx,
-			Language:   "en",
-			OutputDir:  tempOutputDir(fingerprint, epKey, primaryIdx),
-			ItemID:     itemID,
-			EpisodeKey: epKey,
-			Purpose:    "commentary_similarity_primary",
-		})
-		if err != nil {
-			return nil, fmt.Errorf("transcribe primary: %w", err)
-		}
+	primaryIdx int,
+	epKey string,
+) *textutil.Fingerprint {
+	logger := sess.Logger
 
-		primaryText, err := os.ReadFile(primaryResult.SRTPath)
-		if err != nil {
-			return nil, fmt.Errorf("read primary srt: %w", err)
+	if asset, ok := sess.Env.Assets.FindAsset(ripspec.AssetKindTranscript, epKey); ok && asset.IsCompleted() {
+		if text, err := os.ReadFile(asset.Path); err == nil {
+			logger.Info("primary transcript artifact reused",
+				"decision_type", logs.DecisionCommentaryStereoFilter,
+				"decision_result", "artifact_reused",
+				"decision_reason", "canonical transcript already produced earlier in the pipeline",
+				"episode_key", epKey,
+				"srt_path", asset.Path,
+			)
+			return textutil.NewFingerprint(string(text))
 		}
-		return textutil.NewFingerprint(string(primaryText)), nil
-	})
-	if err != nil {
-		return 0, err
 	}
 
-	candidateResult, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
+	if h.transcriber == nil {
+		return nil
+	}
+	stagingRoot, err := sess.Item.StagingRoot(h.cfg.Paths.StagingDir)
+	if err != nil {
+		logger.Warn("primary transcription skipped",
+			"event_type", "commentary_detection_failed",
+			"error_hint", "staging root unavailable",
+			"impact", "similarity filter disabled for this item",
+			"error", err,
+		)
+		return nil
+	}
+	result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 		InputPath:  path,
-		AudioIndex: candidateIdx,
+		AudioIndex: primaryIdx,
 		Language:   "en",
-		OutputDir:  tempOutputDir(fingerprint, epKey, candidateIdx),
-		ItemID:     itemID,
+		OutputDir:  filepath.Join(stagingRoot, "transcripts", epKey),
+		ItemID:     sess.Item.ID,
 		EpisodeKey: epKey,
-		Purpose:    "commentary_similarity_candidate",
+		Purpose:    "commentary_similarity_primary",
 	})
 	if err != nil {
-		return 0, fmt.Errorf("transcribe candidate: %w", err)
+		logger.Warn("primary transcription failed",
+			"event_type", "commentary_detection_failed",
+			"error_hint", "whisperx transcription error",
+			"impact", "similarity filter disabled for this item",
+			"error", err,
+		)
+		return nil
 	}
-
-	candidateText, err := os.ReadFile(candidateResult.SRTPath)
+	if err := sess.SaveAssetSuccess(ripspec.AssetKindTranscript, ripspec.Asset{
+		EpisodeKey: epKey,
+		Path:       result.SRTPath,
+		Status:     ripspec.AssetStatusCompleted,
+	}); err != nil {
+		logger.Warn("transcript artifact record failed",
+			"event_type", "commentary_detection_failed",
+			"error_hint", "could not persist transcript asset",
+			"impact", "later stages will re-transcribe the primary track",
+			"error", err,
+		)
+	}
+	text, err := os.ReadFile(result.SRTPath)
 	if err != nil {
-		return 0, fmt.Errorf("read candidate srt: %w", err)
+		logger.Warn("failed to read primary transcript",
+			"event_type", "commentary_detection_failed",
+			"error_hint", "could not read srt file",
+			"impact", "similarity filter disabled for this item",
+			"error", err,
+		)
+		return nil
 	}
-
-	fpB := textutil.NewFingerprint(string(candidateText))
-
-	similarity := textutil.CosineSimilarity(primaryFP, fpB)
-	logger.Info("stereo similarity check completed",
-		"decision_type", logs.DecisionCommentaryStereoFilter,
-		"decision_result", "measured",
-		"decision_reason", fmt.Sprintf("similarity %.3f", similarity),
-		"episode_key", epKey,
-		"primary_audio_index", primaryIdx,
-		"candidate_audio_index", candidateIdx,
-		"similarity", similarity,
-	)
-	return similarity, nil
+	return textutil.NewFingerprint(string(text))
 }
 
-// classifyTrack transcribes a candidate audio track and sends the transcript
-// to the LLM for commentary classification. Returns a CommentaryTrackRef if
-// the track is classified as commentary (or on error, conservatively).
+// classifyTrack sends a candidate track's transcript to the LLM for
+// commentary classification. The transcript comes from the shared candidate
+// batch transcription; transcribed=false means that transcription failed and
+// the track is conservatively preserved as commentary. Returns a
+// CommentaryTrackRef if the track is classified as commentary (or on error,
+// conservatively).
 func (h *Handler) classifyTrack(
 	ctx context.Context,
 	logger *slog.Logger,
-	path string,
-	itemID int64,
 	idx int,
 	stream ffprobe.Stream,
-	fingerprint, epKey string,
+	epKey string,
+	transcript string,
+	transcribed bool,
 ) *ripspec.CommentaryTrackRef {
-	if h.transcriber == nil || h.llmClient == nil {
+	if h.llmClient == nil {
 		return nil
 	}
-
-	logger.Info("commentary classification transcription started",
-		"event_type", "commentary_classification_transcription_start",
-		"episode_key", epKey,
-		"audio_index", idx,
-		"stream_index", stream.Index,
-	)
-	result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
-		InputPath:  path,
-		AudioIndex: idx,
-		Language:   "en",
-		OutputDir:  tempOutputDir(fingerprint, epKey, idx),
-		Model:      h.cfg.Commentary.WhisperXModel,
-		ItemID:     itemID,
-		EpisodeKey: epKey,
-		Purpose:    "commentary_classification",
-	})
-	if err != nil {
-		logger.Warn("commentary transcription failed, conservatively marking as commentary",
+	if !transcribed {
+		logger.Warn("commentary transcription unavailable, conservatively marking as commentary",
 			"event_type", "commentary_detection_failed",
-			"error_hint", "whisperx transcription error",
+			"error_hint", "candidate transcript missing",
 			"impact", "track preserved as commentary",
-			"error", err,
 			"track_index", idx,
 		)
 		return &ripspec.CommentaryTrackRef{
 			Index:      idx,
 			Confidence: 0,
-			Reason:     fmt.Sprintf("transcription failed: %v", err),
-		}
-	}
-
-	transcript, err := os.ReadFile(result.SRTPath)
-	if err != nil {
-		logger.Warn("failed to read transcript, conservatively marking as commentary",
-			"event_type", "commentary_detection_failed",
-			"error_hint", "could not read srt file",
-			"impact", "track preserved as commentary",
-			"error", err,
-			"track_index", idx,
-		)
-		return &ripspec.CommentaryTrackRef{
-			Index:      idx,
-			Confidence: 0,
-			Reason:     fmt.Sprintf("read transcript failed: %v", err),
+			Reason:     "transcription failed",
 		}
 	}
 
 	// Build user prompt.
-	userPrompt := buildCommentaryUserPrompt(stream, string(transcript))
+	userPrompt := buildCommentaryUserPrompt(stream, transcript)
 
 	logger.Info("LLM commentary classification started",
 		"event_type", "commentary_llm_start",

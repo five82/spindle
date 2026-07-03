@@ -121,10 +121,12 @@ type LLMConfig struct {
 	TimeoutSeconds int    `toml:"timeout_seconds"`
 }
 
-// CommentaryConfig defines commentary track detection settings.
+// CommentaryConfig defines commentary track detection settings. Commentary
+// transcription uses the shared subtitles WhisperX model: candidates are
+// transcribed once and the same transcript feeds both the similarity filter
+// and LLM classification.
 type CommentaryConfig struct {
 	Enabled             bool    `toml:"enabled"`
-	WhisperXModel       string  `toml:"whisperx_model"`
 	SimilarityThreshold float64 `toml:"similarity_threshold"`
 	ConfidenceThreshold float64 `toml:"confidence_threshold"`
 }

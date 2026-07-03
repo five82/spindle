@@ -97,14 +97,16 @@ def _load_model(whisperx, args, *, language, task):
         return whisperx.load_model(args.model, args.device, **kwargs)
 
 
-def _align_or_raw(whisperx, args, audio, raw_segments, detected_language):
+def _align_cached(whisperx, args, align_cache, audio, raw_segments, detected_language):
     if not raw_segments:
         return raw_segments
     try:
-        align_model, align_metadata = whisperx.load_align_model(
-            language_code=detected_language,
-            device=args.device,
-        )
+        if detected_language not in align_cache:
+            align_cache[detected_language] = whisperx.load_align_model(
+                language_code=detected_language,
+                device=args.device,
+            )
+        align_model, align_metadata = align_cache[detected_language]
         aligned_result = whisperx.align(
             raw_segments,
             align_model,
@@ -116,16 +118,18 @@ def _align_or_raw(whisperx, args, audio, raw_segments, detected_language):
         if isinstance(aligned_result, dict) and aligned_result.get("segments"):
             return aligned_result.get("segments") or raw_segments
     except Exception:
-        pass
+        align_cache.pop(detected_language, None)
     return raw_segments
 
 
-def _transcribe_default(whisperx, args, audio):
-    model = _load_model(whisperx, args, language=args.language, task="transcribe")
+def _transcribe_one(whisperx, args, model_cache, align_cache, audio, language):
+    if language not in model_cache:
+        model_cache[language] = _load_model(whisperx, args, language=language, task="transcribe")
+    model = model_cache[language]
     raw_result = model.transcribe(audio, batch_size=args.batch_size, chunk_size=args.chunk_size)
-    detected_language = _language_code(raw_result.get("language"), args.language)
+    detected_language = _language_code(raw_result.get("language"), language)
     raw_segments = raw_result.get("segments") or []
-    aligned_segments = _align_or_raw(whisperx, args, audio, raw_segments, detected_language)
+    aligned_segments = _align_cached(whisperx, args, align_cache, audio, raw_segments, detected_language)
     return {
         "language": detected_language,
         "detected_language": raw_result.get("language") or detected_language,
@@ -136,10 +140,14 @@ def _transcribe_default(whisperx, args, audio):
 
 def main() -> None:
     parser = argparse.ArgumentParser("spindle-whisperx-wrapper")
-    parser.add_argument("--audio", required=True)
-    parser.add_argument("--output-dir", required=True)
+    # --audio, --output-dir, and --language repeat together: item i reads
+    # audio[i] in language[i] and writes audio.srt/audio.json to output-dir[i].
+    # ASR and align models are loaded once per language and reused across
+    # items, which is the point of batching.
+    parser.add_argument("--audio", action="append", required=True)
+    parser.add_argument("--output-dir", action="append", required=True)
+    parser.add_argument("--language", action="append", required=True)
     parser.add_argument("--model", required=True)
-    parser.add_argument("--language", required=True)
     parser.add_argument("--vad-method", required=True)
     parser.add_argument("--device", required=True)
     parser.add_argument("--compute-type", required=True)
@@ -152,23 +160,16 @@ def main() -> None:
     parser.add_argument("--transcription-profile-name", required=True)
     args = parser.parse_args()
 
+    if len(args.audio) != len(args.output_dir) or len(args.audio) != len(args.language):
+        raise SystemExit(
+            f"arg_error:audio/output-dir/language counts differ "
+            f"({len(args.audio)}/{len(args.output_dir)}/{len(args.language)})"
+        )
+
     try:
         import whisperx
     except Exception as exc:  # pragma: no cover
         raise SystemExit(f"import_error:{exc}") from exc
-
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        audio = whisperx.load_audio(args.audio)
-    except Exception as exc:  # pragma: no cover
-        raise SystemExit(f"load_audio_error:{exc}") from exc
-
-    try:
-        payload = _transcribe_default(whisperx, args, audio)
-    except Exception as exc:  # pragma: no cover
-        raise SystemExit(f"transcribe_error:{exc}") from exc
 
     profile = {
         "name": args.transcription_profile_name,
@@ -182,12 +183,29 @@ def main() -> None:
         "vad_offset": args.vad_offset,
         "use_auth_token": bool(args.hf_token),
     }
-    payload["transcription_profile"] = profile
 
-    json_path = output_dir / "audio.json"
-    srt_path = output_dir / "audio.srt"
-    json_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    _write_srt(payload.get("segments") or [], srt_path)
+    model_cache = {}
+    align_cache = {}
+    for audio_path, out_dir, language in zip(args.audio, args.output_dir, args.language):
+        output_dir = Path(out_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            audio = whisperx.load_audio(audio_path)
+        except Exception as exc:  # pragma: no cover
+            raise SystemExit(f"load_audio_error:{audio_path}:{exc}") from exc
+
+        try:
+            payload = _transcribe_one(whisperx, args, model_cache, align_cache, audio, language)
+        except Exception as exc:  # pragma: no cover
+            raise SystemExit(f"transcribe_error:{audio_path}:{exc}") from exc
+
+        payload["transcription_profile"] = profile
+
+        json_path = output_dir / "audio.json"
+        srt_path = output_dir / "audio.srt"
+        json_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        _write_srt(payload.get("segments") or [], srt_path)
 
 
 if __name__ == "__main__":

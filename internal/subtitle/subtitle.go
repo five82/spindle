@@ -62,6 +62,10 @@ type GenerateDisplaySubtitleRequest struct {
 		SelectPrimaryAudioTrack(context.Context, string, string) (transcription.SelectedAudio, error)
 		Transcribe(context.Context, transcription.TranscribeRequest, ...transcription.ProgressFunc) (*transcription.TranscribeResult, error)
 	}
+	// Transcript, when non-nil, is a pre-existing canonical WhisperX result
+	// (the shared per-episode transcript artifact) reused instead of running
+	// WhisperX again. Audio selection still runs for language and labeling.
+	Transcript              *transcription.TranscribeResult
 	Progress                transcription.ProgressFunc
 	OnAudioSelected         func(transcription.SelectedAudio)
 	OnTranscriptionComplete func(*transcription.TranscribeResult)
@@ -105,17 +109,20 @@ func GenerateDisplaySubtitle(ctx context.Context, req GenerateDisplaySubtitleReq
 		req.OnAudioSelected(selectedAudio)
 	}
 
-	transcript, err := req.Transcriber.Transcribe(ctx, transcription.TranscribeRequest{
-		InputPath:  req.VideoPath,
-		AudioIndex: selectedAudio.Index,
-		Language:   selectedAudio.Language,
-		OutputDir:  req.WorkDir,
-		ItemID:     req.ItemID,
-		EpisodeKey: req.EpisodeKey,
-		Purpose:    req.Purpose,
-	}, req.Progress)
-	if err != nil {
-		return nil, &DisplaySubtitleError{Op: "transcribe", Err: err}
+	transcript := req.Transcript
+	if transcript == nil {
+		transcript, err = req.Transcriber.Transcribe(ctx, transcription.TranscribeRequest{
+			InputPath:  req.VideoPath,
+			AudioIndex: selectedAudio.Index,
+			Language:   selectedAudio.Language,
+			OutputDir:  req.WorkDir,
+			ItemID:     req.ItemID,
+			EpisodeKey: req.EpisodeKey,
+			Purpose:    req.Purpose,
+		}, req.Progress)
+		if err != nil {
+			return nil, &DisplaySubtitleError{Op: "transcribe", Err: err}
+		}
 	}
 	if req.OnTranscriptionComplete != nil {
 		req.OnTranscriptionComplete(transcript)
@@ -306,6 +313,7 @@ func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Sessi
 		ItemID:      item.ID,
 		EpisodeKey:  key,
 		Purpose:     "subtitle_generation",
+		Transcript:  transcriptArtifact(sess, key),
 		Transcriber: h.transcriber,
 		Progress: func(phase transcription.Phase, elapsed time.Duration) {
 			message := item.ProgressMessage
@@ -340,6 +348,46 @@ func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Sessi
 			)
 		},
 	})
+}
+
+// transcriptArtifact returns the episode's shared WhisperX transcript
+// artifact (recorded by episode identification, or commentary analysis for
+// movies) when both its SRT and JSON still exist, so subtitle generation can
+// skip its own WhisperX pass. Returns nil when there is no usable artifact.
+func transcriptArtifact(sess *stage.Session, key string) *transcription.TranscribeResult {
+	asset, ok := sess.Env.Assets.FindAsset(ripspec.AssetKindTranscript, key)
+	if !ok || !asset.IsCompleted() {
+		return nil
+	}
+	srtPath := asset.Path
+	jsonPath := filepath.Join(filepath.Dir(srtPath), "audio.json")
+	if _, err := os.Stat(srtPath); err != nil {
+		return nil
+	}
+	if _, err := os.Stat(jsonPath); err != nil {
+		return nil
+	}
+	cues, err := srtutil.ParseFile(srtPath)
+	if err != nil {
+		return nil
+	}
+	var duration float64
+	if len(cues) > 0 {
+		duration = cues[len(cues)-1].End
+	}
+	sess.Logger.Info("reusing transcript artifact for subtitle generation",
+		"decision_type", "subtitle_transcript_source",
+		"decision_result", "artifact_reused",
+		"decision_reason", "canonical transcript already produced earlier in the pipeline",
+		"episode_key", key,
+		"srt_path", srtPath,
+	)
+	return &transcription.TranscribeResult{
+		SRTPath:  srtPath,
+		JSONPath: jsonPath,
+		Duration: duration,
+		Segments: len(cues),
+	}
 }
 
 func (h *Handler) createDisplaySubtitleRecord(sess *stage.Session, job stage.AssetJob, result *GenerateDisplaySubtitleResult) (ripspec.SubtitleGenRecord, error) {

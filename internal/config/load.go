@@ -151,7 +151,6 @@ func defaultConfig() *Config {
 			TimeoutSeconds: 60,
 		},
 		Commentary: CommentaryConfig{
-			WhisperXModel:       "large-v3-turbo",
 			SimilarityThreshold: 0.92,
 			ConfidenceThreshold: 0.80,
 		},

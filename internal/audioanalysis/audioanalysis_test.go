@@ -1,12 +1,10 @@
 package audioanalysis
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
-	"github.com/five82/spindle/internal/textutil"
 )
 
 func TestAssetKeys_Movie(t *testing.T) {
@@ -69,77 +67,6 @@ func TestTempOutputDir(t *testing.T) {
 	want := "/tmp/spindle-commentary-abc123-s01e01-2"
 	if dir != want {
 		t.Fatalf("expected %q, got %q", want, dir)
-	}
-}
-
-func TestPrimaryFingerprintCacheUsesSuccessfulFingerprintOnce(t *testing.T) {
-	cache := primaryFingerprintCache{}
-	calls := 0
-	load := func() (*textutil.Fingerprint, error) {
-		calls++
-		return textutil.NewFingerprint("primary dialogue"), nil
-	}
-
-	first, err := cache.get(load)
-	if err != nil {
-		t.Fatalf("get failed: %v", err)
-	}
-	for i := 0; i < 3; i++ {
-		got, err := cache.get(load)
-		if err != nil {
-			t.Fatalf("cached get failed: %v", err)
-		}
-		if got != first {
-			t.Fatalf("cached fingerprint pointer changed")
-		}
-	}
-	if calls != 1 {
-		t.Fatalf("load called %d times, want 1", calls)
-	}
-}
-
-func TestPrimaryFingerprintCacheRetriesAfterFailure(t *testing.T) {
-	cache := primaryFingerprintCache{}
-	wantErr := errors.New("temporary transcription failure")
-	calls := 0
-	load := func() (*textutil.Fingerprint, error) {
-		calls++
-		if calls == 1 {
-			return nil, wantErr
-		}
-		return textutil.NewFingerprint("primary dialogue"), nil
-	}
-
-	if _, err := cache.get(load); !errors.Is(err, wantErr) {
-		t.Fatalf("first get error = %v, want %v", err, wantErr)
-	}
-	if _, err := cache.get(load); err != nil {
-		t.Fatalf("second get failed: %v", err)
-	}
-	if _, err := cache.get(load); err != nil {
-		t.Fatalf("cached get failed: %v", err)
-	}
-	if calls != 2 {
-		t.Fatalf("load called %d times, want 2", calls)
-	}
-}
-
-func TestPrimaryFingerprintCacheCachesEmptyFingerprint(t *testing.T) {
-	cache := primaryFingerprintCache{}
-	calls := 0
-	load := func() (*textutil.Fingerprint, error) {
-		calls++
-		return nil, nil
-	}
-
-	if got, err := cache.get(load); err != nil || got != nil {
-		t.Fatalf("first get = (%v, %v), want (nil, nil)", got, err)
-	}
-	if got, err := cache.get(load); err != nil || got != nil {
-		t.Fatalf("cached get = (%v, %v), want (nil, nil)", got, err)
-	}
-	if calls != 1 {
-		t.Fatalf("load called %d times, want 1", calls)
 	}
 }
 

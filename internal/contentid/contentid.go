@@ -119,6 +119,31 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	_ = sess.Progress(10, "Phase 1/3 - Transcribing episodes", stage.WithActiveEpisode(""))
 
+	// The initial reference fetch needs only the envelope and TMDB season, so
+	// it runs concurrently with transcription: the fetch loop is network-bound
+	// and internally rate-limited while transcription is GPU-bound. The
+	// buffered channel lets the goroutine finish even when an early return
+	// abandons the result; cancelFetch stops it from outliving the stage.
+	plan := deriveCandidateEpisodes(env, season, env.Metadata.DiscNumber)
+	refCache := make(map[int]referenceFingerprint)
+	fetchCtx, cancelFetch := context.WithCancel(ctx)
+	defer cancelFetch()
+	type refFetchOutcome struct {
+		refs []referenceFingerprint
+		err  error
+	}
+	refFetched := make(chan refFetchOutcome, 1)
+	logger.Info("reference subtitle fetch started",
+		"decision_type", logs.DecisionContentIDCandidates,
+		"decision_result", "fetch_overlapped",
+		"decision_reason", "network-bound reference fetch runs during GPU-bound transcription",
+		"initial_episode_count", len(plan.InitialEpisodes),
+	)
+	go func() {
+		refs, err := h.fetchReferenceFingerprints(fetchCtx, logger, item, seasonNum, env.Metadata.ID, season, plan.InitialEpisodes, refCache)
+		refFetched <- refFetchOutcome{refs: refs, err: err}
+	}()
+
 	ripPrints, err := h.generateEpisodeFingerprints(ctx, sess, env)
 	if err != nil {
 		return err
@@ -139,9 +164,8 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	_ = sess.Progress(50, "Phase 2/3 - Fetching reference subtitles", stage.WithActiveEpisode(""))
 
-	plan := deriveCandidateEpisodes(env, season, env.Metadata.DiscNumber)
-	refCache := make(map[int]referenceFingerprint)
-	refs, err := h.fetchReferenceFingerprints(ctx, logger, item, seasonNum, env.Metadata.ID, season, plan.InitialEpisodes, refCache)
+	fetched := <-refFetched
+	refs, err := fetched.refs, fetched.err
 	if err != nil {
 		return fmt.Errorf("fetch initial references: %w", err)
 	}
@@ -237,13 +261,19 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, sess *stage.S
 	if err != nil {
 		return nil, err
 	}
-	episodeDir := filepath.Join(stagingRoot, "contentid")
+	// Transcripts are shared artifacts: commentary analysis and subtitle
+	// generation reuse them later via ripspec.AssetKindTranscript.
+	episodeDir := filepath.Join(stagingRoot, "transcripts")
 	if err := os.MkdirAll(episodeDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create contentid dir: %w", err)
+		return nil, fmt.Errorf("create transcripts dir: %w", err)
 	}
 
-	prints := make([]ripFingerprint, 0, len(env.Episodes))
-	for idx, ep := range env.Episodes {
+	// Select the primary audio track per episode (cheap ffprobe), then
+	// transcribe every episode in ONE WhisperX invocation so uvx startup and
+	// model load are paid once per disc instead of once per episode.
+	var batched []ripspec.Episode
+	var reqs []transcription.TranscribeRequest
+	for _, ep := range env.Episodes {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -251,9 +281,6 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, sess *stage.S
 		if !ok || !asset.IsCompleted() {
 			continue
 		}
-
-		_ = sess.Progress(10+(40*float64(idx+1)/float64(episodeCount)), fmt.Sprintf("Phase 1/3 - Transcribing (%s)", ep.Key), stage.WithActiveEpisode(ep.Key))
-
 		workDir := filepath.Join(episodeDir, ep.Key)
 		if err := os.MkdirAll(workDir, 0o755); err != nil {
 			return nil, fmt.Errorf("create workdir %s: %w", workDir, err)
@@ -262,7 +289,8 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, sess *stage.S
 		if err != nil {
 			return nil, fmt.Errorf("select audio %s: %w", ep.Key, err)
 		}
-		result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
+		batched = append(batched, ep)
+		reqs = append(reqs, transcription.TranscribeRequest{
 			InputPath:  asset.Path,
 			AudioIndex: selectedAudio.Index,
 			Language:   selectedAudio.Language,
@@ -271,8 +299,27 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, sess *stage.S
 			EpisodeKey: ep.Key,
 			Purpose:    "episode_identification",
 		})
-		if err != nil {
-			return nil, fmt.Errorf("transcribe %s: %w", ep.Key, err)
+	}
+	if len(reqs) == 0 {
+		return nil, nil
+	}
+
+	_ = sess.Progress(15, fmt.Sprintf("Phase 1/3 - Transcribing %d of %d episodes (batched)", len(reqs), episodeCount), stage.WithActiveEpisode(""))
+	results, err := h.transcriber.TranscribeBatch(ctx, reqs)
+	if err != nil {
+		return nil, fmt.Errorf("transcribe episode batch: %w", err)
+	}
+
+	prints := make([]ripFingerprint, 0, len(batched))
+	for i, ep := range batched {
+		result := results[i]
+		if err := sess.SaveAssetSuccess(ripspec.AssetKindTranscript, ripspec.Asset{
+			EpisodeKey: ep.Key,
+			TitleID:    ep.TitleID,
+			Path:       result.SRTPath,
+			Status:     ripspec.AssetStatusCompleted,
+		}); err != nil {
+			return nil, fmt.Errorf("record transcript asset %s: %w", ep.Key, err)
 		}
 		text := readSRTText(result.SRTPath)
 		fp := textutil.NewFingerprint(text)

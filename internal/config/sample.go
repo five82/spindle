@@ -160,9 +160,6 @@ api_key = ""
 # Enable commentary track detection
 # enabled = false
 
-# WhisperX model for commentary analysis
-# whisperx_model = "large-v3-turbo"
-
 # Cosine similarity threshold for stereo downmix check
 # similarity_threshold = 0.92
 

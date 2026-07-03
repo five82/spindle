@@ -103,14 +103,22 @@ const (
 	AssetKindEncoded   = "encoded"
 	AssetKindSubtitled = "subtitled"
 	AssetKindFinal     = "final"
+	// AssetKindTranscript is the canonical WhisperX transcript of an
+	// episode's primary audio track, transcribed from the RIPPED source.
+	// Path points at the SRT; the WhisperX JSON (word timings) sits next to
+	// it as audio.json in the same directory. Episode ID, commentary
+	// analysis, and subtitle generation all reuse this artifact instead of
+	// re-transcribing. It lives in staging and dies with staging cleanup.
+	AssetKindTranscript = "transcript"
 )
 
 // Assets holds per-stage asset lists.
 type Assets struct {
-	Ripped    []Asset `json:"ripped,omitempty"`
-	Encoded   []Asset `json:"encoded,omitempty"`
-	Subtitled []Asset `json:"subtitled,omitempty"`
-	Final     []Asset `json:"final,omitempty"`
+	Ripped     []Asset `json:"ripped,omitempty"`
+	Encoded    []Asset `json:"encoded,omitempty"`
+	Subtitled  []Asset `json:"subtitled,omitempty"`
+	Final      []Asset `json:"final,omitempty"`
+	Transcript []Asset `json:"transcript,omitempty"`
 }
 
 // AudioTrackRef identifies a primary audio track by index.
@@ -305,6 +313,8 @@ func (as *Assets) stageSlice(kind string) *[]Asset {
 		return &as.Subtitled
 	case AssetKindFinal:
 		return &as.Final
+	case AssetKindTranscript:
+		return &as.Transcript
 	default:
 		return nil
 	}
@@ -357,7 +367,7 @@ func (as *Assets) RemapEpisodeKeys(remap map[string]string) {
 		normalized[strings.ToLower(oldKey)] = newKey
 	}
 
-	for _, kind := range []string{AssetKindRipped, AssetKindEncoded, AssetKindSubtitled, AssetKindFinal} {
+	for _, kind := range []string{AssetKindRipped, AssetKindEncoded, AssetKindSubtitled, AssetKindFinal, AssetKindTranscript} {
 		sp := as.stageSlice(kind)
 		if sp == nil {
 			continue

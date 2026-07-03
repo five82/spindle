@@ -146,7 +146,11 @@ func TestSelectPrimaryAudioTrackFallsBackLanguage(t *testing.T) {
 
 func TestBuildWhisperXInvocation(t *testing.T) {
 	svc := New("large-v3", true, "pyannote", "hf-token", nil)
-	invocation := svc.buildWhisperXInvocation("/tmp/audio.wav", "/tmp/out", "large-v3", "en")
+	invocation := svc.buildWhisperXInvocation(
+		[]string{"/tmp/audio.wav"},
+		[]TranscribeRequest{{OutputDir: "/tmp/out", Language: "en"}},
+		"large-v3",
+	)
 	if invocation.TranscriptionProfileName != transcriptionProfileID {
 		t.Fatalf("profile = %q, want %q", invocation.TranscriptionProfileName, transcriptionProfileID)
 	}
@@ -164,5 +168,48 @@ func TestBuildWhisperXInvocation(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(invocation.Env, " "), "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1") {
 		t.Fatalf("expected torch compatibility env in %v", invocation.Env)
+	}
+}
+
+func TestBuildWhisperXInvocationBatch(t *testing.T) {
+	svc := New("large-v3", false, "silero", "", nil)
+	invocation := svc.buildWhisperXInvocation(
+		[]string{"/tmp/e1/audio.wav", "/tmp/e2/audio.wav"},
+		[]TranscribeRequest{
+			{OutputDir: "/tmp/e1", Language: "en"},
+			{OutputDir: "/tmp/e2", Language: "de"},
+		},
+		"large-v3",
+	)
+	joined := strings.Join(invocation.Args, " ")
+	for _, want := range []string{
+		"--audio /tmp/e1/audio.wav --output-dir /tmp/e1 --language en",
+		"--audio /tmp/e2/audio.wav --output-dir /tmp/e2 --language de",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("invocation args missing %q: %s", want, joined)
+		}
+	}
+	// Model and profile flags appear once, after the per-item triples.
+	if strings.Count(joined, "--model ") != 1 {
+		t.Fatalf("expected exactly one --model flag: %s", joined)
+	}
+}
+
+func TestTranscribeBatchRejectsMixedModels(t *testing.T) {
+	svc := New("large-v3", false, "silero", "", nil)
+	_, err := svc.TranscribeBatch(context.Background(), []TranscribeRequest{
+		{OutputDir: "/tmp/a", Language: "en"},
+		{OutputDir: "/tmp/b", Language: "en", Model: "large-v3-turbo"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "mixed models") {
+		t.Fatalf("expected mixed-models error, got %v", err)
+	}
+}
+
+func TestTranscribeBatchRejectsEmpty(t *testing.T) {
+	svc := New("large-v3", false, "silero", "", nil)
+	if _, err := svc.TranscribeBatch(context.Background(), nil); err == nil {
+		t.Fatal("expected error for empty batch")
 	}
 }

@@ -251,7 +251,7 @@ func newDebugCommentaryCmd() *cobra.Command {
 			}
 
 			transcriber := transcription.New(
-				cfg.Commentary.WhisperXModel,
+				cfg.Subtitles.WhisperXModel,
 				cfg.Subtitles.WhisperXCUDAEnabled,
 				cfg.Subtitles.WhisperXVADMethod,
 				cfg.Subtitles.WhisperXHFToken,
