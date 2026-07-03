@@ -2,11 +2,13 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,10 +37,10 @@ func newTestManager(stages []PipelineStage) *Manager {
 
 func TestConfigureStagesBuildsStageMap(t *testing.T) {
 	stages := []PipelineStage{
-		{Stage: queue.StageIdentification, Semaphore: SemDisc},
-		{Stage: queue.StageRipping, Semaphore: SemDisc},
-		{Stage: queue.StageEncoding, Semaphore: SemEncode},
-		{Stage: queue.StageOrganizing, Semaphore: SemNone},
+		{Stage: queue.StageIdentification},
+		{Stage: queue.StageRipping},
+		{Stage: queue.StageEncoding},
+		{Stage: queue.StageOrganizing},
 	}
 
 	m := newTestManager(stages)
@@ -60,42 +62,12 @@ func TestConfigureStagesBuildsStageMap(t *testing.T) {
 	}
 }
 
-func TestConfigureStagesDerivesStageOrderDiscFirst(t *testing.T) {
-	stages := []PipelineStage{
-		{Stage: queue.StageIdentification, Semaphore: SemDisc},
-		{Stage: queue.StageEncoding, Semaphore: SemEncode},
-		{Stage: queue.StageRipping, Semaphore: SemDisc},
-		{Stage: queue.StageOrganizing, Semaphore: SemNone},
-	}
-
-	m := newTestManager(stages)
-	order := m.pipeline.stageOrder
-
-	if len(order) != 4 {
-		t.Fatalf("stageOrder length = %d, want 4", len(order))
-	}
-
-	// Disc stages should come first (identification, ripping), then the rest.
-	if order[0] != queue.StageIdentification {
-		t.Errorf("stageOrder[0] = %q, want %q", order[0], queue.StageIdentification)
-	}
-	if order[1] != queue.StageRipping {
-		t.Errorf("stageOrder[1] = %q, want %q", order[1], queue.StageRipping)
-	}
-	if order[2] != queue.StageEncoding {
-		t.Errorf("stageOrder[2] = %q, want %q", order[2], queue.StageEncoding)
-	}
-	if order[3] != queue.StageOrganizing {
-		t.Errorf("stageOrder[3] = %q, want %q", order[3], queue.StageOrganizing)
-	}
-}
-
 func TestNextStageReturnsCorrectProgression(t *testing.T) {
 	stages := []PipelineStage{
-		{Stage: queue.StageIdentification, Semaphore: SemDisc},
-		{Stage: queue.StageRipping, Semaphore: SemDisc},
-		{Stage: queue.StageEncoding, Semaphore: SemEncode},
-		{Stage: queue.StageOrganizing, Semaphore: SemNone},
+		{Stage: queue.StageIdentification},
+		{Stage: queue.StageRipping},
+		{Stage: queue.StageEncoding},
+		{Stage: queue.StageOrganizing},
 	}
 
 	m := newTestManager(stages)
@@ -119,9 +91,9 @@ func TestNextStageReturnsCorrectProgression(t *testing.T) {
 
 func TestNextStageReturnsCompletedForLastStage(t *testing.T) {
 	stages := []PipelineStage{
-		{Stage: queue.StageIdentification, Semaphore: SemDisc},
-		{Stage: queue.StageRipping, Semaphore: SemDisc},
-		{Stage: queue.StageOrganizing, Semaphore: SemNone},
+		{Stage: queue.StageIdentification},
+		{Stage: queue.StageRipping},
+		{Stage: queue.StageOrganizing},
 	}
 
 	m := newTestManager(stages)
@@ -134,7 +106,7 @@ func TestNextStageReturnsCompletedForLastStage(t *testing.T) {
 
 func TestNextStageReturnsCompletedForUnknownStage(t *testing.T) {
 	stages := []PipelineStage{
-		{Stage: queue.StageIdentification, Semaphore: SemDisc},
+		{Stage: queue.StageIdentification},
 	}
 
 	m := newTestManager(stages)
@@ -159,7 +131,7 @@ func TestCompletedItemKeepsTerminalProgress(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	manager := New(store, nil, nil, logger)
-	manager.ConfigureStages([]PipelineStage{{Stage: queue.StageOrganizing, Handler: stubHandler{}, Semaphore: SemNone}})
+	manager.ConfigureStages([]PipelineStage{{Stage: queue.StageOrganizing, Handler: stubHandler{}}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -218,7 +190,7 @@ func TestUserStoppedItemIsNotRecordedAsStageSuccess(t *testing.T) {
 			_, err := store.StopItems(item.ID)
 			return err
 		},
-	}, Semaphore: SemNone}})
+	}}})
 
 	manager.processItem(context.Background(), item, manager.pipeline.stages[0])
 
@@ -246,7 +218,7 @@ func TestFinalPersistenceFailureSignalsWorkflowStop(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	manager := New(store, nil, nil, logger)
-	manager.ConfigureStages([]PipelineStage{{Stage: queue.StageOrganizing, Handler: stubHandler{}, Semaphore: SemNone}})
+	manager.ConfigureStages([]PipelineStage{{Stage: queue.StageOrganizing, Handler: stubHandler{}}})
 
 	manager.processItem(context.Background(), item, manager.pipeline.stages[0])
 
@@ -394,4 +366,263 @@ func TestQueueCompletionSuppressedWithoutStartedCycle(t *testing.T) {
 	if len(events) != 0 {
 		t.Fatalf("unexpected queue notification(s): %v", events)
 	}
+}
+
+func TestSchedulerRunsChainedStagesAndRecordsTasks(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	item, _ := store.NewDisc("A", "fp1")
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, nil, nil, logger)
+	manager.ConfigureStages([]PipelineStage{
+		{Stage: queue.StageIdentification, Handler: stubHandler{}, Claims: map[string]int{"drive": 1}},
+		{Stage: queue.StageRipping, Handler: stubHandler{}, Claims: map[string]int{"drive": 1}},
+		{Stage: queue.StageOrganizing, Handler: stubHandler{}},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		manager.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		got, err := store.GetByID(item.ID)
+		if err != nil {
+			t.Fatalf("get item: %v", err)
+		}
+		if got.Stage == queue.StageCompleted {
+			tasks, err := store.TasksForItem(item.ID)
+			if err != nil {
+				t.Fatalf("tasks: %v", err)
+			}
+			if len(tasks) != 3 {
+				t.Fatalf("task count = %d, want 3", len(tasks))
+			}
+			for _, task := range tasks {
+				if task.State != queue.TaskDone {
+					t.Fatalf("task %s state = %q, want done", task.Type, task.State)
+				}
+				if task.Attempts != 1 {
+					t.Fatalf("task %s attempts = %d, want 1", task.Type, task.Attempts)
+				}
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("item did not complete under scheduler")
+}
+
+func TestSchedulerBudgetSerializesSameClaim(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	_, _ = store.NewDisc("A", "fp1")
+	_, _ = store.NewDisc("B", "fp2")
+
+	var mu sync.Mutex
+	running, maxRunning, total := 0, 0, 0
+
+	handler := stubHandler{run: func(context.Context, *stage.Session) error {
+		mu.Lock()
+		running++
+		if running > maxRunning {
+			maxRunning = running
+		}
+		total++
+		mu.Unlock()
+		time.Sleep(50 * time.Millisecond)
+		mu.Lock()
+		running--
+		mu.Unlock()
+		return nil
+	}}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, nil, nil, logger)
+	manager.ConfigureStages([]PipelineStage{
+		{Stage: queue.StageIdentification, Handler: handler, Claims: map[string]int{"drive": 1}},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		manager.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		t2 := total
+		mu.Unlock()
+		if t2 == 2 {
+			mu.Lock()
+			defer mu.Unlock()
+			if maxRunning != 1 {
+				t.Fatalf("max concurrent same-claim stages = %d, want 1", maxRunning)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("both items did not run")
+}
+
+func TestSchedulerFailureMarksTaskFailedAndStopsItem(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	item, _ := store.NewDisc("A", "fp1")
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, nil, nil, logger)
+	manager.ConfigureStages([]PipelineStage{
+		{Stage: queue.StageIdentification, Handler: stubHandler{run: func(context.Context, *stage.Session) error {
+			return errTestBoom
+		}}, Claims: map[string]int{"drive": 1}},
+		{Stage: queue.StageRipping, Handler: stubHandler{}, Claims: map[string]int{"drive": 1}},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		manager.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		got, err := store.GetByID(item.ID)
+		if err != nil {
+			t.Fatalf("get item: %v", err)
+		}
+		if got.Stage == queue.StageFailed {
+			tasks, err := store.TasksForItem(item.ID)
+			if err != nil {
+				t.Fatalf("tasks: %v", err)
+			}
+			if tasks[0].State != queue.TaskFailed {
+				t.Fatalf("failed task state = %q, want failed", tasks[0].State)
+			}
+			if tasks[1].State != queue.TaskPending {
+				t.Fatalf("dependent task state = %q, want pending (gated by item failure)", tasks[1].State)
+			}
+			ready, err := store.ReadyTasks()
+			if err != nil {
+				t.Fatalf("ready: %v", err)
+			}
+			if len(ready) != 0 {
+				t.Fatalf("ready tasks for failed item = %v, want none", ready)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("item did not fail")
+}
+
+var errTestBoom = errors.New("boom")
+
+func TestSchedulerCancelsWorkerOnUserStop(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	item, _ := store.NewDisc("A", "fp1")
+
+	handlerRunning := make(chan struct{})
+	handlerCanceled := make(chan struct{})
+	handler := stubHandler{run: func(ctx context.Context, _ *stage.Session) error {
+		close(handlerRunning)
+		<-ctx.Done()
+		close(handlerCanceled)
+		return ctx.Err()
+	}}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, nil, nil, logger)
+	manager.ConfigureStages([]PipelineStage{
+		{Stage: queue.StageIdentification, Handler: handler, Claims: map[string]int{"drive": 1}},
+		{Stage: queue.StageRipping, Handler: stubHandler{}, Claims: map[string]int{"drive": 1}},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		manager.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	select {
+	case <-handlerRunning:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler never started")
+	}
+
+	// User stops the item while its stage worker is running. The scheduler
+	// must cancel the worker (within one loop tick) instead of leaving a
+	// zombie that later stomps queue state or has staging wiped under it.
+	if _, err := store.StopItems(item.ID); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+
+	select {
+	case <-handlerCanceled:
+	case <-time.After(8 * time.Second):
+		t.Fatal("worker was not cancelled after user stop")
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		got, err := store.GetByID(item.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		tasks, err := store.TasksForItem(item.ID)
+		if err != nil {
+			t.Fatalf("tasks: %v", err)
+		}
+		if got.Stage == queue.StageFailed && got.UserStopped() &&
+			len(tasks) == 2 && tasks[0].State == queue.TaskPending && got.InProgress == 0 {
+			if got.FailedAtStage != string(queue.StageIdentification) {
+				t.Fatalf("failed_at_stage = %q, want identification", got.FailedAtStage)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("stopped item did not settle into failed state with pending task")
 }

@@ -15,24 +15,16 @@ import (
 	"github.com/five82/spindle/internal/stage"
 )
 
-// Semaphore identifies a resource semaphore.
-type Semaphore int
-
-const (
-	SemNone     Semaphore = iota
-	SemDisc               // guards optical drive
-	SemEncode             // guards SVT-AV1 encoder
-	SemWhisperX           // guards WhisperX GPU
-)
-
 // PipelineStage describes a single stage in the pipeline.
 // Stage identifies which queue stage this handler owns: the handler picks up
 // items whose item.Stage equals this value, and on success advances the item
 // to the next handler's Stage (or StageCompleted for the last handler).
+// Claims declare the resources the stage consumes while running; the
+// scheduler admits a task only when every claimed resource has capacity.
 type PipelineStage struct {
-	Handler   stage.Handler
-	Stage     queue.Stage
-	Semaphore Semaphore
+	Handler stage.Handler
+	Stage   queue.Stage
+	Claims  map[string]int
 }
 
 // pipelineState holds runtime state for the pipeline.
@@ -40,11 +32,11 @@ type pipelineState struct {
 	stages     []PipelineStage
 	stageOrder []queue.Stage
 	stageMap   map[queue.Stage]int
-	sems       [3]chan struct{} // disc, encode, whisperx (capacity 1 each)
+	specs      []queue.TaskSpec
 	logger     *slog.Logger
 }
 
-// Manager runs the pipeline poll loop.
+// Manager runs the task scheduler.
 type Manager struct {
 	store                  *queue.Store
 	notifier               *notify.Notifier
@@ -54,6 +46,19 @@ type Manager struct {
 	queueCycleActive       bool
 	persistenceFailures    chan error
 	persistenceFailureOnce sync.Once
+
+	wake       chan struct{}
+	budgetMu   sync.Mutex
+	budgetCap  map[string]int
+	budgetUsed map[string]int
+
+	// running tracks the cancel function of each item's active worker. It
+	// guards against dispatching a second task for an item whose previous
+	// worker has not exited (StopItems clears in_progress while the worker
+	// is still alive), and lets the scheduler cancel workers of
+	// user-stopped items.
+	runningMu sync.Mutex
+	running   map[int64]context.CancelFunc
 }
 
 // New creates a workflow manager. statusTracker may be nil.
@@ -63,6 +68,8 @@ func New(store *queue.Store, notifier *notify.Notifier, statusTracker *httpapi.S
 		notifier:            notifier,
 		statusTracker:       statusTracker,
 		persistenceFailures: make(chan error, 1),
+		wake:                make(chan struct{}, 1),
+		running:             make(map[int64]context.CancelFunc),
 		pipeline: &pipelineState{
 			logger: logs.Default(logger),
 		},
@@ -70,8 +77,6 @@ func New(store *queue.Store, notifier *notify.Notifier, statusTracker *httpapi.S
 }
 
 // ConfigureStages registers an ordered slice of stage handlers.
-// It builds the stageMap, derives stageOrder (disc-semaphore stages first),
-// and initializes semaphore channels (capacity 1 each).
 func (m *Manager) ConfigureStages(stages []PipelineStage) {
 	p := m.pipeline
 	p.stages = stages
@@ -81,26 +86,134 @@ func (m *Manager) ConfigureStages(stages []PipelineStage) {
 		p.stageMap[s.Stage] = i
 	}
 
-	// Derive stageOrder: disc-semaphore stages first, then the rest.
-	var disc []queue.Stage
-	var rest []queue.Stage
-	for _, s := range stages {
-		if s.Semaphore == SemDisc {
-			disc = append(disc, s.Stage)
-		} else {
-			rest = append(rest, s.Stage)
-		}
+	p.stageOrder = make([]queue.Stage, len(stages))
+	for i, s := range stages {
+		p.stageOrder[i] = s.Stage
 	}
-	p.stageOrder = append(disc, rest...)
 
-	// Initialize semaphore channels (capacity 1 each).
-	for i := range p.sems {
-		p.sems[i] = make(chan struct{}, 1)
+	// Task specs mirror registration order; the compiled per-item chain is
+	// one task per stage at the current granularity.
+	p.specs = make([]queue.TaskSpec, len(stages))
+	for i, s := range stages {
+		p.specs[i] = queue.TaskSpec{Type: s.Stage}
+	}
+
+	// Budget capacities replicate today's exclusivity: every claimed
+	// resource has capacity 1. Raising a capacity is a Phase 4/5 change
+	// gated by the GPU coexistence validation (see the plan doc).
+	m.budgetCap = make(map[string]int)
+	m.budgetUsed = make(map[string]int)
+	for _, s := range stages {
+		for res := range s.Claims {
+			m.budgetCap[res] = 1
+		}
 	}
 }
 
-// Run executes the pipeline poll loop until ctx is cancelled.
+// reserve attempts to claim the stage's resources. It is all-or-nothing.
+func (m *Manager) reserve(claims map[string]int) bool {
+	m.budgetMu.Lock()
+	defer m.budgetMu.Unlock()
+	for res, n := range claims {
+		if m.budgetUsed[res]+n > m.budgetCap[res] {
+			return false
+		}
+	}
+	for res, n := range claims {
+		m.budgetUsed[res] += n
+	}
+	return true
+}
+
+// release returns a stage's claimed resources to the budget.
+func (m *Manager) release(claims map[string]int) {
+	m.budgetMu.Lock()
+	defer m.budgetMu.Unlock()
+	for res, n := range claims {
+		m.budgetUsed[res] -= n
+	}
+}
+
+// signalWake nudges the scheduler loop without blocking.
+func (m *Manager) signalWake() {
+	select {
+	case m.wake <- struct{}{}:
+	default:
+	}
+}
+
+// trackWorker registers an item's active worker cancel function. Returns
+// false when the item already has a live worker.
+func (m *Manager) trackWorker(itemID int64, cancel context.CancelFunc) bool {
+	m.runningMu.Lock()
+	defer m.runningMu.Unlock()
+	if _, live := m.running[itemID]; live {
+		return false
+	}
+	m.running[itemID] = cancel
+	return true
+}
+
+// untrackWorker removes an item's worker registration.
+func (m *Manager) untrackWorker(itemID int64) {
+	m.runningMu.Lock()
+	defer m.runningMu.Unlock()
+	delete(m.running, itemID)
+}
+
+// hasLiveWorker reports whether the item has a worker that has not exited.
+func (m *Manager) hasLiveWorker(itemID int64) bool {
+	m.runningMu.Lock()
+	defer m.runningMu.Unlock()
+	_, live := m.running[itemID]
+	return live
+}
+
+// cancelStoppedWorkers cancels the workers of items the user has stopped.
+// Without this, `queue stop` only flips queue state and the stage worker
+// keeps running as a zombie -- and a subsequent retry can re-run earlier
+// stages (staging wipe) underneath it.
+func (m *Manager) cancelStoppedWorkers() {
+	m.runningMu.Lock()
+	ids := make([]int64, 0, len(m.running))
+	for id := range m.running {
+		ids = append(ids, id)
+	}
+	m.runningMu.Unlock()
+
+	for _, id := range ids {
+		item, err := m.store.GetByID(id)
+		if err != nil || item == nil {
+			continue
+		}
+		if !item.UserStopped() {
+			continue
+		}
+		m.runningMu.Lock()
+		cancel, live := m.running[id]
+		m.runningMu.Unlock()
+		if live {
+			m.pipeline.logger.Info("cancelling worker for stopped item",
+				"decision_type", logs.DecisionStageExecution,
+				"decision_result", "cancelled",
+				"decision_reason", "item was stopped by user while its stage was running",
+				"item_id", id,
+			)
+			cancel()
+		}
+	}
+}
+
+// Run executes the scheduler loop until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context) {
+	m.runScheduler(ctx)
+}
+
+// runScheduler dispatches every ready task whose resource claims fit the
+// budget, waking on task completion (plus a timer fallback for externally
+// enqueued items). Items stay visibly pending until resources are free;
+// no goroutine ever blocks invisibly holding queue state.
+func (m *Manager) runScheduler(ctx context.Context) {
 	p := m.pipeline
 	runCtx, cancel := context.WithCancel(ctx)
 	var workers sync.WaitGroup
@@ -111,8 +224,6 @@ func (m *Manager) Run(ctx context.Context) {
 
 	for {
 		select {
-		case <-runCtx.Done():
-			return
 		case err := <-m.persistenceFailures:
 			p.logger.Error("workflow stopped after queue persistence failure",
 				"event_type", "queue_persistence_critical",
@@ -124,82 +235,176 @@ func (m *Manager) Run(ctx context.Context) {
 		default:
 		}
 
-		item, err := m.store.NextForStatuses(p.stageOrder...)
-		if err != nil {
-			p.logger.Error("fetch next item failed",
-				"event_type", "queue_fetch_error",
-				"error_hint", "failed to fetch next queue item",
+		m.cancelStoppedWorkers()
+		m.dispatch(runCtx, &workers)
+
+		select {
+		case <-runCtx.Done():
+			return
+		case <-m.wake:
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+// dispatch compiles task rows for eligible items and starts every ready
+// task whose claims fit the current budget.
+func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
+	p := m.pipeline
+
+	items, err := m.store.List(p.stageOrder...)
+	if err != nil {
+		p.logger.Error("list items for scheduling failed",
+			"event_type", "queue_fetch_error",
+			"error_hint", "failed to list queue items",
+			"error", err,
+		)
+		return
+	}
+	byID := make(map[int64]*queue.Item, len(items))
+	for _, item := range items {
+		if err := m.store.EnsureTasks(item, p.specs); err != nil {
+			p.logger.Error("task compile failed",
+				"event_type", "task_compile_error",
+				"error_hint", "failed to compile task rows for item",
+				"item_id", item.ID,
 				"error", err,
 			)
-			if !sleep(runCtx, 10*time.Second) {
-				return
-			}
 			continue
 		}
+		byID[item.ID] = item
+	}
 
-		if item == nil {
-			if !sleep(runCtx, 5*time.Second) {
-				return
-			}
-			continue
+	ready, err := m.store.ReadyTasks()
+	if err != nil {
+		p.logger.Error("ready task query failed",
+			"event_type", "queue_fetch_error",
+			"error_hint", "failed to query ready tasks",
+			"error", err,
+		)
+		return
+	}
+
+	for _, task := range ready {
+		if ctx.Err() != nil {
+			return
 		}
-
-		idx, ok := p.stageMap[item.Stage]
+		item, ok := byID[task.ItemID]
 		if !ok {
-			p.logger.Error("unknown stage for item",
+			continue
+		}
+		// Never run two workers for one item, even when queue state says the
+		// item is free: StopItems clears in_progress while the stopped
+		// worker is still exiting.
+		if m.hasLiveWorker(item.ID) {
+			continue
+		}
+		idx, ok := p.stageMap[task.Type]
+		if !ok {
+			p.logger.Error("unknown task type",
 				"event_type", "unknown_stage",
-				"error_hint", "stage not in pipeline map",
-				"item_id", item.ID,
-				"stage", item.Stage,
+				"error_hint", "task type not in pipeline map",
+				"item_id", task.ItemID,
+				"stage", task.Type,
 			)
 			continue
 		}
 		ps := p.stages[idx]
 
-		// Mark in_progress synchronously before spawning goroutine to prevent
-		// the poll loop from picking up the same item on the next iteration.
-		// Initialize progress state so external consumers (flyer) know which
-		// stage is active and stale progress from the prior stage is cleared.
+		if !m.reserve(ps.Claims) {
+			continue
+		}
+
+		// Mark in_progress synchronously so the next dispatch pass cannot
+		// pick up another task for the same item.
 		if err := m.store.StartStage(item, ps.Stage); err != nil {
+			m.release(ps.Claims)
 			p.logger.Error("persist in_progress failed",
 				"event_type", "progress_persist_failed",
 				"error_hint", "failed to persist in_progress flag",
 				"item_id", item.ID,
 				"error", err,
 			)
+			continue
+		}
+		if err := m.store.StartTask(task); err != nil {
+			m.release(ps.Claims)
 			_ = m.store.ClearInProgress(item)
-			if !sleep(runCtx, 10*time.Second) {
-				return
-			}
+			p.logger.Error("persist task start failed",
+				"event_type", "task_persist_failed",
+				"error_hint", "failed to mark task running",
+				"item_id", item.ID,
+				"error", err,
+			)
+			continue
+		}
+
+		taskCtx, cancelTask := context.WithCancel(ctx)
+		if !m.trackWorker(item.ID, cancelTask) {
+			// Lost a race with another dispatch pass; revert.
+			cancelTask()
+			m.release(ps.Claims)
+			_ = m.store.FinishTask(task, queue.TaskPending, "")
+			_ = m.store.ClearInProgress(item)
 			continue
 		}
 
 		workers.Add(1)
-		go func() {
+		go func(task *queue.Task, item *queue.Item, ps PipelineStage, taskCtx context.Context, cancelTask context.CancelFunc) {
 			defer workers.Done()
-			if ps.Semaphore != SemNone {
-				if !m.acquireSem(runCtx, ps.Semaphore) {
-					// Release the in_progress flag if we can't acquire the semaphore.
-					if err := m.store.ClearInProgress(item); err != nil {
-						p.logger.Error("release in_progress after sem cancel failed",
-							"event_type", "progress_persist_failed",
-							"error_hint", "failed to release in_progress after semaphore cancel",
-							"item_id", item.ID,
-							"error", err,
-						)
-					}
-					return
-				}
-				defer m.releaseSem(ps.Semaphore)
-			}
-
-			m.processItem(runCtx, item, ps)
-		}()
+			defer m.signalWake()
+			defer m.release(ps.Claims)
+			defer m.untrackWorker(item.ID)
+			defer cancelTask()
+			m.runTask(taskCtx, task, item, ps)
+		}(task, item, ps, taskCtx, cancelTask)
 	}
 }
 
-// processItem executes a single stage handler for an item.
-func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps PipelineStage) {
+// runTask executes one task via the stage handler and records its terminal
+// state. Cancellation, user stops, and persistence failures revert the task
+// to pending: the item-level filters decide whether it ever runs again.
+func (m *Manager) runTask(ctx context.Context, task *queue.Task, item *queue.Item, ps PipelineStage) {
+	outcome := m.processItem(ctx, item, ps)
+
+	var state, errMsg string
+	switch outcome {
+	case outcomeDone:
+		state = queue.TaskDone
+	case outcomeFailed:
+		state = queue.TaskFailed
+		if refreshed, err := m.store.GetByID(item.ID); err == nil && refreshed != nil {
+			errMsg = refreshed.ErrorMessage
+		}
+	default:
+		state = queue.TaskPending
+	}
+	if err := m.store.FinishTask(task, state, errMsg); err != nil {
+		m.pipeline.logger.Error("persist task finish failed",
+			"event_type", "task_persist_failed",
+			"error_hint", "failed to record task state",
+			"item_id", item.ID,
+			"stage", task.Type,
+			"error", err,
+		)
+	}
+}
+
+// itemOutcome classifies a stage execution for task bookkeeping.
+type itemOutcome int
+
+const (
+	outcomeDone itemOutcome = iota
+	outcomeFailed
+	outcomeCanceled
+	outcomeStopped
+	outcomePersistence
+)
+
+// processItem executes a single stage handler for an item and reports the
+// outcome. Item-level persistence (advance, failure, review, notifications)
+// happens here; task-level bookkeeping is the scheduler caller's job.
+func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps PipelineStage) itemOutcome {
 	p := m.pipeline
 
 	itemLogger := p.logger.With("item_id", item.ID)
@@ -227,7 +432,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 				"error", err,
 			)
 		}
-		return
+		return outcomeCanceled
 	}
 	if res.UserStopped {
 		itemLogger.Info("stage result ignored after user stop",
@@ -238,7 +443,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 			"stage_duration", res.Duration,
 		)
 		m.maybeCompleteQueueCycle(ctx, itemLogger)
-		return
+		return outcomeStopped
 	}
 	if err != nil {
 		var persistenceErr *stage.PersistenceError
@@ -253,10 +458,10 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 				hint = "failed to persist after stage failure"
 			}
 			m.reportPersistenceFailure(itemLogger, persistenceErr.Err, eventType, hint, item.ID)
-			return
+			return outcomePersistence
 		}
 		m.recordStageFailure(ctx, item, err, ps, res.Duration)
-		return
+		return outcomeFailed
 	}
 	if res.Degraded {
 		itemLogger.Warn("stage completed with degraded behavior",
@@ -282,6 +487,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	}
 
 	m.maybeCompleteQueueCycle(ctx, itemLogger)
+	return outcomeDone
 }
 
 // recordStageFailure records status/notification state after stage execution
@@ -347,23 +553,6 @@ func (m *Manager) nextStage(current queue.Stage) queue.Stage {
 		return queue.StageCompleted
 	}
 	return p.stages[idx+1].Stage
-}
-
-// acquireSem acquires a semaphore, respecting context cancellation.
-// Returns false if the context was cancelled before acquisition.
-func (m *Manager) acquireSem(ctx context.Context, sem Semaphore) bool {
-	ch := m.pipeline.sems[sem-1] // SemDisc=1 -> index 0, etc.
-	select {
-	case ch <- struct{}{}:
-		return true
-	case <-ctx.Done():
-		return false
-	}
-}
-
-// releaseSem releases a semaphore.
-func (m *Manager) releaseSem(sem Semaphore) {
-	<-m.pipeline.sems[sem-1]
 }
 
 // maybeStartQueueCycle sends queue_started once per backlog cycle.
@@ -434,17 +623,4 @@ func (m *Manager) maybeCompleteQueueCycle(ctx context.Context, logger *slog.Logg
 		return
 	}
 	m.queueCycleActive = false
-}
-
-// sleep waits for the given duration or until ctx is cancelled.
-// Returns false if the context was cancelled.
-func sleep(ctx context.Context, d time.Duration) bool {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-t.C:
-		return true
-	case <-ctx.Done():
-		return false
-	}
 }

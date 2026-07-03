@@ -219,7 +219,7 @@ disc replayed end-to-end produces the same library output as before the
 refactor (see Validation), and no handler contains multi-step logic that is
 not one of the extracted task functions.
 
-### Phase 3 -- scheduler cutover at today's concurrency
+### Phase 3 -- scheduler cutover at today's concurrency -- CODE COMPLETE 2026-07-03, real-disc bring-up pending; lane deletion blocks phase completion
 
 1. `tasks` (+ deps) tables; graph compile at end of identification.
 2. Scheduler loop replaces the stage poll loop in `internal/workflow`:
@@ -393,3 +393,57 @@ dependent failure, per-asset outcomes and review state).
 - 2026-07-03: Phase 2 replay validated (Air rip-cache replay, item #1:
   clean audit, no WARN/ERROR, validation passed, correct library routing).
   Operator approved starting Phase 3.
+- 2026-07-03: Phase 3 code complete (check-ci.sh green incl. race
+  detector). What was built: `tasks` table + task layer in internal/queue
+  (EnsureTasks/ReadyTasks/StartTask/FinishTask/ResetRunningTasks/
+  DeleteTasks); scheduler loop in internal/workflow (dispatches every
+  ready task whose claims fit the budget, wakes on task completion with a
+  5s timer fallback); stage registration carries resource claims (drive/
+  gpu/encode, capacity 1 each -- exact replication of the old semaphore
+  exclusivity); item.Stage remains the display/API surface, still written
+  by ExecuteWorkflowStage, so CLI/HTTP/Flyer are untouched; startup and
+  shutdown reset running tasks alongside in_progress.
+  DEVIATION (recorded per the guardrails): tasks are compiled at STAGE
+  granularity (7 per item, linear deps), not the fine-grained task-table
+  granularity. Rationale: at linear stage granularity task rows are a pure
+  projection of (template, item.Stage), so every external position
+  mutation (RetryFailed, RetryWithRipSpec, MoveToStage) simply DELETES the
+  item's tasks and the scheduler recompiles lazily -- no repair logic, no
+  migration, legacy queue DBs just work. Fine-grained rows (rip_title[k],
+  encode[k], transcribe_primaries, analyze/apply split) become Phase 4
+  template changes on this machinery, made together with the edge
+  loosening they exist to serve. Do NOT split tasks without also handling
+  per-task resumable state (identification's scan output is in-memory
+  today -- splitting disc_scan/resolve_metadata into separate rows
+  requires persisting DiscInfo first).
+  Also: the scheduler removes two legacy behaviors -- workers no longer
+  block invisibly on semaphores (items stay visibly pending until
+  resources free), and stage transitions no longer wait for the next 5s
+  poll tick (wake-on-completion).
+  Bring-up: config [workflow] legacy_lanes = true falls back to the old
+  loop (TEMPORARY). Phase completion = real-disc validation (fresh disc +
+  rip-cache replay + a retry-after-failure) and then DELETING the lane
+  loop, semaphores, and the flag.
+- 2026-07-03: bring-up testing (kill during encode -> resume OK) exposed
+  two PRE-EXISTING bugs via the stop/retry path, both fixed:
+  (1) `queue stop` never cancelled the running stage worker (true in the
+  legacy lanes too) -- the zombie encode kept running, and later stomped
+  the item's state when it failed. The scheduler now tracks each item's
+  worker cancel function, cancels workers of user-stopped items on each
+  loop pass (<=5s), and refuses to dispatch an item that still has a live
+  worker (StopItems clears in_progress while the worker is exiting).
+  (2) StopItems recorded no failed_at_stage, so retry-after-stop restarted
+  from identification; the re-run ripping stage then wiped staging
+  (including reel's resumable encode state) under the zombie -- observed
+  as "encoding failed: no files were encoded" and a from-scratch re-encode
+  on the next retry. StopItems now records the stopped stage and retry
+  resumes there. The legacy lane path retains bug (1); it is not worth
+  fixing in code slated for deletion -- do not user-stop under
+  legacy_lanes without restarting the daemon afterward.
+- 2026-07-03: Phase 3 validated on real hardware (Air replay, item #1):
+  kill-during-encode resumed correctly; stop-during-encode cancelled the
+  worker; retry resumed the encode in progress with chunks intact; clean
+  final audit (validation 7/7, correct library routing; only historical
+  WARN/ERROR from the intentionally cancelled attempt). Operator approved
+  Phase 4. Lane path, semaphores, and legacy_lanes flag deleted per
+  acceptance.

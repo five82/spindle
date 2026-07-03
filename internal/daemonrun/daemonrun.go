@@ -176,14 +176,17 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// Create workflow manager and configure stages.
 	manager := workflow.New(store, notifier, statusTracker, logger)
+	// Claims replicate the pre-scheduler exclusivity: drive, gpu, and encode
+	// each have capacity 1 (Phase 3 conservative budgets; see the task-graph
+	// plan before raising any of these).
 	manager.ConfigureStages([]workflow.PipelineStage{
-		{Stage: queue.StageIdentification, Handler: identifyHandler, Semaphore: workflow.SemDisc},
-		{Stage: queue.StageRipping, Handler: ripperHandler, Semaphore: workflow.SemDisc},
-		{Stage: queue.StageEpisodeIdentification, Handler: contentidHandler, Semaphore: workflow.SemWhisperX},
-		{Stage: queue.StageEncoding, Handler: encoderHandler, Semaphore: workflow.SemEncode},
-		{Stage: queue.StageAudioAnalysis, Handler: audioHandler, Semaphore: workflow.SemWhisperX},
-		{Stage: queue.StageSubtitling, Handler: subtitleHandler, Semaphore: workflow.SemWhisperX},
-		{Stage: queue.StageOrganizing, Handler: organizerHandler, Semaphore: workflow.SemNone},
+		{Stage: queue.StageIdentification, Handler: identifyHandler, Claims: map[string]int{"drive": 1}},
+		{Stage: queue.StageRipping, Handler: ripperHandler, Claims: map[string]int{"drive": 1}},
+		{Stage: queue.StageEpisodeIdentification, Handler: contentidHandler, Claims: map[string]int{"gpu": 1}},
+		{Stage: queue.StageEncoding, Handler: encoderHandler, Claims: map[string]int{"encode": 1}},
+		{Stage: queue.StageAudioAnalysis, Handler: audioHandler, Claims: map[string]int{"gpu": 1}},
+		{Stage: queue.StageSubtitling, Handler: subtitleHandler, Claims: map[string]int{"gpu": 1}},
+		{Stage: queue.StageOrganizing, Handler: organizerHandler},
 	})
 
 	// Create HTTP API with shutdown channel.
@@ -232,11 +235,18 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("another daemon instance is running (lock: %s)", lockPath)
 	}
 
-	// Startup recovery: reset any stale in-progress items.
+	// Startup recovery: reset any stale in-progress items and running tasks.
 	if err := store.ResetInProgress(); err != nil {
 		logger.Error("startup recovery failed",
 			"event_type", "startup_recovery_failed",
 			"error_hint", "failed to reset in_progress flags on startup",
+			"error", err,
+		)
+	}
+	if err := store.ResetRunningTasks(); err != nil {
+		logger.Error("startup recovery failed",
+			"event_type", "startup_recovery_failed",
+			"error_hint", "failed to reset running tasks on startup",
 			"error", err,
 		)
 	}
@@ -332,11 +342,18 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Wait for workflow to finish.
 	wg.Wait()
 
-	// Shutdown recovery: clear in-progress flags.
+	// Shutdown recovery: clear in-progress flags and running tasks.
 	if err := store.ResetInProgress(); err != nil {
 		logger.Error("shutdown recovery failed",
 			"event_type", "shutdown_recovery_failed",
 			"error_hint", "failed to reset in_progress flags on shutdown",
+			"error", err,
+		)
+	}
+	if err := store.ResetRunningTasks(); err != nil {
+		logger.Error("shutdown recovery failed",
+			"event_type", "shutdown_recovery_failed",
+			"error_hint", "failed to reset running tasks on shutdown",
 			"error", err,
 		)
 	}

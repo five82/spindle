@@ -432,14 +432,18 @@ func TestLifecycleMethodsDoNotOverrideUserStoppedItem(t *testing.T) {
 		t.Fatalf("completion left in-memory item inconsistent: stage=%q user_stopped=%v", item.Stage, item.UserStopped())
 	}
 
+	// StopItems records the stopped stage in failed_at_stage so retry
+	// resumes there; a racing FailStage must not override that or attach
+	// its error message.
+	stoppedAt := string(StageIdentification)
 	if err := store.FailStage(item, StageEncoding, "encode failed"); err != nil {
 		t.Fatalf("fail stopped item: %v", err)
 	}
 	got, _ = store.GetByID(item.ID)
-	if got.ErrorMessage != "" || got.FailedAtStage != "" {
+	if got.ErrorMessage != "" || got.FailedAtStage != stoppedAt {
 		t.Fatalf("failure overrode stopped item details: failed_at=%q err=%q", got.FailedAtStage, got.ErrorMessage)
 	}
-	if item.ErrorMessage != "" || item.FailedAtStage != "" || !item.UserStopped() {
+	if item.ErrorMessage != "" || item.FailedAtStage != stoppedAt || !item.UserStopped() {
 		t.Fatalf("failure left in-memory item inconsistent: failed_at=%q err=%q user_stopped=%v", item.FailedAtStage, item.ErrorMessage, item.UserStopped())
 	}
 

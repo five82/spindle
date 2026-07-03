@@ -69,6 +69,11 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("create queue table: %w", err)
 	}
 
+	if _, err := db.Exec(createTasksTableSQL); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("create tasks table: %w", err)
+	}
+
 	return &Store{db: db}, nil
 }
 
@@ -284,6 +289,11 @@ func (s *Store) ClearInProgress(item *Item) error {
 func (s *Store) MoveToStage(item *Item, stage Stage) error {
 	item.Stage = stage
 	item.InProgress = 0
+	// The item's position changed out from under the scheduler: drop its
+	// task rows so they recompile from the new stage.
+	if err := s.DeleteTasks(item.ID); err != nil {
+		return err
+	}
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`
 			UPDATE queue_items SET
@@ -459,6 +469,9 @@ func (s *Store) UpdateProgress(item *Item) error {
 // Remove deletes a single item by ID.
 func (s *Store) Remove(id int64) error {
 	return retryOnBusy(func() error {
+		if _, err := s.db.Exec("DELETE FROM tasks WHERE item_id = ?", id); err != nil {
+			return fmt.Errorf("remove item %d tasks: %w", id, err)
+		}
 		_, err := s.db.Exec("DELETE FROM queue_items WHERE id = ?", id)
 		if err != nil {
 			return fmt.Errorf("remove item %d: %w", id, err)
@@ -471,6 +484,9 @@ func (s *Store) Remove(id int64) error {
 func (s *Store) Clear() (int64, error) {
 	var count int64
 	err := retryOnBusy(func() error {
+		if _, err := s.db.Exec("DELETE FROM tasks"); err != nil {
+			return fmt.Errorf("clear tasks: %w", err)
+		}
 		res, err := s.db.Exec("DELETE FROM queue_items")
 		if err != nil {
 			return fmt.Errorf("clear queue: %w", err)
@@ -485,6 +501,9 @@ func (s *Store) Clear() (int64, error) {
 func (s *Store) ClearCompleted() (int64, error) {
 	var count int64
 	err := retryOnBusy(func() error {
+		if _, err := s.db.Exec("DELETE FROM tasks WHERE item_id IN (SELECT id FROM queue_items WHERE stage = ?)", string(StageCompleted)); err != nil {
+			return fmt.Errorf("clear completed tasks: %w", err)
+		}
 		res, err := s.db.Exec("DELETE FROM queue_items WHERE stage = ?", string(StageCompleted))
 		if err != nil {
 			return fmt.Errorf("clear completed: %w", err)
@@ -685,6 +704,9 @@ func (s *Store) RetryFailed(ids ...int64) (int, error) {
 			if err != nil {
 				return fmt.Errorf("retry failed %d: %w", id, err)
 			}
+			if _, err := s.db.Exec("DELETE FROM tasks WHERE item_id = ?", id); err != nil {
+				return fmt.Errorf("retry failed %d tasks: %w", id, err)
+			}
 			count++
 		}
 		return nil
@@ -710,6 +732,9 @@ func (s *Store) RetryWithRipSpec(id int64, targetStage Stage, ripSpecData string
 		if err != nil {
 			return fmt.Errorf("retry with ripspec %d: %w", id, err)
 		}
+		if _, err := s.db.Exec("DELETE FROM tasks WHERE item_id = ?", id); err != nil {
+			return fmt.Errorf("retry with ripspec %d tasks: %w", id, err)
+		}
 		return nil
 	})
 }
@@ -732,18 +757,28 @@ func (s *Store) StopItems(ids ...int64) (int, error) {
 				continue
 			}
 
+			// Record where the item was stopped so retry resumes from that
+			// stage instead of restarting the whole pipeline. Re-running
+			// earlier stages is not just wasted work: a re-run rip wipes
+			// staging while later-stage outputs (e.g. reel's resumable
+			// encode state) still live there.
+			stoppedAt := item.Stage
 			item.Stage = StageFailed
 			item.InProgress = 0
 			item.userStopped = 1
 			item.AppendReviewReason(ReviewReasonUserStopped)
 
+			if stoppedAt != StageFailed && stoppedAt != StageCompleted {
+				item.FailedAtStage = string(stoppedAt)
+			}
+
 			_, err = s.db.Exec(`
 				UPDATE queue_items SET
-					stage = ?, in_progress = 0,
+					stage = ?, in_progress = 0, failed_at_stage = ?,
 					needs_review = ?, review_reason = ?, user_stopped = 1,
 					updated_at = CURRENT_TIMESTAMP
 				WHERE id = ?`,
-				string(StageFailed), item.NeedsReview, item.ReviewReason, id,
+				string(StageFailed), item.FailedAtStage, item.NeedsReview, item.ReviewReason, id,
 			)
 			if err != nil {
 				return fmt.Errorf("stop item %d: %w", id, err)
