@@ -186,6 +186,11 @@ func (s *Store) refreshItem(item *Item) error {
 	return nil
 }
 
+// Refresh reloads the item's row from the database into item.
+func (s *Store) Refresh(item *Item) error {
+	return s.refreshItem(item)
+}
+
 // NewDisc inserts a new queue item at the identification stage and returns it with its ID.
 func (s *Store) NewDisc(title, fingerprint string) (*Item, error) {
 	return s.insertItem(title, fingerprint, StageIdentification, "", "")

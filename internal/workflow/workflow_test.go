@@ -62,61 +62,6 @@ func TestConfigureStagesBuildsStageMap(t *testing.T) {
 	}
 }
 
-func TestNextStageReturnsCorrectProgression(t *testing.T) {
-	stages := []PipelineStage{
-		{Stage: queue.StageIdentification},
-		{Stage: queue.StageRipping},
-		{Stage: queue.StageEncoding},
-		{Stage: queue.StageOrganizing},
-	}
-
-	m := newTestManager(stages)
-
-	tests := []struct {
-		current queue.Stage
-		want    queue.Stage
-	}{
-		{queue.StageIdentification, queue.StageRipping},
-		{queue.StageRipping, queue.StageEncoding},
-		{queue.StageEncoding, queue.StageOrganizing},
-	}
-
-	for _, tt := range tests {
-		got := m.nextStage(tt.current)
-		if got != tt.want {
-			t.Errorf("nextStage(%q) = %q, want %q", tt.current, got, tt.want)
-		}
-	}
-}
-
-func TestNextStageReturnsCompletedForLastStage(t *testing.T) {
-	stages := []PipelineStage{
-		{Stage: queue.StageIdentification},
-		{Stage: queue.StageRipping},
-		{Stage: queue.StageOrganizing},
-	}
-
-	m := newTestManager(stages)
-
-	got := m.nextStage(queue.StageOrganizing)
-	if got != queue.StageCompleted {
-		t.Errorf("nextStage(%q) = %q, want %q", queue.StageOrganizing, got, queue.StageCompleted)
-	}
-}
-
-func TestNextStageReturnsCompletedForUnknownStage(t *testing.T) {
-	stages := []PipelineStage{
-		{Stage: queue.StageIdentification},
-	}
-
-	m := newTestManager(stages)
-
-	got := m.nextStage(queue.Stage("nonexistent"))
-	if got != queue.StageCompleted {
-		t.Errorf("nextStage(nonexistent) = %q, want %q", got, queue.StageCompleted)
-	}
-}
-
 func TestCompletedItemKeepsTerminalProgress(t *testing.T) {
 	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
 	if err != nil {

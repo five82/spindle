@@ -241,15 +241,75 @@ not one of the extracted task functions.
 
 ### Phase 4 -- loosen concurrency one edge at a time
 
-Each step is one graph/budget change, validated on real discs before the next:
-1. Remove the conservative edges so transcription/classification/SRT tasks
-   depend on rips, and episode_match no longer blocks encode. GPU budget
-   still 1: WhisperX work fills encode gaps but never overlaps an encode.
-2. GPU coexistence validation: run WhisperX tasks during an encode on test
-   content. Gate on reel's methodology (see Validation). Only then raise the
-   GPU budget to allow whisperx + encode concurrently.
-3. Rip-to-encode streaming needs no work: `encode[k]` readiness on
-   `rip_title[k]` completion falls out of the graph. Confirm it behaves.
+Restructured 2026-07-04 after Phase 3 landed, incorporating what stage-
+granularity implementation taught us. Each sub-phase is validated on real
+discs before the next. Hazards discovered during Phase 3 design that gate
+this phase (do not rediscover these):
+
+- ENVELOPE WRITES ARE LAST-WRITER-WINS. stage.Session loads the RipSpec
+  envelope at stage start and every Save writes the WHOLE envelope. Two
+  concurrent stages on one item silently lose each other's writes. Any
+  same-item overlap needs a coordination decision first (4b).
+- EPISODE KEY REMAP RACE. contentid's applyMatches remaps asset episode
+  keys (placeholder s01_001 -> s01e03) across the whole envelope once.
+  Any stage running concurrently with episode_match that records assets
+  under pre-remap keys breaks the key chain. episode_match must stay
+  upstream of anything that records per-episode assets until keys are
+  remapped at save time. Do NOT reorder episode_match parallel to encode.
+- SINGLE-SLOT PROGRESS. progress_stage/percent/message are one set of
+  columns; two concurrent stages fight over them and Flyer flickers.
+  Overlap needs a progress ownership rule.
+- PER-EPISODE TASKS FORFEIT BATCHING (recorded in the task table): model
+  transcription as one item-level batched task.
+- Cross-item encode+WhisperX GPU sharing has ALWAYS happened (legacy
+  semaphores were separate), so 4b's same-item overlap adds no new
+  resource regime; 4c is about measuring it properly before raising the
+  gpu capacity above 1.
+
+Sub-phases:
+
+4a (infra, ZERO behavior change): DAG-capable task compilation --
+   TaskSpec gains explicit dependencies, EnsureTasks compiles arbitrary
+   edges, ReadyTasks gates on deps rather than the item in_progress flag,
+   and worker tracking moves to per-task granularity (per-item stop
+   cancellation and the one-worker-per-item dispatch guard stay until 4b
+   deliberately relaxes the guard for parallel branches). Templates stay
+   linear, so behavior is identical.
+
+4b decisions (operator-confirmed 2026-07-04): envelope coordination via
+   SCOPED SESSION OPS (per-item envelope lock; overlapping branch handlers
+   persist only through narrow merge operations; envelope stays the single
+   source of truth). ENCODING OWNS item progress during overlap (analysis
+   branch is progress-silent; its visibility is logs + task states). NEW
+   STAGE NAMES analysis/apply ship now; Flyer compatibility is explicitly
+   allowed to break and gets fixed in the post-all-phases Flyer update.
+   4a+4b validate together on disc. NOTE: the stage-set change means
+   existing queue DBs mid-pipeline recompile incorrectly -- clear queue.db
+   when deploying 4b (established policy for schema-semantic changes).
+
+4b (analyze/apply split): the template becomes a DAG per item. After
+   episode_match (TV) or ripping (movies): an ANALYSIS branch (batched
+   primary transcription from RIPPED audio, commentary candidate
+   classification from RIPPED audio, SRT generation from transcripts)
+   runs in parallel with the ENCODING branch; an APPLY stage (audio
+   refine + commentary disposition remuxes, subtitle mux -- all writers
+   of the encoded MKV, serialized by design) follows both, then
+   organizing. Requires the coordination decisions (operator sign-off):
+   envelope-write strategy for the two branches, progress ownership
+   during overlap, and new stage names appearing in the CLI/API/Flyer.
+   Commentary track indices measured on the ripped file are valid on the
+   encoded file because encoding preserves track count/order; refinement
+   only strips tracks in apply, after classification.
+
+4c (GPU coexistence measurement + budget raise): run the reel A/B gate
+   (see Validation) against same-item overlap from 4b; record the
+   measured WhisperX VRAM peak in the resource model; only then consider
+   gpu capacity > 1.
+
+4d (rip-to-encode streaming): per-title rip_title[k]/encode[k] tasks so
+   episode 1 encodes while episode 2 rips. Needs the same-item overlap
+   machinery from 4b plus per-title task templates; the ripper's
+   whole-stage staging wipe must move to a per-item pre-rip task first.
 
 ### Phase 5 -- encode subprocess workers and cross-title pairing
 
@@ -447,3 +507,34 @@ dependent failure, per-asset outcomes and review state).
   WARN/ERROR from the intentionally cancelled attempt). Operator approved
   Phase 4. Lane path, semaphores, and legacy_lanes flag deleted per
   acceptance.
+- 2026-07-04: Phase 4 restructured into sub-phases 4a-4d (see the Phase 4
+  section) with the discovered hazards recorded (envelope last-writer-wins,
+  episode-key remap race, single-slot progress). Phase 4a implemented
+  (check-ci.sh green), zero behavior change: TaskSpec carries explicit
+  DependsOn edges (topological order enforced at compile), ReadyTasks
+  gates on dependencies and item eligibility only (in_progress is now
+  purely a display/detection signal), and worker tracking is per-task
+  under each item. Dispatch still allows one live worker per item until
+  4b's DAG templates deliberately relax it. DAG compilation and
+  parallel-branch readiness are covered by queue tests (diamond template).
+- 2026-07-04: 4b infrastructure implemented (check-ci.sh green), still
+  zero behavior change with the linear template:
+  (1) stage.Session gains merge operations -- MergeSave applies a mutation
+  to freshly loaded envelope state under a per-item lock AND to the
+  session's own view (dual-apply; adopting fresh state would discard a
+  handler's unsaved accumulation); SaveAssetSuccess/SaveAssetFailure are
+  merge-based for every caller; MergeAddReviewReason for concurrent-safe
+  review flags. RULE: overlap-capable handlers must persist envelope
+  changes ONLY through merge ops, never plain Save.
+  (2) The executor no longer advances items (WorkflowOptions.NoAdvance):
+  the scheduler derives the display stage after the last worker exits --
+  earliest not-done task in registration order, or completed -- because
+  with DAG templates a completing stage cannot know the next one. The
+  NoAdvance success path refreshes the item so racing user stops and
+  broken stores surface exactly as before.
+  (3) Dispatch only resets progress (StartStage) for the FIRST worker of
+  an overlap window, implementing the encoding-owns-progress decision.
+  NEXT (4b-ii, the remaining chunk): analysis/apply handler split with new
+  stage constants, DAG template in daemonrun, per-episode commentary data
+  in ripspec, dispatch guard relaxation for parallel branches, audit skill
+  update, then combined 4a+4b disc validation (clear queue.db first).

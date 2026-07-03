@@ -123,16 +123,27 @@ func (s *Session) RecordAssetFailure(kind, key, errMsg string) {
 	})
 }
 
-// SaveAssetSuccess records a completed asset and persists the session state.
+// SaveAssetSuccess records a completed asset and persists it through a
+// merge save, so concurrent stages of the same item cannot lose the write.
+// The session's in-memory envelope adopts the merged state.
 func (s *Session) SaveAssetSuccess(kind string, asset ripspec.Asset) error {
-	s.RecordAssetSuccess(kind, asset)
-	return s.Save()
+	return s.MergeSave(func(env *ripspec.Envelope) error {
+		env.Assets.AddAsset(kind, asset)
+		return nil
+	})
 }
 
-// SaveAssetFailure records a failed asset and persists the session state.
+// SaveAssetFailure records a failed asset and persists it through a merge
+// save (see SaveAssetSuccess).
 func (s *Session) SaveAssetFailure(kind, key, errMsg string) error {
-	s.RecordAssetFailure(kind, key, errMsg)
-	return s.Save()
+	return s.MergeSave(func(env *ripspec.Envelope) error {
+		env.Assets.AddAsset(kind, ripspec.Asset{
+			EpisodeKey: key,
+			Status:     ripspec.AssetStatusFailed,
+			ErrorMsg:   errMsg,
+		})
+		return nil
+	})
 }
 
 // OverallPercent converts per-item progress into total stage progress for a

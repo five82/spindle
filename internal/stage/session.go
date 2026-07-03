@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
@@ -51,6 +52,112 @@ func (s *Session) SetEnvelope(env *ripspec.Envelope) {
 		return
 	}
 	s.Env = env
+}
+
+// itemLocks serializes envelope read-modify-write cycles per item so stages
+// running concurrently for the same item (Phase 4 parallel branches) cannot
+// lose each other's writes: plain Save persists the whole envelope,
+// last-writer-wins.
+var (
+	itemLocksMu sync.Mutex
+	itemLocks   = make(map[int64]*sync.Mutex)
+)
+
+func itemLock(id int64) *sync.Mutex {
+	itemLocksMu.Lock()
+	defer itemLocksMu.Unlock()
+	l, ok := itemLocks[id]
+	if !ok {
+		l = &sync.Mutex{}
+		itemLocks[id] = l
+	}
+	return l
+}
+
+// MergeSave applies mutate to a FRESHLY loaded copy of the item's envelope
+// under the per-item lock and persists it, then applies the same mutation
+// to the session's in-memory envelope. Handlers whose stage can run
+// concurrently with another stage of the same item MUST persist envelope
+// changes only through merge operations (MergeSave, SaveAssetSuccess,
+// MergeAddReviewReason) and never through plain Save.
+func (s *Session) MergeSave(mutate func(*ripspec.Envelope) error) error {
+	if s == nil || s.Store == nil || s.Item == nil {
+		return fmt.Errorf("stage session: incomplete merge state")
+	}
+	lock := itemLock(s.Item.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	fresh, err := s.Store.GetByID(s.Item.ID)
+	if err != nil {
+		return fmt.Errorf("merge save load: %w", err)
+	}
+	if fresh == nil {
+		return fmt.Errorf("merge save: item %d no longer exists", s.Item.ID)
+	}
+	env, err := ripspec.Parse(fresh.RipSpecData)
+	if err != nil {
+		return fmt.Errorf("merge save parse: %w", err)
+	}
+	if env.Version != ripspec.CurrentVersion {
+		// The envelope has never been persisted (fresh DB state is empty).
+		// Base the merge on a deep copy of the session's envelope, which is
+		// the authoritative initial state in that case.
+		encoded, encErr := s.Env.Encode()
+		if encErr != nil {
+			return encErr
+		}
+		env, err = ripspec.Parse(encoded)
+		if err != nil {
+			return fmt.Errorf("merge save seed: %w", err)
+		}
+	}
+	if err := mutate(&env); err != nil {
+		return err
+	}
+	data, err := env.Encode()
+	if err != nil {
+		return err
+	}
+	fresh.RipSpecData = data
+	if err := s.Store.UpdateWorkState(fresh); err != nil {
+		return err
+	}
+
+	// Apply the same mutation to the session's own envelope so its view
+	// stays consistent WITHOUT adopting unrelated fresh state: handlers
+	// accumulate in-memory changes they persist later, and replacing the
+	// session envelope here would silently discard them. Mutations must
+	// therefore be deterministic per copy (asset adds replace by key).
+	if err := mutate(s.Env); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MergeAddReviewReason appends a review reason against fresh item state
+// under the per-item lock (the concurrent-stage-safe AddReviewReason).
+func (s *Session) MergeAddReviewReason(reason string) error {
+	if s == nil || s.Store == nil || s.Item == nil {
+		return fmt.Errorf("stage session: incomplete merge state")
+	}
+	lock := itemLock(s.Item.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	fresh, err := s.Store.GetByID(s.Item.ID)
+	if err != nil {
+		return fmt.Errorf("merge review load: %w", err)
+	}
+	if fresh == nil {
+		return fmt.Errorf("merge review: item %d no longer exists", s.Item.ID)
+	}
+	fresh.AppendReviewReason(reason)
+	if err := s.Store.UpdateWorkState(fresh); err != nil {
+		return err
+	}
+	s.Item.AppendReviewReason(reason)
+	return nil
 }
 
 // Save persists the session's RipSpec envelope and queue-visible work state.

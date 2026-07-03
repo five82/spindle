@@ -6,9 +6,9 @@ import (
 
 var testSpecs = []TaskSpec{
 	{Type: StageIdentification},
-	{Type: StageRipping},
-	{Type: StageEncoding},
-	{Type: StageOrganizing},
+	{Type: StageRipping, DependsOn: []Stage{StageIdentification}},
+	{Type: StageEncoding, DependsOn: []Stage{StageRipping}},
+	{Type: StageOrganizing, DependsOn: []Stage{StageEncoding}},
 }
 
 func taskStatesByType(t *testing.T, store *Store, itemID int64) map[Stage]string {
@@ -112,19 +112,19 @@ func TestReadyTasksGatesOnDepsAndItemState(t *testing.T) {
 		t.Fatalf("ready after done = %v, want only ripping", ready)
 	}
 
-	// An in-progress item exposes no ready tasks.
-	if err := store.StartStage(item, StageRipping); err != nil {
-		t.Fatalf("start stage: %v", err)
+	// A running task is not ready, and its dependents are gated by deps.
+	if err := store.StartTask(ready[0]); err != nil {
+		t.Fatalf("start task: %v", err)
 	}
-	ready, err = store.ReadyTasks()
+	ready2, err := store.ReadyTasks()
 	if err != nil {
 		t.Fatalf("ready: %v", err)
 	}
-	if len(ready) != 0 {
-		t.Fatalf("ready for in-progress item = %v, want none", ready)
+	if len(ready2) != 0 {
+		t.Fatalf("ready while task running = %v, want none", ready2)
 	}
-	if err := store.ClearInProgress(item); err != nil {
-		t.Fatalf("clear: %v", err)
+	if err := store.FinishTask(ready[0], TaskPending, ""); err != nil {
+		t.Fatalf("revert task: %v", err)
 	}
 
 	// A failed item exposes no ready tasks.
@@ -232,5 +232,86 @@ func TestStopItemsRecordsStoppedStageForRetry(t *testing.T) {
 	}
 	if got.Stage != StageEncoding {
 		t.Fatalf("stage after retry = %q, want encoding", got.Stage)
+	}
+}
+
+func TestEnsureTasksCompilesDAGAndReadyTasksExposesParallelBranches(t *testing.T) {
+	store := openTestStore(t)
+	item, _ := store.NewDisc("A", "fp1")
+
+	// Diamond: ripping -> (encoding || subtitling) -> organizing.
+	dag := []TaskSpec{
+		{Type: StageRipping},
+		{Type: StageEncoding, DependsOn: []Stage{StageRipping}},
+		{Type: StageSubtitling, DependsOn: []Stage{StageRipping}},
+		{Type: StageOrganizing, DependsOn: []Stage{StageEncoding, StageSubtitling}},
+	}
+	if err := store.MoveToStage(item, StageRipping); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+	if err := store.EnsureTasks(item, dag); err != nil {
+		t.Fatalf("ensure tasks: %v", err)
+	}
+
+	ready, err := store.ReadyTasks()
+	if err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	if len(ready) != 1 || ready[0].Type != StageRipping {
+		t.Fatalf("ready = %v, want only ripping", ready)
+	}
+	if err := store.StartTask(ready[0]); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := store.FinishTask(ready[0], TaskDone, ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	// Both branches become ready simultaneously.
+	ready, err = store.ReadyTasks()
+	if err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	if len(ready) != 2 {
+		t.Fatalf("parallel branches ready = %d, want 2 (%v)", len(ready), ready)
+	}
+
+	// The join is gated until BOTH branches are done.
+	for _, task := range ready {
+		if err := store.StartTask(task); err != nil {
+			t.Fatalf("start: %v", err)
+		}
+	}
+	if err := store.FinishTask(ready[0], TaskDone, ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	mid, err := store.ReadyTasks()
+	if err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	if len(mid) != 0 {
+		t.Fatalf("join ready before both branches done: %v", mid)
+	}
+	if err := store.FinishTask(ready[1], TaskDone, ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	final, err := store.ReadyTasks()
+	if err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+	if len(final) != 1 || final[0].Type != StageOrganizing {
+		t.Fatalf("join not ready after both branches: %v", final)
+	}
+}
+
+func TestEnsureTasksRejectsForwardDependency(t *testing.T) {
+	store := openTestStore(t)
+	item, _ := store.NewDisc("A", "fp1")
+	bad := []TaskSpec{
+		{Type: StageRipping, DependsOn: []Stage{StageEncoding}},
+		{Type: StageEncoding},
+	}
+	if err := store.EnsureTasks(item, bad); err == nil {
+		t.Fatal("expected error for forward dependency")
 	}
 }

@@ -52,13 +52,14 @@ type Manager struct {
 	budgetCap  map[string]int
 	budgetUsed map[string]int
 
-	// running tracks the cancel function of each item's active worker. It
-	// guards against dispatching a second task for an item whose previous
-	// worker has not exited (StopItems clears in_progress while the worker
-	// is still alive), and lets the scheduler cancel workers of
-	// user-stopped items.
+	// running tracks the cancel function of each item's active workers,
+	// keyed by item then task. It guards against dispatching work for an
+	// item whose previous worker has not exited (StopItems clears
+	// in_progress while the worker is still alive), and lets the scheduler
+	// cancel workers of user-stopped items. Until Phase 4b's DAG templates,
+	// dispatch policy allows at most one live worker per item.
 	runningMu sync.Mutex
-	running   map[int64]context.CancelFunc
+	running   map[int64]map[int64]context.CancelFunc
 }
 
 // New creates a workflow manager. statusTracker may be nil.
@@ -69,7 +70,7 @@ func New(store *queue.Store, notifier *notify.Notifier, statusTracker *httpapi.S
 		statusTracker:       statusTracker,
 		persistenceFailures: make(chan error, 1),
 		wake:                make(chan struct{}, 1),
-		running:             make(map[int64]context.CancelFunc),
+		running:             make(map[int64]map[int64]context.CancelFunc),
 		pipeline: &pipelineState{
 			logger: logs.Default(logger),
 		},
@@ -91,11 +92,16 @@ func (m *Manager) ConfigureStages(stages []PipelineStage) {
 		p.stageOrder[i] = s.Stage
 	}
 
-	// Task specs mirror registration order; the compiled per-item chain is
-	// one task per stage at the current granularity.
+	// Task specs mirror registration order; the compiled per-item template
+	// is one task per stage, each depending on the previous (linear at the
+	// current granularity -- Phase 4b introduces DAG templates).
 	p.specs = make([]queue.TaskSpec, len(stages))
 	for i, s := range stages {
-		p.specs[i] = queue.TaskSpec{Type: s.Stage}
+		spec := queue.TaskSpec{Type: s.Stage}
+		if i > 0 {
+			spec.DependsOn = []queue.Stage{stages[i-1].Stage}
+		}
+		p.specs[i] = spec
 	}
 
 	// Budget capacities replicate today's exclusivity: every claimed
@@ -142,31 +148,37 @@ func (m *Manager) signalWake() {
 	}
 }
 
-// trackWorker registers an item's active worker cancel function. Returns
-// false when the item already has a live worker.
-func (m *Manager) trackWorker(itemID int64, cancel context.CancelFunc) bool {
+// trackWorker registers a task worker's cancel function under its item.
+// Returns false when the item already has a live worker (one worker per
+// item until Phase 4b relaxes dispatch for parallel branches).
+func (m *Manager) trackWorker(itemID, taskID int64, cancel context.CancelFunc) bool {
 	m.runningMu.Lock()
 	defer m.runningMu.Unlock()
-	if _, live := m.running[itemID]; live {
+	if len(m.running[itemID]) > 0 {
 		return false
 	}
-	m.running[itemID] = cancel
+	if m.running[itemID] == nil {
+		m.running[itemID] = make(map[int64]context.CancelFunc)
+	}
+	m.running[itemID][taskID] = cancel
 	return true
 }
 
-// untrackWorker removes an item's worker registration.
-func (m *Manager) untrackWorker(itemID int64) {
+// untrackWorker removes a task worker's registration.
+func (m *Manager) untrackWorker(itemID, taskID int64) {
 	m.runningMu.Lock()
 	defer m.runningMu.Unlock()
-	delete(m.running, itemID)
+	delete(m.running[itemID], taskID)
+	if len(m.running[itemID]) == 0 {
+		delete(m.running, itemID)
+	}
 }
 
-// hasLiveWorker reports whether the item has a worker that has not exited.
+// hasLiveWorker reports whether the item has any worker that has not exited.
 func (m *Manager) hasLiveWorker(itemID int64) bool {
 	m.runningMu.Lock()
 	defer m.runningMu.Unlock()
-	_, live := m.running[itemID]
-	return live
+	return len(m.running[itemID]) > 0
 }
 
 // cancelStoppedWorkers cancels the workers of items the user has stopped.
@@ -190,9 +202,12 @@ func (m *Manager) cancelStoppedWorkers() {
 			continue
 		}
 		m.runningMu.Lock()
-		cancel, live := m.running[id]
+		cancels := make([]context.CancelFunc, 0, len(m.running[id]))
+		for _, cancel := range m.running[id] {
+			cancels = append(cancels, cancel)
+		}
 		m.runningMu.Unlock()
-		if live {
+		for _, cancel := range cancels {
 			m.pipeline.logger.Info("cancelling worker for stopped item",
 				"decision_type", logs.DecisionStageExecution,
 				"decision_result", "cancelled",
@@ -315,17 +330,20 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 			continue
 		}
 
-		// Mark in_progress synchronously so the next dispatch pass cannot
-		// pick up another task for the same item.
-		if err := m.store.StartStage(item, ps.Stage); err != nil {
-			m.release(ps.Claims)
-			p.logger.Error("persist in_progress failed",
-				"event_type", "progress_persist_failed",
-				"error_hint", "failed to persist in_progress flag",
-				"item_id", item.ID,
-				"error", err,
-			)
-			continue
+		// Mark in_progress and reset progress for the first worker of an
+		// overlap window; a sibling branch already holding the item skips
+		// this so it cannot stomp the progress owner's columns.
+		if item.InProgress == 0 {
+			if err := m.store.StartStage(item, ps.Stage); err != nil {
+				m.release(ps.Claims)
+				p.logger.Error("persist in_progress failed",
+					"event_type", "progress_persist_failed",
+					"error_hint", "failed to persist in_progress flag",
+					"item_id", item.ID,
+					"error", err,
+				)
+				continue
+			}
 		}
 		if err := m.store.StartTask(task); err != nil {
 			m.release(ps.Claims)
@@ -340,7 +358,7 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		}
 
 		taskCtx, cancelTask := context.WithCancel(ctx)
-		if !m.trackWorker(item.ID, cancelTask) {
+		if !m.trackWorker(item.ID, task.ID, cancelTask) {
 			// Lost a race with another dispatch pass; revert.
 			cancelTask()
 			m.release(ps.Claims)
@@ -354,9 +372,10 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 			defer workers.Done()
 			defer m.signalWake()
 			defer m.release(ps.Claims)
-			defer m.untrackWorker(item.ID)
 			defer cancelTask()
 			m.runTask(taskCtx, task, item, ps)
+			m.untrackWorker(item.ID, task.ID)
+			m.finalizeItem(item.ID)
 		}(task, item, ps, taskCtx, cancelTask)
 	}
 }
@@ -380,13 +399,8 @@ func (m *Manager) runTask(ctx context.Context, task *queue.Task, item *queue.Ite
 		state = queue.TaskPending
 	}
 	if err := m.store.FinishTask(task, state, errMsg); err != nil {
-		m.pipeline.logger.Error("persist task finish failed",
-			"event_type", "task_persist_failed",
-			"error_hint", "failed to record task state",
-			"item_id", item.ID,
-			"stage", task.Type,
-			"error", err,
-		)
+		m.reportPersistenceFailure(m.pipeline.logger.With("item_id", item.ID), err,
+			"task_persist_failed", "failed to record task state", item.ID)
 	}
 }
 
@@ -422,7 +436,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 		Handler:   ps.Handler,
 		Logger:    p.logger,
 		Stage:     ps.Stage,
-		NextStage: m.nextStage(item.Stage),
+		NoAdvance: true,
 	})
 	if res.Canceled {
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -476,7 +490,6 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	itemLogger.Info("stage completed",
 		"decision_type", logs.DecisionStageExecution,
 		"decision_result", "completed",
-		"decision_reason", fmt.Sprintf("advancing to %s", item.Stage),
 		"event_type", "stage_complete",
 		"stage", ps.Stage,
 		"stage_duration", res.Duration,
@@ -488,6 +501,68 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 
 	m.maybeCompleteQueueCycle(ctx, itemLogger)
 	return outcomeDone
+}
+
+// finalizeItem derives and persists the item's display stage once no
+// workers remain: the earliest not-done task (in registration order) is the
+// item's stage, or completed when every task is done. With DAG templates a
+// completing stage cannot know the next one, so advancement lives here
+// rather than in the executor.
+func (m *Manager) finalizeItem(itemID int64) {
+	if m.hasLiveWorker(itemID) {
+		return
+	}
+	p := m.pipeline
+	item, err := m.store.GetByID(itemID)
+	if err != nil || item == nil {
+		if err != nil {
+			p.logger.Error("finalize item load failed",
+				"event_type", "queue_fetch_error",
+				"error_hint", "failed to load item for stage derivation",
+				"item_id", itemID,
+				"error", err,
+			)
+		}
+		return
+	}
+	if item.Stage == queue.StageFailed || item.Stage == queue.StageCompleted || item.UserStopped() {
+		return
+	}
+	tasks, err := m.store.TasksForItem(itemID)
+	if err != nil {
+		p.logger.Error("finalize item tasks failed",
+			"event_type", "queue_fetch_error",
+			"error_hint", "failed to load tasks for stage derivation",
+			"item_id", itemID,
+			"error", err,
+		)
+		return
+	}
+	if len(tasks) == 0 {
+		return
+	}
+	derived := queue.StageCompleted
+	for _, t := range tasks {
+		if t.State != queue.TaskDone {
+			derived = t.Type
+			break
+		}
+	}
+	if derived == item.Stage {
+		return
+	}
+	if err := m.store.CompleteStage(item, derived, true); err != nil {
+		m.reportPersistenceFailure(p.logger.With("item_id", itemID), err,
+			"completion_persist_failed", "failed to persist derived stage", itemID)
+		return
+	}
+	p.logger.Info("item stage derived",
+		"decision_type", logs.DecisionStageExecution,
+		"decision_result", "advanced",
+		"decision_reason", fmt.Sprintf("earliest incomplete task is %s", derived),
+		"item_id", itemID,
+		"stage", derived,
+	)
 }
 
 // recordStageFailure records status/notification state after stage execution
@@ -539,20 +614,6 @@ func (m *Manager) reportPersistenceFailure(logger *slog.Logger, err error, event
 			"source_event_type", eventType,
 		)
 	})
-}
-
-// nextStage returns the stage following current in the pipeline.
-// Returns completed if current is the last stage.
-func (m *Manager) nextStage(current queue.Stage) queue.Stage {
-	p := m.pipeline
-	idx, ok := p.stageMap[current]
-	if !ok {
-		return queue.StageCompleted
-	}
-	if idx+1 >= len(p.stages) {
-		return queue.StageCompleted
-	}
-	return p.stages[idx+1].Stage
 }
 
 // maybeStartQueueCycle sends queue_started once per backlog cycle.

@@ -58,16 +58,26 @@ type Task struct {
 	FinishedAt time.Time
 }
 
-// TaskSpec describes one task type in pipeline order for compilation.
+// TaskSpec describes one task type for compilation. Specs must be listed in
+// topological order; DependsOn names task types that appear earlier in the
+// list. An empty DependsOn means the task is a root (no dependencies).
 type TaskSpec struct {
-	Type Stage
+	Type      Stage
+	DependsOn []Stage
 }
 
 // EnsureTasks compiles task rows for the item if none exist. Tasks for
-// stages the item has already passed are inserted as done; the rest are
-// pending with a dependency on the previous task. Items whose stage is not
-// in specs (failed, completed) compile with all tasks done or are skipped
-// by callers via eligibility filters.
+// stages positioned before the item's current stage in the spec list are
+// inserted as done; the rest are pending with their declared dependencies.
+// Items whose stage is not in specs (failed, completed) compile with all
+// tasks done or are skipped by callers via eligibility filters.
+//
+// NOTE: the position rule ("everything listed before the item's stage is
+// done") is exact for linear templates. A DAG template (Phase 4b+) must
+// revisit recompilation semantics: an item's single display stage cannot
+// name which parallel branch tasks completed. Until then, DAG recompiles
+// after retry conservatively re-pend both branches (topological position
+// still marks strictly-earlier tasks done).
 func (s *Store) EnsureTasks(item *Item, specs []TaskSpec) error {
 	var count int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE item_id = ?`, item.ID).Scan(&count); err != nil {
@@ -92,36 +102,43 @@ func (s *Store) EnsureTasks(item *Item, specs []TaskSpec) error {
 		}
 		defer func() { _ = tx.Rollback() }()
 
-		var prevID int64
+		idByType := make(map[Stage]int64, len(specs))
 		for i, spec := range specs {
 			state := TaskPending
 			if i < position {
 				state = TaskDone
 			}
-			deps := "[]"
-			if i > 0 {
-				b, _ := json.Marshal([]int64{prevID})
-				deps = string(b)
+			depIDs := make([]int64, 0, len(spec.DependsOn))
+			for _, dep := range spec.DependsOn {
+				id, ok := idByType[dep]
+				if !ok {
+					return fmt.Errorf("task spec %s depends on %s, which is not declared earlier", spec.Type, dep)
+				}
+				depIDs = append(depIDs, id)
 			}
+			depsJSON, _ := json.Marshal(depIDs)
 			res, err := tx.Exec(
 				`INSERT INTO tasks (item_id, type, state, deps) VALUES (?, ?, ?, ?)`,
-				item.ID, string(spec.Type), state, deps,
+				item.ID, string(spec.Type), state, string(depsJSON),
 			)
 			if err != nil {
 				return fmt.Errorf("insert task %s: %w", spec.Type, err)
 			}
-			prevID, err = res.LastInsertId()
+			id, err := res.LastInsertId()
 			if err != nil {
 				return err
 			}
+			idByType[spec.Type] = id
 		}
 		return tx.Commit()
 	})
 }
 
 // ReadyTasks returns pending tasks whose dependencies are all done, for
-// items that are eligible to run (not failed/completed, not user-stopped,
-// not already in progress), ordered oldest item first.
+// items that are eligible to run (not failed/completed, not user-stopped),
+// ordered oldest item first. Readiness is purely dependency- and
+// eligibility-derived: the item's in_progress flag stays a display/detection
+// signal, and same-item dispatch policy belongs to the scheduler.
 func (s *Store) ReadyTasks() ([]*Task, error) {
 	rows, err := s.db.Query(`
 		SELECT t.id, t.item_id, t.type, t.asset_key, t.state, t.attempts, t.error_message, t.deps
@@ -129,7 +146,6 @@ func (s *Store) ReadyTasks() ([]*Task, error) {
 		JOIN queue_items i ON i.id = t.item_id
 		WHERE t.state = ?
 		  AND i.user_stopped = 0
-		  AND i.in_progress = 0
 		  AND i.stage NOT IN (?, ?)
 		ORDER BY i.created_at, t.id`,
 		TaskPending, string(StageFailed), string(StageCompleted))

@@ -21,6 +21,11 @@ type WorkflowOptions struct {
 	Stage     queue.Stage
 	NextStage queue.Stage
 	OneShot   bool
+	// NoAdvance leaves success persistence (stage advancement, in_progress)
+	// to the caller: the task scheduler derives the item's display stage
+	// from task states, since with DAG templates a single completing stage
+	// no longer determines the next one.
+	NoAdvance bool
 }
 
 // ExecuteResult describes the queue-visible outcome of a stage invocation.
@@ -121,6 +126,19 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 			}
 			return res, err
 		}
+	}
+
+	if opts.NoAdvance {
+		// Refresh so a user stop that raced the handler is seen (the
+		// advancing path got this via CompleteStage's refresh); a broken
+		// store surfaces as a persistence failure exactly as before.
+		if refreshErr := opts.Store.Refresh(item); refreshErr != nil {
+			return res, &PersistenceError{Op: "refresh after stage completion", Err: refreshErr}
+		}
+		if item.UserStopped() {
+			res.UserStopped = true
+		}
+		return res, nil
 	}
 
 	advance := !opts.OneShot
