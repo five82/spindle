@@ -317,7 +317,10 @@ func (h *Handler) detectCommentary(
 		"candidate_tracks", candidateCount,
 	)
 
-	// Examine each non-primary audio track.
+	// Examine each non-primary audio track. The primary fingerprint is shared
+	// across candidates so similarity checks do not transcribe the same primary
+	// audio repeatedly.
+	primaryCache := primaryFingerprintCache{}
 	candidateNumber := 0
 	for _, as := range audioStreams {
 		if as.audioIndex == primaryAudioIdx {
@@ -355,7 +358,7 @@ func (h *Handler) detectCommentary(
 		// Stereo similarity check: compare transcription fingerprints of
 		// the primary and candidate tracks.
 		if h.transcriber != nil {
-			sim, simErr := h.stereoSimilarity(ctx, logger, path, itemID, primaryAudioIdx, as.audioIndex, fingerprint, epKey)
+			sim, simErr := h.stereoSimilarity(ctx, logger, path, itemID, primaryAudioIdx, as.audioIndex, fingerprint, epKey, &primaryCache)
 			if simErr != nil {
 				logger.Warn("stereo similarity check failed",
 					"event_type", "commentary_detection_failed",
@@ -401,9 +404,27 @@ func commentaryCandidatePercent(candidateNumber, candidateCount int, fraction fl
 	return 5 + (35 * (completed + fraction) / float64(candidateCount))
 }
 
+type primaryFingerprintCache struct {
+	loaded      bool
+	fingerprint *textutil.Fingerprint
+}
+
+func (c *primaryFingerprintCache) get(load func() (*textutil.Fingerprint, error)) (*textutil.Fingerprint, error) {
+	if c.loaded {
+		return c.fingerprint, nil
+	}
+	fp, err := load()
+	if err != nil {
+		return nil, err
+	}
+	c.loaded = true
+	c.fingerprint = fp
+	return fp, nil
+}
+
 // stereoSimilarity computes the cosine similarity between transcription
 // fingerprints of two audio tracks. This detects stereo downmixes of the
-// primary audio.
+// primary audio. The primary fingerprint is cached across candidates.
 func (h *Handler) stereoSimilarity(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -411,6 +432,7 @@ func (h *Handler) stereoSimilarity(
 	itemID int64,
 	primaryIdx, candidateIdx int,
 	fingerprint, epKey string,
+	primaryCache *primaryFingerprintCache,
 ) (float64, error) {
 	logger.Info("stereo similarity check started",
 		"event_type", "commentary_stereo_check_start",
@@ -421,17 +443,28 @@ func (h *Handler) stereoSimilarity(
 		"primary_audio_index", primaryIdx,
 		"candidate_audio_index", candidateIdx,
 	)
-	primaryResult, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
-		InputPath:  path,
-		AudioIndex: primaryIdx,
-		Language:   "en",
-		OutputDir:  tempOutputDir(fingerprint, epKey, primaryIdx),
-		ItemID:     itemID,
-		EpisodeKey: epKey,
-		Purpose:    "commentary_similarity_primary",
+	primaryFP, err := primaryCache.get(func() (*textutil.Fingerprint, error) {
+		primaryResult, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
+			InputPath:  path,
+			AudioIndex: primaryIdx,
+			Language:   "en",
+			OutputDir:  tempOutputDir(fingerprint, epKey, primaryIdx),
+			ItemID:     itemID,
+			EpisodeKey: epKey,
+			Purpose:    "commentary_similarity_primary",
+		})
+		if err != nil {
+			return nil, fmt.Errorf("transcribe primary: %w", err)
+		}
+
+		primaryText, err := os.ReadFile(primaryResult.SRTPath)
+		if err != nil {
+			return nil, fmt.Errorf("read primary srt: %w", err)
+		}
+		return textutil.NewFingerprint(string(primaryText)), nil
 	})
 	if err != nil {
-		return 0, fmt.Errorf("transcribe primary: %w", err)
+		return 0, err
 	}
 
 	candidateResult, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
@@ -447,19 +480,14 @@ func (h *Handler) stereoSimilarity(
 		return 0, fmt.Errorf("transcribe candidate: %w", err)
 	}
 
-	primaryText, err := os.ReadFile(primaryResult.SRTPath)
-	if err != nil {
-		return 0, fmt.Errorf("read primary srt: %w", err)
-	}
 	candidateText, err := os.ReadFile(candidateResult.SRTPath)
 	if err != nil {
 		return 0, fmt.Errorf("read candidate srt: %w", err)
 	}
 
-	fpA := textutil.NewFingerprint(string(primaryText))
 	fpB := textutil.NewFingerprint(string(candidateText))
 
-	similarity := textutil.CosineSimilarity(fpA, fpB)
+	similarity := textutil.CosineSimilarity(primaryFP, fpB)
 	logger.Info("stereo similarity check completed",
 		"decision_type", logs.DecisionCommentaryStereoFilter,
 		"decision_result", "measured",
