@@ -122,6 +122,26 @@ func CopyFileVerifiedWithProgress(src, dst string, progress ProgressFunc) error 
 	return nil
 }
 
+// LinkOrCopyFileVerified hardlinks src to dst when both are on the same
+// filesystem, falling back to a verified copy otherwise. Any existing dst is
+// replaced. A hardlink shares the inode: callers must guarantee neither path
+// is ever modified in place afterward, only read, replaced, or unlinked.
+func LinkOrCopyFileVerified(src, dst string, progress ProgressFunc) error {
+	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove existing destination: %w", err)
+	}
+	if err := os.Link(src, dst); err == nil {
+		if progress != nil {
+			if info, statErr := os.Stat(src); statErr == nil {
+				progress(CopyProgress{BytesCopied: info.Size(), TotalBytes: info.Size()})
+			}
+		}
+		return nil
+	}
+	// Cross-device or filesystem without hardlink support.
+	return CopyFileVerifiedWithProgress(src, dst, progress)
+}
+
 // progressWriter wraps a writer and reports cumulative copy progress.
 type progressWriter struct {
 	w       io.Writer

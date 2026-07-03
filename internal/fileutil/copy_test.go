@@ -209,3 +209,53 @@ func TestCopyFileVerifiedWithProgress(t *testing.T) {
 		t.Fatalf("TotalBytes = %d, want %d", last.TotalBytes, len(content))
 	}
 }
+
+func TestLinkOrCopyFileVerified(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.bin")
+	dst := filepath.Join(dir, "dst.bin")
+	content := []byte("spindle hardlink test payload")
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var last CopyProgress
+	if err := LinkOrCopyFileVerified(src, dst, func(p CopyProgress) { last = p }); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(content) {
+		t.Fatalf("dst content mismatch")
+	}
+	if last.BytesCopied != int64(len(content)) || last.TotalBytes != int64(len(content)) {
+		t.Fatalf("progress = %+v, want full size %d", last, len(content))
+	}
+
+	// Same TempDir means same filesystem: expect a hardlink (shared inode).
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstInfo, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(srcInfo, dstInfo) {
+		t.Fatal("expected dst to be a hardlink of src on the same filesystem")
+	}
+
+	// Replacing an existing destination must succeed.
+	if err := LinkOrCopyFileVerified(src, dst, nil); err != nil {
+		t.Fatalf("replace existing dst: %v", err)
+	}
+
+	t.Run("missing source", func(t *testing.T) {
+		if err := LinkOrCopyFileVerified(filepath.Join(dir, "missing"), filepath.Join(dir, "dst2"), nil); err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}

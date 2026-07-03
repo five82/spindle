@@ -296,9 +296,13 @@ func (s *Store) Clear() error {
 	return nil
 }
 
-// copyFileWithProgress copies src to dst using the shared verified-copy helper.
-// baseOffset is the cumulative bytes already copied in a multi-file operation.
-// Returns the number of bytes copied from this file.
+// copyFileWithProgress transfers src to dst, hardlinking when cache and
+// staging share a filesystem so cache hits and cache stores are near-instant,
+// with a verified copy as the cross-device fallback. Cache entries and
+// staging ripped files may therefore share inodes: ripped files are only
+// ever read downstream (encodes and remuxes write new files), never modified
+// in place. baseOffset is the cumulative bytes already transferred in a
+// multi-file operation. Returns the number of bytes this file contributed.
 func copyFileWithProgress(src, dst string, baseOffset, totalBytes int64, progress ProgressFunc) (int64, error) {
 	info, err := os.Stat(src)
 	if err != nil {
@@ -312,7 +316,7 @@ func copyFileWithProgress(src, dst string, baseOffset, totalBytes int64, progres
 		}
 	}
 
-	if err := fileutil.CopyFileVerifiedWithProgress(src, dst, wrapped); err != nil {
+	if err := fileutil.LinkOrCopyFileVerified(src, dst, wrapped); err != nil {
 		return 0, err
 	}
 	return info.Size(), nil
