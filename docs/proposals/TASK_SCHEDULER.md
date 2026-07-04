@@ -310,6 +310,15 @@ Sub-phases:
    episode 1 encodes while episode 2 rips. Needs the same-item overlap
    machinery from 4b plus per-title task templates; the ripper's
    whole-stage staging wipe must move to a per-item pre-rip task first.
+   DECIDED 2026-07-04: 4d is gated on the STABLE-KEY redesign -- episode
+   matching needs all rips and renames asset keys today, so streaming
+   buys nothing until asset keys become permanent rip-time identifiers
+   with episode identity as an organize-time lookup mapping (this also
+   moves episode matching off the encode critical path). Sequencing:
+   validate 4b on a real TV disc first (per-episode commentary and the
+   remap-upstream-of-branches path are untested), then do the stable-key
+   redesign, then 4d. Additional Flyer breakage from placeholder keys is
+   accepted (fixed in the post-all-phases Flyer update).
 
 ### Phase 5 -- encode subprocess workers and cross-title pairing
 
