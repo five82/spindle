@@ -560,3 +560,16 @@ dependent failure, per-asset outcomes and review state).
   progress, commentary indices remapped in apply, subtitles muxed in
   apply. GPU claims still capacity 1: analysis/subtitling serialize with
   episode-ID cross-item; overlap is only gpu-vs-encode.
+- 2026-07-04: 4a+4b VALIDATED on a real run (Air, item #1, fresh queue DB,
+  log-verified; zero WARN/ERROR). Encoding and analysis started in the
+  same second; the analysis branch (11.5 min commentary detection + 2 s
+  subtitle generation via transcript-artifact reuse) completed entirely
+  during the encode; the post-encode tail (apply: refine 2 s, mux 1 s;
+  organize 10 s) took 13 SECONDS from encode-finish to library, versus
+  ~12 minutes of serial WhisperX work before this phase. Stage derivation
+  advanced correctly at every transition and the display showed encoding
+  during overlap. The organizer's "sidecar subtitle not found" info line
+  is pre-existing behavior when subtitles are muxed (sidecar name does
+  not match the .subtitled.mkv base), not a 4b regression. Remaining in
+  Phase 4: 4c (GPU coexistence measurement + budget raise decision) and
+  4d (per-title rip-to-encode streaming).
