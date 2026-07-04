@@ -462,23 +462,21 @@ func TestSchedulerFailureMarksTaskFailedAndStopsItem(t *testing.T) {
 		<-done
 	}()
 
+	// The item's stage flips to failed (executor) momentarily before the
+	// scheduler records the task state, so poll for the COMPLETE terminal
+	// state rather than asserting at first sight of the failed stage.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		got, err := store.GetByID(item.ID)
 		if err != nil {
 			t.Fatalf("get item: %v", err)
 		}
-		if got.Stage == queue.StageFailed {
-			tasks, err := store.TasksForItem(item.ID)
-			if err != nil {
-				t.Fatalf("tasks: %v", err)
-			}
-			if tasks[0].State != queue.TaskFailed {
-				t.Fatalf("failed task state = %q, want failed", tasks[0].State)
-			}
-			if tasks[1].State != queue.TaskPending {
-				t.Fatalf("dependent task state = %q, want pending (gated by item failure)", tasks[1].State)
-			}
+		tasks, err := store.TasksForItem(item.ID)
+		if err != nil {
+			t.Fatalf("tasks: %v", err)
+		}
+		if got.Stage == queue.StageFailed &&
+			len(tasks) == 2 && tasks[0].State == queue.TaskFailed && tasks[1].State == queue.TaskPending {
 			ready, err := store.ReadyTasks()
 			if err != nil {
 				t.Fatalf("ready: %v", err)
@@ -490,7 +488,7 @@ func TestSchedulerFailureMarksTaskFailedAndStopsItem(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("item did not fail")
+	t.Fatal("item did not settle into failed state with failed task and gated dependent")
 }
 
 var errTestBoom = errors.New("boom")
