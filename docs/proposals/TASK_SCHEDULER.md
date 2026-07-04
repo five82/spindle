@@ -322,6 +322,26 @@ Sub-phases:
    encode cross-process) -- it is adjacent evidence only; that
    validation belongs to Phase 5.
 
+STABLE-KEY DESIGN (4d prerequisite, surveyed 2026-07-04): asset/episode
+   keys become PERMANENT rip-time identifiers; episode matching stops
+   renaming them. Survey findings that size the change: episode identity
+   (Season/Episode/EpisodeEnd/Title/AirDate) already lives in
+   ripspec.Episode fields separate from Key; season-pack naming
+   (mediameta) is field-derived; Flyer reads season/episode fields and
+   uses Key only for joins and display (placeholder display accepted).
+   The rename machinery is exactly: applyMatches' ep.Key assignment,
+   applyOpeningDoubleEpisode's two Key assignments, recordAssetKeyRemap,
+   and Assets.RemapEpisodeKeys -- all deleted. ONE real consumer parses
+   keys for identity: mediameta.DestFilename derives per-file episode
+   naming via ParseEpisodeKey; it changes to take explicit
+   season/episode/episodeEnd resolved by the organizer from the envelope
+   episode entry. Visible changes: episode keys in logs, review reasons,
+   CLI/Flyer display, and queueops retry --episode arguments stay
+   placeholder-form (s01_001) for the item's lifetime. Payoff wired in
+   4d proper: episode_match no longer needs to precede encoding/analysis
+   data-wise, enabling per-title rip-to-encode streaming and moving
+   matching off the encode critical path.
+
 4d (rip-to-encode streaming): per-title rip_title[k]/encode[k] tasks so
    episode 1 encodes while episode 2 rips. Needs the same-item overlap
    machinery from 4b plus per-title task templates; the ripper's
@@ -615,6 +635,19 @@ dependent failure, per-asset outcomes and review state).
   (extras_dominate_candidates), which did not materialize (all 3 selected
   titles matched clearly). The stable-key redesign (gating 4d) is now
   unblocked.
+- 2026-07-04: STABLE KEYS IMPLEMENTED (check-ci.sh green; mechanical
+  implementation delegated to a lower-power subagent per operator
+  guidance, from the fully-specified design above; diff reviewed).
+  Episode matching no longer renames keys; recordAssetKeyRemap,
+  Assets.RemapEpisodeKeys, ripspec.EpisodeKey/EpisodeRangeKey, and
+  mediameta.ParseEpisodeKey are deleted (net -133 production lines).
+  DestFilename takes explicit season/episode/episodeEnd resolved by the
+  organizer from the envelope; final library filenames are unchanged.
+  Keys now display in placeholder form (s01_001) in logs, review reasons,
+  and Flyer for the item's lifetime. itemaudit skill updated. 4d is now
+  data-unblocked; template rewiring (episode_match off the encode
+  critical path, per-title streaming) happens in 4d proper. Validate
+  stable keys on the next TV disc before starting 4d.
 - 2026-07-04: 4c executed and PASSED (details in the 4c sub-phase entry):
   probe scores bit-identical under WhisperX load at all 56 shared points,
   WhisperX VRAM peak 3.3 GiB recorded in the resource model, gpu capacity

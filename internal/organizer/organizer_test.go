@@ -75,7 +75,7 @@ func TestDestFilename_Movie(t *testing.T) {
 		Movie:     true,
 	}
 
-	got := mediameta.DestFilename(meta, "main", ".mkv")
+	got := mediameta.DestFilename(meta, "main", ".mkv", 0, 0, 0)
 	want := "The Matrix (1999).mkv"
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
@@ -90,7 +90,7 @@ func TestDestFilename_TVEpisode(t *testing.T) {
 		SeasonNumber: 1,
 	}
 
-	got := mediameta.DestFilename(meta, "s01e03", ".mkv")
+	got := mediameta.DestFilename(meta, "s01_001", ".mkv", 1, 3, 0)
 	want := "Breaking Bad - S01E03.mkv"
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
@@ -105,7 +105,7 @@ func TestDestFilename_TVRange(t *testing.T) {
 		SeasonNumber: 1,
 	}
 
-	got := mediameta.DestFilename(meta, "s01e01-e02", ".mkv")
+	got := mediameta.DestFilename(meta, "s01_001", ".mkv", 1, 1, 2)
 	want := "Breaking Bad - S01E01-E02.mkv"
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
@@ -120,34 +120,11 @@ func TestDestFilename_TVFallback(t *testing.T) {
 		SeasonNumber: 1,
 	}
 
-	// Non-standard key that does not parse as sNNeNN.
-	got := mediameta.DestFilename(meta, "s01_001", ".mkv")
+	// Unresolved episode: season/episode not yet set, so the key is used as-is.
+	got := mediameta.DestFilename(meta, "s01_001", ".mkv", 0, 0, 0)
 	want := "Some Show - s01_001.mkv"
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
-	}
-}
-
-func TestParseEpisodeKey(t *testing.T) {
-	tests := []struct {
-		key            string
-		wantSeason     int
-		wantEpisode    int
-		wantEpisodeEnd int
-	}{
-		{"s01e03", 1, 3, 0},
-		{"S02E10", 2, 10, 0},
-		{"s01e01-e02", 1, 1, 2},
-		{"s01_001", 0, 0, 0},
-		{"main", 0, 0, 0},
-		{"", 0, 0, 0},
-	}
-	for _, tt := range tests {
-		s, e, end := mediameta.ParseEpisodeKey(tt.key)
-		if s != tt.wantSeason || e != tt.wantEpisode || end != tt.wantEpisodeEnd {
-			t.Errorf("parseEpisodeKey(%q) = (%d, %d, %d), want (%d, %d, %d)",
-				tt.key, s, e, end, tt.wantSeason, tt.wantEpisode, tt.wantEpisodeEnd)
-		}
 	}
 }
 

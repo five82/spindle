@@ -172,31 +172,6 @@ func TestFindAssetSuccessAndMiss(t *testing.T) {
 	}
 }
 
-func TestRemapEpisodeKeys(t *testing.T) {
-	assets := Assets{
-		Ripped:    []Asset{{EpisodeKey: "s01_001", Path: "/rip/ep1.mkv", Status: AssetStatusCompleted}},
-		Encoded:   []Asset{{EpisodeKey: "s01_001", Path: "/enc/ep1.mkv", Status: AssetStatusCompleted}},
-		Subtitled: []Asset{{EpisodeKey: "s01_001", Path: "/sub/ep1.mkv", Status: AssetStatusCompleted}},
-		Final:     []Asset{{EpisodeKey: "s01_001", Path: "/final/ep1.mkv", Status: AssetStatusCompleted}},
-	}
-
-	assets.RemapEpisodeKeys(map[string]string{"s01_001": "s01e03"})
-
-	for _, stage := range []string{AssetKindRipped, AssetKindEncoded, AssetKindSubtitled, AssetKindFinal} {
-		asset, ok := assets.FindAsset(stage, "s01e03")
-		if !ok {
-			t.Fatalf("FindAsset(%q, remapped key) = false, want true", stage)
-		}
-		if asset.EpisodeKey != "s01e03" {
-			t.Fatalf("stage %s EpisodeKey = %q, want s01e03", stage, asset.EpisodeKey)
-		}
-	}
-
-	if _, ok := assets.FindAsset(AssetKindEncoded, "s01_001"); ok {
-		t.Fatal("old encoded key still present after remap")
-	}
-}
-
 func TestPlaceholderKey(t *testing.T) {
 	tests := []struct {
 		season, disc int
@@ -213,34 +188,6 @@ func TestPlaceholderKey(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("PlaceholderKey(%d, %d) = %q, want %q", tt.season, tt.disc, got, tt.want)
 		}
-	}
-}
-
-func TestEpisodeKeyFormatting(t *testing.T) {
-	tests := []struct {
-		season, episode int
-		want            string
-	}{
-		{1, 3, "s01e03"},
-		{10, 12, "s10e12"},
-		{0, 0, ""},
-		{-1, -1, ""},
-		{0, 5, "s00e05"},
-	}
-	for _, tt := range tests {
-		got := EpisodeKey(tt.season, tt.episode)
-		if got != tt.want {
-			t.Errorf("EpisodeKey(%d, %d) = %q, want %q", tt.season, tt.episode, got, tt.want)
-		}
-	}
-}
-
-func TestEpisodeRangeKey(t *testing.T) {
-	if got := EpisodeRangeKey(1, 1, 2); got != "s01e01-e02" {
-		t.Fatalf("EpisodeRangeKey() = %q, want s01e01-e02", got)
-	}
-	if got := EpisodeRangeKey(1, 3, 3); got != "s01e03" {
-		t.Fatalf("EpisodeRangeKey() fallback = %q, want s01e03", got)
 	}
 }
 

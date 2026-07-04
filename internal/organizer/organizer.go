@@ -346,7 +346,11 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 			continue
 		}
 
-		destName := mediameta.DestFilename(meta, key, filepath.Ext(asset.Path))
+		var season, episode, episodeEnd int
+		if ep := env.EpisodeByKey(key); ep != nil {
+			season, episode, episodeEnd = ep.Season, ep.Episode, ep.EpisodeEnd
+		}
+		destName := mediameta.DestFilename(meta, key, filepath.Ext(asset.Path), season, episode, episodeEnd)
 		destPath := filepath.Join(destDir, destName)
 		if target == "library" && !h.cfg.Library.OverwriteExisting {
 			if info, err := os.Stat(destPath); err == nil {

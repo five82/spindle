@@ -126,7 +126,10 @@ func (m *Metadata) BaseFilename() string {
 }
 
 // DestFilename builds the destination filename, including ext, for an asset key.
-func DestFilename(meta *Metadata, key, ext string) string {
+// When season and episode are resolved (both > 0), they are used to build the
+// TV episode filename directly; otherwise the sanitized "show - key" fallback
+// is used for unresolved placeholder keys.
+func DestFilename(meta *Metadata, key, ext string, season, episode, episodeEnd int) string {
 	if meta == nil {
 		return textutil.SanitizeDisplayName(key) + ext
 	}
@@ -134,7 +137,6 @@ func DestFilename(meta *Metadata, key, ext string) string {
 		return meta.Filename() + ext
 	}
 
-	season, episode, episodeEnd := ParseEpisodeKey(key)
 	if season > 0 && episode > 0 {
 		epMeta := Metadata{
 			Title:        meta.Title,
@@ -152,19 +154,6 @@ func DestFilename(meta *Metadata, key, ext string) string {
 		show = textutil.SanitizeDisplayName(meta.Title)
 	}
 	return textutil.SanitizeDisplayName(show+" - "+key) + ext
-}
-
-// ParseEpisodeKey extracts season and episode numbers from keys like "s01e03"
-// or "s01e01-e02". Returns zeros if the key does not match the expected format.
-func ParseEpisodeKey(key string) (season, episode, episodeEnd int) {
-	lower := strings.ToLower(key)
-	if _, err := fmt.Sscanf(lower, "s%02de%02d-e%02d", &season, &episode, &episodeEnd); err == nil {
-		return season, episode, episodeEnd
-	}
-	if _, err := fmt.Sscanf(lower, "s%02de%02d", &season, &episode); err == nil {
-		return season, episode, 0
-	}
-	return 0, 0, 0
 }
 
 func buildEpisodeFilename(m *Metadata) string {

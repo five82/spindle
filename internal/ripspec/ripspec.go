@@ -379,35 +379,6 @@ func (as *Assets) FindAsset(kind, key string) (Asset, bool) {
 	return Asset{}, false
 }
 
-// RemapEpisodeKeys rewrites asset episode keys according to the provided old->new
-// mapping. Matching is case-insensitive. Assets whose keys are not present in the
-// mapping are left unchanged.
-func (as *Assets) RemapEpisodeKeys(remap map[string]string) {
-	if len(remap) == 0 {
-		return
-	}
-
-	normalized := make(map[string]string, len(remap))
-	for oldKey, newKey := range remap {
-		if oldKey == "" || newKey == "" {
-			continue
-		}
-		normalized[strings.ToLower(oldKey)] = newKey
-	}
-
-	for _, kind := range []string{AssetKindRipped, AssetKindEncoded, AssetKindSubtitled, AssetKindFinal, AssetKindTranscript} {
-		sp := as.stageSlice(kind)
-		if sp == nil {
-			continue
-		}
-		for i := range *sp {
-			if newKey, ok := normalized[strings.ToLower((*sp)[i].EpisodeKey)]; ok {
-				(*sp)[i].EpisodeKey = newKey
-			}
-		}
-	}
-}
-
 // ClearFailedAsset resets the status, error message, and path for a failed
 // asset so it can be retried.
 func (as *Assets) ClearFailedAsset(kind, key string) {
@@ -478,27 +449,6 @@ func PlaceholderKey(season, discIndex int) string {
 		discIndex = 1
 	}
 	return fmt.Sprintf("s%02d_%03d", season, discIndex)
-}
-
-// EpisodeKey formats an episode key as "s01e03". Returns "" if both season
-// and episode are <= 0.
-func EpisodeKey(season, episode int) string {
-	if season <= 0 && episode <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("s%02de%02d", season, episode)
-}
-
-// EpisodeRangeKey formats an episode range key as "s01e01-e02".
-// If end <= start, it falls back to EpisodeKey.
-func EpisodeRangeKey(season, start, end int) string {
-	if end <= start {
-		return EpisodeKey(season, start)
-	}
-	if season <= 0 && start <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("s%02de%02d-e%02d", season, start, end)
 }
 
 // EpisodeLast returns the last resolved episode number represented by the entry.

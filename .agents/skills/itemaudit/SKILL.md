@@ -161,7 +161,7 @@ Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `lo
    - `event_type=low_confidence_match` — episodes with `MatchConfidence` below 0.70
    - `decision_type=contentid_matches` — final episode-to-reference matching results; compare `ambiguous_rips`, `decisive_low_similarity_rips`, and `contested_rips`
    - `decision_type=reference_search` — reference subtitle candidate quality and suspect/fallback selections
-   - Verify placeholder keys (`s01_001`) were replaced with resolved keys (`s01e03`) after episodeid
+   - Asset keys are PERMANENT placeholder identifiers (stable-key model, 2026-07-04): `episodeid` never renames `s01_001`-style keys. Episode identity lives in `envelope.episodes[]` fields (`season`, `episode`, `episode_end`) -- join assets to episodes by key and read identity from those fields. Placeholder-looking keys in logs, review reasons, and final routing are correct, not a defect
    - **Do not stop at episode-ID quality.** If organizer/review routing is implicated, compare per-episode review state against final destinations.
 
 ### Phase 3: Rip Cache Analysis (when `phase_rip_cache` is true)
