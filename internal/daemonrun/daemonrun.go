@@ -177,11 +177,15 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// Create workflow manager and configure stages.
 	manager := workflow.New(store, notifier, statusTracker, logger)
-	// The per-item template is a DAG (task-graph plan, Phase 4b): after
-	// episode identification, the analysis branch (commentary detection,
-	// subtitle generation -- both from RIPPED sources) runs concurrently
-	// with encoding; apply joins both branches and performs every write to
-	// the encoded files. Budgets stay at capacity 1 per resource (drive,
+	// The per-item template is a DAG (task-graph plan, Phase 4b/4d):
+	// encoding starts right after identification and STREAMS ripped assets
+	// as the ripper lands them (episode 1 encodes while episode 2 rips);
+	// the analysis branch (commentary detection, subtitle generation --
+	// both from RIPPED sources) runs after episode identification,
+	// concurrently with encoding; apply joins the branches and performs
+	// every write to the encoded files. Stable keys make this safe: episode
+	// matching no longer renames asset keys, so it runs off the encode
+	// critical path. Budgets stay at capacity 1 per resource (drive,
 	// gpu, encode) -- the same exclusivity as before; the overlap is
 	// between the gpu and encode lanes, which were already concurrent
 	// across items. Registration order is the display priority: during
@@ -190,7 +194,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		{Stage: queue.StageIdentification, Handler: identifyHandler, Claims: map[string]int{"drive": 1}},
 		{Stage: queue.StageRipping, Handler: ripperHandler, Claims: map[string]int{"drive": 1}, DependsOn: []queue.Stage{queue.StageIdentification}},
 		{Stage: queue.StageEpisodeIdentification, Handler: contentidHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageRipping}},
-		{Stage: queue.StageEncoding, Handler: encoderHandler, Claims: map[string]int{"encode": 1}, DependsOn: []queue.Stage{queue.StageEpisodeIdentification}},
+		{Stage: queue.StageEncoding, Handler: encoderHandler, Claims: map[string]int{"encode": 1}, DependsOn: []queue.Stage{queue.StageIdentification}},
 		{Stage: queue.StageAnalysis, Handler: analysisHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageEpisodeIdentification}},
 		{Stage: queue.StageSubtitling, Handler: subtitleHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageAnalysis}},
 		{Stage: queue.StageApply, Handler: applyHandler, DependsOn: []queue.Stage{queue.StageSubtitling, queue.StageEncoding}},

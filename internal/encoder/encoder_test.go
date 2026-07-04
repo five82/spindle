@@ -1,6 +1,7 @@
 package encoder
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/stage"
 )
 
 func TestPlanJobs_MovieProducesOneJob(t *testing.T) {
@@ -18,9 +20,10 @@ func TestPlanJobs_MovieProducesOneJob(t *testing.T) {
 				{EpisodeKey: "main", Path: "/tmp/ripped/title00.mkv", Status: ripspec.AssetStatusCompleted},
 			},
 		},
+		// AssetKeys() for movies is ["main"] regardless of Episodes.
 	}
 
-	jobs := planJobs(env)
+	jobs, _ := stage.PendingKeyedAssetJobs(env, ripspec.AssetKindRipped, ripspec.AssetKindEncoded)
 	if len(jobs) != 1 {
 		t.Fatalf("expected 1 job for movie, got %d", len(jobs))
 	}
@@ -49,7 +52,7 @@ func TestPlanJobs_TVProducesNJobs(t *testing.T) {
 		},
 	}
 
-	jobs := planJobs(env)
+	jobs, _ := stage.PendingKeyedAssetJobs(env, ripspec.AssetKindRipped, ripspec.AssetKindEncoded)
 	if len(jobs) != 3 {
 		t.Fatalf("expected 3 jobs for TV, got %d", len(jobs))
 	}
@@ -65,6 +68,9 @@ func TestPlanJobs_TVProducesNJobs(t *testing.T) {
 func TestPlanJobs_SkipsFailedAssets(t *testing.T) {
 	env := &ripspec.Envelope{
 		Metadata: ripspec.Metadata{MediaType: "tv"},
+		Episodes: []ripspec.Episode{
+			{Key: "s01e01"}, {Key: "s01e02"}, {Key: "s01e03"},
+		},
 		Assets: ripspec.Assets{
 			Ripped: []ripspec.Asset{
 				{EpisodeKey: "s01e01", Path: "/tmp/ripped/title00.mkv", Status: ripspec.AssetStatusCompleted},
@@ -74,7 +80,7 @@ func TestPlanJobs_SkipsFailedAssets(t *testing.T) {
 		},
 	}
 
-	jobs := planJobs(env)
+	jobs, _ := stage.PendingKeyedAssetJobs(env, ripspec.AssetKindRipped, ripspec.AssetKindEncoded)
 	if len(jobs) != 2 {
 		t.Fatalf("expected 2 jobs (skipping failed), got %d", len(jobs))
 	}
@@ -91,7 +97,7 @@ func TestPlanJobs_EmptyRippedAssets(t *testing.T) {
 		Metadata: ripspec.Metadata{MediaType: "movie"},
 	}
 
-	jobs := planJobs(env)
+	jobs, _ := stage.PendingKeyedAssetJobs(env, ripspec.AssetKindRipped, ripspec.AssetKindEncoded)
 	if len(jobs) != 0 {
 		t.Fatalf("expected 0 jobs for empty assets, got %d", len(jobs))
 	}
@@ -168,4 +174,65 @@ func TestProgressThrottle_FirstCallAlwaysProceeds(t *testing.T) {
 func TestReporterImplementsInterface(t *testing.T) {
 	// Compile-time check that spindleReporter implements reel.Reporter.
 	var _ reel.Reporter = (*spindleReporter)(nil)
+}
+
+func TestRippingActiveStates(t *testing.T) {
+	store, err := queue.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	item, _ := store.NewDisc("A", "fp1")
+	specs := []queue.TaskSpec{
+		{Type: queue.StageIdentification},
+		{Type: queue.StageRipping, DependsOn: []queue.Stage{queue.StageIdentification}},
+		{Type: queue.StageEncoding, DependsOn: []queue.Stage{queue.StageIdentification}},
+	}
+	if err := store.EnsureTasks(item, specs); err != nil {
+		t.Fatalf("ensure tasks: %v", err)
+	}
+	sess, err := stage.NewSession(context.Background(), store, item)
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	h := New(nil, nil)
+
+	active, err := h.rippingActive(sess)
+	if err != nil || !active {
+		t.Fatalf("pending ripping: active=%v err=%v, want true", active, err)
+	}
+
+	tasks, _ := store.TasksForItem(item.ID)
+	var ripTask *queue.Task
+	for _, task := range tasks {
+		if task.Type == queue.StageRipping {
+			ripTask = task
+		}
+	}
+	if err := store.StartTask(ripTask); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if active, _ = h.rippingActive(sess); !active {
+		t.Fatal("running ripping should be active")
+	}
+	if err := store.FinishTask(ripTask, queue.TaskDone, ""); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if active, _ = h.rippingActive(sess); active {
+		t.Fatal("done ripping should be inactive")
+	}
+	if err := store.FinishTask(ripTask, queue.TaskFailed, "boom"); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+	if active, _ = h.rippingActive(sess); active {
+		t.Fatal("failed ripping should be inactive (no more assets coming)")
+	}
+
+	// Absent ripping task (recompilation window) must read inactive.
+	if err := store.DeleteTasks(item.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if active, _ = h.rippingActive(sess); active {
+		t.Fatal("absent ripping task should be inactive")
+	}
 }

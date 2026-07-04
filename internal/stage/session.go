@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
@@ -19,6 +20,13 @@ type Session struct {
 	Item   *queue.Item
 	Env    *ripspec.Envelope
 	Logger *slog.Logger
+
+	// progressSilent suppresses writes to the shared progress columns while
+	// another stage of the same item owns the display (rip-to-encode
+	// streaming: ripping owns progress until it completes). Encoding
+	// telemetry still persists through the details-only path. Atomic:
+	// reporters invoke Progress from encoder callback goroutines.
+	progressSilent atomic.Bool
 }
 
 // NewSession creates a stage session and parses the item's RipSpec envelope.
@@ -135,6 +143,44 @@ func (s *Session) MergeSave(mutate func(*ripspec.Envelope) error) error {
 	return nil
 }
 
+// SetProgressSilent toggles suppression of shared progress-column writes
+// (see the progressSilent field).
+func (s *Session) SetProgressSilent(v bool) {
+	if s != nil {
+		s.progressSilent.Store(v)
+	}
+}
+
+// RefreshEnvelope reloads the item's envelope from the store under the
+// per-item lock, adopting fresh state as the session's view. ONLY safe for
+// handlers whose every envelope write goes through merge operations: any
+// unsaved in-session envelope mutation is discarded. The encoder's
+// streaming loop uses it to observe ripped assets the ripper persists
+// concurrently.
+func (s *Session) RefreshEnvelope() error {
+	if s == nil || s.Store == nil || s.Item == nil {
+		return fmt.Errorf("stage session: incomplete refresh state")
+	}
+	lock := itemLock(s.Item.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	fresh, err := s.Store.GetByID(s.Item.ID)
+	if err != nil {
+		return fmt.Errorf("refresh envelope load: %w", err)
+	}
+	if fresh == nil {
+		return fmt.Errorf("refresh envelope: item %d no longer exists", s.Item.ID)
+	}
+	env, err := ripspec.Parse(fresh.RipSpecData)
+	if err != nil {
+		return fmt.Errorf("refresh envelope parse: %w", err)
+	}
+	s.Env = &env
+	s.Item.RipSpecData = fresh.RipSpecData
+	return nil
+}
+
 // MergeAddReviewReason appends a review reason against fresh item state
 // under the per-item lock (the concurrent-stage-safe AddReviewReason).
 func (s *Session) MergeAddReviewReason(reason string) error {
@@ -236,6 +282,14 @@ func (s *Session) Progress(percent float64, message string, opts ...ProgressOpti
 	}
 	if update.encodingJSON != nil {
 		s.Item.EncodingDetailsJSON = *update.encodingJSON
+	}
+	if s.progressSilent.Load() {
+		// Another stage owns the shared progress columns; persist only the
+		// encoding telemetry when it changed.
+		if update.encodingJSON != nil {
+			return s.Store.UpdateEncodingDetails(s.Item)
+		}
+		return nil
 	}
 	return s.Store.UpdateProgress(s.Item)
 }

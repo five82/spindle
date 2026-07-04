@@ -342,10 +342,30 @@ STABLE-KEY DESIGN (4d prerequisite, surveyed 2026-07-04): asset/episode
    data-wise, enabling per-title rip-to-encode streaming and moving
    matching off the encode critical path.
 
-4d (rip-to-encode streaming): per-title rip_title[k]/encode[k] tasks so
-   episode 1 encodes while episode 2 rips. Needs the same-item overlap
-   machinery from 4b plus per-title task templates; the ripper's
-   whole-stage staging wipe must move to a per-item pre-rip task first.
+4d (rip-to-encode streaming) -- IMPLEMENTED 2026-07-04 (check-ci.sh
+   green; disc validation pending). DESIGN DEVIATION, recorded: instead of
+   per-title rip_title[k]/encode[k] TASK ROWS (which would require dynamic
+   template expansion, since the title count is unknown until
+   identification completes), streaming lives INSIDE the encoding stage:
+   the template lets encoding depend on identification (parallel with the
+   ripping chain -- 4b's same-item overlap machinery carries it), and the
+   encoder's loop consumes completed ripped assets as the ripper's
+   merge-based per-title saves land, polling Session.RefreshEnvelope every
+   10s when idle and finishing when the ripping task reaches a terminal
+   state (absent task rows read inactive so recompilation windows cannot
+   deadlock the loop). attemptedKeys preserves run-once-per-asset
+   semantics (PendingKeyedAssetJobs treats failed outputs as pending;
+   without it a failing encode would retry every poll). Progress
+   ownership: RIPPING owns the shared progress columns while active; the
+   encoder runs progress-silent (Session.SetProgressSilent) and persists
+   its telemetry through a details-only write (UpdateEncodingDetails), so
+   Flyer shows rip progress plus live encode telemetry, then flips to
+   loud encode progress when ripping completes. Ripper unchanged. KNOWN
+   TRADE-OFF: the encoding task holds the encode claim while waiting for
+   the first rip, idling another item's encode for that window --
+   acceptable single-operator, superseded by Phase 5 dual encode lanes.
+   If a rip fails mid-disc, the encoder finishes the assets that exist
+   (useful work preserved for retry) and the item fails via ripping.
    DECIDED 2026-07-04: 4d is gated on the STABLE-KEY redesign -- episode
    matching needs all rips and renames asset keys today, so streaming
    buys nothing until asset keys become permanent rip-time identifiers

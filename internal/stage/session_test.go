@@ -186,3 +186,42 @@ func TestSessionReviewHelpers(t *testing.T) {
 		t.Fatalf("episode review reason = %q", got)
 	}
 }
+
+func TestProgressSilentPersistsOnlyEncodingDetails(t *testing.T) {
+	store, item, s := newTestSession(t)
+
+	if err := s.Progress(25, "ripping title 1"); err != nil {
+		t.Fatalf("progress: %v", err)
+	}
+
+	// Silent mode: shared progress columns are owned by another stage
+	// (rip-to-encode streaming); only encoding telemetry may persist.
+	s.SetProgressSilent(true)
+	if err := s.Progress(90, "encoding chunk", WithEncodingDetails(`{"substage":"encoding"}`)); err != nil {
+		t.Fatalf("silent progress with details: %v", err)
+	}
+	if err := s.Progress(95, "encoding chunk 2"); err != nil {
+		t.Fatalf("silent progress without details: %v", err)
+	}
+
+	got, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.ProgressPercent != 25 || got.ProgressMessage != "ripping title 1" {
+		t.Fatalf("shared progress columns overwritten in silent mode: %v %q", got.ProgressPercent, got.ProgressMessage)
+	}
+	if got.EncodingDetailsJSON != `{"substage":"encoding"}` {
+		t.Fatalf("encoding details not persisted in silent mode: %q", got.EncodingDetailsJSON)
+	}
+
+	// Loud again: shared columns update.
+	s.SetProgressSilent(false)
+	if err := s.Progress(50, "encoding e01"); err != nil {
+		t.Fatalf("loud progress: %v", err)
+	}
+	got, _ = store.GetByID(item.ID)
+	if got.ProgressPercent != 50 || got.ProgressMessage != "encoding e01" {
+		t.Fatalf("progress not restored after silent mode: %v %q", got.ProgressPercent, got.ProgressMessage)
+	}
+}

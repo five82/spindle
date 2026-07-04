@@ -32,12 +32,6 @@ func New(cfg *config.Config, notifier *notify.Notifier) *Handler {
 	return &Handler{cfg: cfg, notifier: notifier}
 }
 
-// planJobs determines the encoding jobs from the envelope's ripped assets.
-// Movies produce one job; TV produces one job per episode.
-func planJobs(env *ripspec.Envelope) []stage.AssetJob {
-	return stage.CompletedAssetJobs(env, ripspec.AssetKindRipped)
-}
-
 // Run executes the encoding stage.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	item := sess.Item
@@ -55,39 +49,90 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return fmt.Errorf("create encoded dir: %w", err)
 	}
 
-	jobs := planJobs(env)
-	if len(jobs) == 0 {
-		return fmt.Errorf("no ripped assets to encode")
-	}
-
-	logger.Info("encoding plan",
-		"decision_type", logs.DecisionEncodingPlan,
-		"decision_result", fmt.Sprintf("%d jobs", len(jobs)),
-		"decision_reason", fmt.Sprintf("media_type=%s", env.Metadata.MediaType),
-	)
-
 	encoder, err := h.newEncoder(logger)
 	if err != nil {
 		return err
 	}
 
-	summary, err := h.encodeJobs(ctx, sess, encoder, encodedDir, jobs)
-	if err != nil {
-		return err
+	logger.Info("encoding plan",
+		"decision_type", logs.DecisionEncodingPlan,
+		"decision_result", "streaming",
+		"decision_reason", fmt.Sprintf("media_type=%s; encode ripped assets as they land, ripping owns item progress while active", env.Metadata.MediaType),
+	)
+
+	// Rip-to-encode streaming (task-graph plan, Phase 4d): this stage starts
+	// alongside ripping and consumes completed ripped assets as the ripper's
+	// merge-based per-title saves land, waiting when none are pending and
+	// finishing once the ripping task is terminal. attemptedKeys preserves
+	// run-once semantics per asset: a failed encode must not retry every
+	// poll (PendingKeyedAssetJobs treats failed outputs as pending).
+	var summary encodeSummary
+	attempted := 0
+	attemptedKeys := make(map[string]bool)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := sess.RefreshEnvelope(); err != nil {
+			return err
+		}
+		pending, _ := sess.PendingKeyedAssetJobs(ripspec.AssetKindRipped, ripspec.AssetKindEncoded)
+		jobs := pending[:0:0]
+		for _, job := range pending {
+			if !attemptedKeys[job.Key] {
+				jobs = append(jobs, job)
+			}
+		}
+
+		ripping, err := h.rippingActive(sess)
+		if err != nil {
+			return err
+		}
+		// Ripping owns the shared progress columns while it runs; encoding
+		// telemetry still persists through the details-only path.
+		sess.SetProgressSilent(ripping)
+
+		if len(jobs) == 0 {
+			if !ripping {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(encodeStreamPollInterval):
+			}
+			continue
+		}
+
+		for _, job := range jobs {
+			attemptedKeys[job.Key] = true
+		}
+		attempted += len(jobs)
+		batch, err := h.encodeJobs(ctx, sess, encoder, encodedDir, jobs)
+		summary.errors += batch.errors
+		summary.originalSize += batch.originalSize
+		summary.encodedSize += batch.encodedSize
+		if err != nil {
+			return err
+		}
 	}
+	sess.SetProgressSilent(false)
 
 	// No whole-envelope Save here: encoding runs concurrently with the
 	// analysis branch, and every envelope write in this stage already
 	// persisted through the merge-based SaveAsset helpers. A plain Save
 	// would clobber the sibling branch's merged state.
 
+	if attempted == 0 {
+		return fmt.Errorf("no ripped assets to encode")
+	}
 	if summary.errors > 0 {
-		return fmt.Errorf("encoding failed for %d of %d jobs", summary.errors, len(jobs))
+		return fmt.Errorf("encoding failed for %d of %d jobs", summary.errors, attempted)
 	}
 
 	// Notification.
 	snap, _ := encodingstate.Unmarshal(item.EncodingDetailsJSON)
-	msg := fmt.Sprintf("Encoded %s (%d files", item.DisplayTitle(), len(jobs))
+	msg := fmt.Sprintf("Encoded %s (%d files", item.DisplayTitle(), attempted)
 	if snap.Resolution != "" {
 		msg += ", " + snap.Resolution
 	}
@@ -106,7 +151,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	logger.Info("encoding stage completed",
 		"event_type", "stage_complete",
 		"stage", "encoding",
-		"jobs", len(jobs),
+		"jobs", attempted,
 		"encoded_size_bytes", summary.encodedSize,
 		"original_size_bytes", summary.originalSize,
 	)
@@ -125,6 +170,24 @@ func (h *Handler) newEncoder(logger *slog.Logger) (*reel.Encoder, error) {
 		return nil, fmt.Errorf("create reel encoder: %w", err)
 	}
 	return encoder, nil
+}
+
+const encodeStreamPollInterval = 10 * time.Second
+
+// rippingActive reports whether the item's ripping task is still pending or
+// running. Absent task rows (e.g. recompilation windows) read as inactive so
+// the streaming loop cannot deadlock waiting for rips that will never come.
+func (h *Handler) rippingActive(sess *stage.Session) (bool, error) {
+	tasks, err := sess.Store.TasksForItem(sess.Item.ID)
+	if err != nil {
+		return false, fmt.Errorf("ripping task state: %w", err)
+	}
+	for _, t := range tasks {
+		if t.Type == queue.StageRipping {
+			return t.State == queue.TaskPending || t.State == queue.TaskRunning, nil
+		}
+	}
+	return false, nil
 }
 
 type encodeSummary struct {

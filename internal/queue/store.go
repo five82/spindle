@@ -471,6 +471,32 @@ func (s *Store) UpdateProgress(item *Item) error {
 	})
 }
 
+// UpdateEncodingDetails persists ONLY the encoding telemetry column,
+// leaving the shared progress columns untouched. Used while another stage
+// owns the progress display (rip-to-encode streaming overlap).
+func (s *Store) UpdateEncodingDetails(item *Item) error {
+	return retryOnBusy(func() error {
+		res, err := s.db.Exec(`
+			UPDATE queue_items SET
+				encoding_details_json = ?,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND user_stopped = 0`,
+			item.EncodingDetailsJSON, item.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("update encoding details item %d: %w", item.ID, err)
+		}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("update encoding details item %d rows affected: %w", item.ID, err)
+		}
+		if rows == 0 {
+			return s.refreshItem(item)
+		}
+		return nil
+	})
+}
+
 // Remove deletes a single item by ID.
 func (s *Store) Remove(id int64) error {
 	return retryOnBusy(func() error {
