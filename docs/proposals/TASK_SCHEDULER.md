@@ -122,8 +122,9 @@ Budgets are configured capacities; each task type declares claims:
   can sum GPU percentages.
 - `gpu_vram_gib`: the hard GPU admission budget, in GiB against the 16 GiB
   card. Claims (2026-07-03): `encode_1080p` = 4 (measured 3.9 per reel),
-  `encode_4k` = 6 (measured 5.9), `whisperx` (large-v3, CUDA) = 4 ESTIMATE --
-  measure real peak during the Phase 4 coexistence gate and correct this line.
+  `encode_4k` = 6 (measured 5.9), `whisperx` = 4 (MEASURED 3.3 GiB peak at
+  the 2026-07-04 coexistence gate, large-v3-turbo/CUDA/silero; 4 keeps
+  headroom).
   Budget schedule: Phase 3 sets budget 6 (any single task fits, no pair
   admits -- replicates today); Phase 4 raises to 10 after the coexistence
   gate (whisperx 4 + encode_4k 6); Phase 5 raises to 14 (pair + headroom).
@@ -301,10 +302,25 @@ Sub-phases:
    encoded file because encoding preserves track count/order; refinement
    only strips tracks in apply, after classification.
 
-4c (GPU coexistence measurement + budget raise): run the reel A/B gate
-   (see Validation) against same-item overlap from 4b; record the
-   measured WhisperX VRAM peak in the resource model; only then consider
-   gpu capacity > 1.
+4c (GPU coexistence measurement + budget raise) -- DONE 2026-07-04,
+   gate PASSED. A/B per reel's methodology (artifacts:
+   ~/testing/perf-runs/20260703-210442-coex-solo vs
+   20260703-211638-coex-whisperx; driver ~/testing/coex-20260704):
+   air-5m (1080p, metric-bound) + sully-5m (4K) solo vs. under a
+   continuous WhisperX loop (large-v3-turbo, CUDA, silero VAD, 10-min
+   audio). Probe scores BIT-IDENTICAL at all 56 shared (chunk, CRF)
+   points; probes/chunk, size, and JOD deltas within documented
+   run-to-run drift. WhisperX VRAM peak 3308 MiB. Wall cost of
+   coexistence: 1080p encode +29.7%, 4K +7.5% -- acceptable because the
+   analysis branch is short relative to the encode and the alternative
+   was serializing it entirely (the Air run added ~12 min serial before
+   4b). BUDGET DECISION: gpu capacity STAYS 1. VRAM would allow two
+   WhisperX tasks (2x3.3 + 5.9 = 12.5 of 16 GiB) but a second WhisperX
+   only helps multi-disc backlogs and would deepen the encode slowdown;
+   revisit with real backlog evidence. NOTE: this gate does NOT close
+   reel's cross-title pairing prerequisite (reel-metric-during-reel-
+   encode cross-process) -- it is adjacent evidence only; that
+   validation belongs to Phase 5.
 
 4d (rip-to-encode streaming): per-title rip_title[k]/encode[k] tasks so
    episode 1 encodes while episode 2 rips. Needs the same-item overlap
@@ -582,3 +598,9 @@ dependent failure, per-asset outcomes and review state).
   not match the .subtitled.mkv base), not a 4b regression. Remaining in
   Phase 4: 4c (GPU coexistence measurement + budget raise decision) and
   4d (per-title rip-to-encode streaming).
+- 2026-07-04: 4c executed and PASSED (details in the 4c sub-phase entry):
+  probe scores bit-identical under WhisperX load at all 56 shared points,
+  WhisperX VRAM peak 3.3 GiB recorded in the resource model, gpu capacity
+  deliberately stays 1. Phase 4 remaining: TV-disc validation of 4b, then
+  the stable-key redesign gating 4d. Reel's PERFORMANCE_TESTING.md updated
+  with the adjacent-evidence note (reel repo, uncommitted).
