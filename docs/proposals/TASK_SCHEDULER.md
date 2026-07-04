@@ -598,6 +598,23 @@ dependent failure, per-asset outcomes and review state).
   not match the .subtitled.mkv base), not a 4b regression. Remaining in
   Phase 4: 4c (GPU coexistence measurement + budget raise decision) and
   4d (per-title rip-to-encode streaming).
+- 2026-07-04: 4b TV VALIDATION PASSED (Breaking Bad S1 disc, 3 episodes,
+  item #2, log-verified). Every TV-only path exercised cleanly: 3 titles
+  selected from 7 candidates; batched 3-episode transcription (one
+  WhisperX invocation, batch_files=3) with the OpenSubtitles reference
+  fetch overlapped; 3 clear episode matches; the key remap completed
+  strictly before the branch fork (encoding and analysis started the same
+  second); PER-EPISODE commentary detection under remapped keys
+  (s01e02-04, ~50s each, transcript artifacts found post-remap -- the
+  remap correctly carries transcript assets); subtitle generation ~1s per
+  episode via artifact reuse (zero WhisperX in subtitling); whole analysis
+  branch 2m40s, entirely inside the encode window; apply 10s for three
+  per-episode refine+mux passes; organizing 57s; 67 SECONDS from
+  encode-finish to library for three episodes. One WARN in the whole run:
+  the pre-existing identification title-ambiguity caution
+  (extras_dominate_candidates), which did not materialize (all 3 selected
+  titles matched clearly). The stable-key redesign (gating 4d) is now
+  unblocked.
 - 2026-07-04: 4c executed and PASSED (details in the 4c sub-phase entry):
   probe scores bit-identical under WhisperX load at all 56 shared points,
   WhisperX VRAM peak 3.3 GiB recorded in the resource model, gpu capacity
