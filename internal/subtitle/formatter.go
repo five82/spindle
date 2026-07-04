@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+
+	"github.com/five82/spindle/internal/transcription"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -15,6 +17,9 @@ import (
 
 var runStableTS = func(ctx context.Context, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, stableTSCommand, args...)
+	// uvx grandchild processes must die with the group or they outlive
+	// cancellation and block the pipe wait (see ConfigureGroupKill).
+	transcription.ConfigureGroupKill(cmd)
 	return cmd.CombinedOutput()
 }
 

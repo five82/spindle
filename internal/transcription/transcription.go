@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/five82/spindle/internal/logs"
@@ -75,6 +76,23 @@ type TranscribeResult struct {
 	Segments       int
 	ExtractTime    time.Duration // time spent on ffmpeg audio extraction
 	TranscribeTime time.Duration // time spent on WhisperX
+}
+
+// ConfigureGroupKill runs cmd in its own process group, kills the WHOLE
+// group on context cancellation, and caps the post-kill pipe-drain wait.
+// uvx spawns python as a grandchild that inherits our pipes: killing only
+// uvx leaves an orphaned python holding the GPU with the pipe open, which
+// blocks CombinedOutput -- and therefore daemon shutdown -- until the
+// orphan finishes on its own.
+func ConfigureGroupKill(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 10 * time.Second
 }
 
 type whisperXInvocation struct {
@@ -194,6 +212,7 @@ func (s *Service) TranscribeBatch(ctx context.Context, reqs []TranscribeRequest,
 	transcribeStart := time.Now()
 	whisperCmd := exec.CommandContext(ctx, whisperXCommand, invocation.Args...)
 	whisperCmd.Env = invocation.Env
+	ConfigureGroupKill(whisperCmd)
 	if output, err := whisperCmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("whisperx transcription: %w: %s", err, output)
 	}
