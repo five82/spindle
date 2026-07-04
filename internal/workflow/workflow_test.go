@@ -651,3 +651,55 @@ func TestSchedulerRunsParallelBranchesOfOneItemConcurrently(t *testing.T) {
 	}
 	t.Fatal("item did not complete")
 }
+
+func TestRefreshDisplayStageUpdatesLabelDuringOverlap(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	item, _ := store.NewDisc("A", "fp1")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, nil, nil, logger)
+	manager.ConfigureStages([]PipelineStage{
+		{Stage: queue.StageRipping, Handler: stubHandler{}, Claims: map[string]int{"drive": 1}},
+		{Stage: queue.StageEncoding, Handler: stubHandler{}, Claims: map[string]int{"encode": 1}, DependsOn: []queue.Stage{queue.StageRipping}},
+	})
+	if err := store.MoveToStage(item, queue.StageRipping); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+	if err := store.EnsureTasks(item, manager.pipeline.specs); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if err := store.StartStage(item, queue.StageRipping); err != nil {
+		t.Fatalf("start stage: %v", err)
+	}
+
+	// Mark ripping done while an encoding worker is registered as live
+	// (the 4d overlap: encoder running, rips just finished).
+	tasks, _ := store.TasksForItem(item.ID)
+	if err := store.StartTask(tasks[0]); err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	if err := store.FinishTask(tasks[0], queue.TaskDone, ""); err != nil {
+		t.Fatalf("finish task: %v", err)
+	}
+	if !manager.trackWorker(item.ID, tasks[1].ID, func() {}) {
+		t.Fatal("track worker")
+	}
+	defer manager.untrackWorker(item.ID, tasks[1].ID)
+
+	manager.finalizeItem(item.ID)
+
+	got, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Stage != queue.StageEncoding {
+		t.Fatalf("stage label = %q, want encoding (refreshed during overlap)", got.Stage)
+	}
+	if got.InProgress != 1 {
+		t.Fatalf("in_progress = %d, want 1 (label-only refresh must not clear it)", got.InProgress)
+	}
+}

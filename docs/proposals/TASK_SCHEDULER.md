@@ -366,6 +366,22 @@ STABLE-KEY DESIGN (4d prerequisite, surveyed 2026-07-04): asset/episode
    acceptable single-operator, superseded by Phase 5 dual encode lanes.
    If a rip fails mid-disc, the encoder finishes the assets that exist
    (useful work preserved for retry) and the item fails via ripping.
+   4d VALIDATED 2026-07-04 on a fresh Breaking Bad S1 rip (cache entry
+   deleted; item #1): encoding dispatched the same second as ripping,
+   title 1 hit the encoder 8 SECONDS after its rip finished (while title
+   2 ripped), titles 2/3 flowed rip-to-encode back to back, episode
+   matching + per-episode commentary + subtitles all completed by 14:26
+   during the first encode, apply muxed 3 episodes in 10s, organize 58s:
+   68 seconds from final encode to library. Total wall 125 min =
+   identification + first rip + encode stream; vs ~150+ min for the same
+   disc pre-4d. Zero unexpected WARN/ERROR (only the known pilot
+   selection caution). Validation also surfaced a display gap, fixed
+   same day: the stage label only re-derived when the item went idle, so
+   the queue showed "ripping" through the whole 85-min encode window
+   (and kept the disc-detection gate held after the drive was free).
+   finalizeItem now refreshes the LABEL when sibling workers remain
+   (store.SetStageLabel, label-only: in_progress and completion stay
+   with the idle path). Phase 4 is COMPLETE.
    DECIDED 2026-07-04: 4d is gated on the STABLE-KEY redesign -- episode
    matching needs all rips and renames asset keys today, so streaming
    buys nothing until asset keys become permanent rip-time identifiers

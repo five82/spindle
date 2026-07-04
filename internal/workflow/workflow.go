@@ -548,6 +548,12 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 // rather than in the executor.
 func (m *Manager) finalizeItem(itemID int64) {
 	if m.hasLiveWorker(itemID) {
+		// Sibling workers still running: keep the display label honest
+		// without touching in_progress or completion (a long encode after
+		// ripping finishes should show encoding, and dropping the ripping
+		// label also releases the disc-detection gate once the drive is
+		// genuinely free).
+		m.refreshDisplayStage(itemID)
 		return
 	}
 	p := m.pipeline
@@ -598,6 +604,50 @@ func (m *Manager) finalizeItem(itemID int64) {
 		"decision_type", logs.DecisionStageExecution,
 		"decision_result", "advanced",
 		"decision_reason", fmt.Sprintf("earliest incomplete task is %s", derived),
+		"item_id", itemID,
+		"stage", derived,
+	)
+}
+
+// refreshDisplayStage updates the item's stage label to the earliest
+// not-done task while workers are still running. Label-only: in_progress
+// and terminal transitions belong to the idle finalize path.
+func (m *Manager) refreshDisplayStage(itemID int64) {
+	p := m.pipeline
+	item, err := m.store.GetByID(itemID)
+	if err != nil || item == nil {
+		return
+	}
+	if item.Stage == queue.StageFailed || item.Stage == queue.StageCompleted || item.UserStopped() {
+		return
+	}
+	tasks, err := m.store.TasksForItem(itemID)
+	if err != nil || len(tasks) == 0 {
+		return
+	}
+	derived := item.Stage
+	for _, t := range tasks {
+		if t.State != queue.TaskDone {
+			derived = t.Type
+			break
+		}
+	}
+	if derived == item.Stage {
+		return
+	}
+	if err := m.store.SetStageLabel(item, derived); err != nil {
+		p.logger.Warn("stage label refresh failed",
+			"event_type", "progress_persist_failed",
+			"error_hint", "failed to update display stage label",
+			"item_id", itemID,
+			"error", err,
+		)
+		return
+	}
+	p.logger.Info("item stage label refreshed",
+		"decision_type", logs.DecisionStageExecution,
+		"decision_result", "label_updated",
+		"decision_reason", fmt.Sprintf("earliest incomplete task is %s; sibling workers still running", derived),
 		"item_id", itemID,
 		"stage", derived,
 	)

@@ -471,6 +471,33 @@ func (s *Store) UpdateProgress(item *Item) error {
 	})
 }
 
+// SetStageLabel updates ONLY the display stage label, leaving in_progress
+// and progress columns untouched. The scheduler uses it to keep the label
+// honest while sibling workers are still running (e.g. flipping ripping ->
+// encoding mid-overlap); full stage completion stays with CompleteStage.
+func (s *Store) SetStageLabel(item *Item, stage Stage) error {
+	return retryOnBusy(func() error {
+		res, err := s.db.Exec(`
+			UPDATE queue_items SET
+				stage = ?, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND user_stopped = 0 AND stage NOT IN (?, ?)`,
+			string(stage), item.ID, string(StageFailed), string(StageCompleted),
+		)
+		if err != nil {
+			return fmt.Errorf("set stage label item %d: %w", item.ID, err)
+		}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("set stage label item %d rows affected: %w", item.ID, err)
+		}
+		if rows == 0 {
+			return s.refreshItem(item)
+		}
+		item.Stage = stage
+		return nil
+	})
+}
+
 // UpdateEncodingDetails persists ONLY the encoding telemetry column,
 // leaving the shared progress columns untouched. Used while another stage
 // owns the progress display (rip-to-encode streaming overlap).
