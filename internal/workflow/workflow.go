@@ -401,6 +401,10 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 			continue
 		}
 
+		// Each worker gets its OWN copy of the item: parallel branches of one
+		// item dispatch from the same List() result, and workers mutate item
+		// fields (Refresh, progress) concurrently.
+		itemCopy := *item
 		workers.Add(1)
 		go func(task *queue.Task, item *queue.Item, ps PipelineStage, taskCtx context.Context, cancelTask context.CancelFunc) {
 			defer workers.Done()
@@ -410,7 +414,7 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 			m.runTask(taskCtx, task, item, ps)
 			m.untrackWorker(item.ID, task.ID)
 			m.finalizeItem(item.ID)
-		}(task, item, ps, taskCtx, cancelTask)
+		}(task, &itemCopy, ps, taskCtx, cancelTask)
 	}
 }
 
