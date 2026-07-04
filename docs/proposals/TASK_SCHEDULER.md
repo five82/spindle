@@ -648,6 +648,13 @@ dependent failure, per-asset outcomes and review state).
   data-unblocked; template rewiring (episode_match off the encode
   critical path, per-title streaming) happens in 4d proper. Validate
   stable keys on the next TV disc before starting 4d.
+- 2026-07-04: STABLE KEYS VALIDATED on a Breaking Bad S1 rerun (audit):
+  matching logged s01_001 -> S01E02 (keys retained), library naming
+  correct from envelope fields (Season 01/...S01E02-04.mkv), review
+  strings sane, clean pipeline for all selected episodes. The audit's
+  critical finding is the KNOWN pre-existing pilot title-selection bug
+  (separate operator-owned item), unchanged in shape. 4d is fully
+  unblocked.
 - 2026-07-04: 4c executed and PASSED (details in the 4c sub-phase entry):
   probe scores bit-identical under WhisperX load at all 56 shared points,
   WhisperX VRAM peak 3.3 GiB recorded in the resource model, gpu capacity
