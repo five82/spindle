@@ -403,21 +403,18 @@ STABLE-KEY DESIGN (4d prerequisite, surveyed 2026-07-04): asset/episode
 2. Progress: the reporter callbacks (`encoder.spindleReporter`) become a
    stdout/socket protocol from the worker; snapshot persistence stays in the
    daemon.
-3. Pairing policy: the budget MECHANISM is pair-agnostic (per-tier
-   concurrency caps); which pairs are ENABLED is measured, not assumed
-   (utilization sums have repeatedly failed as predictors -- see reel's
-   A/B methodology notes). Initial enabled pair: 1080p+4K only (the
-   complementary lanes reel projected at 15-35%). Same-tier pairs are an
-   explicit measurement matrix before enabling, same shape as the 4c
-   gate (concurrent vs sequential 5m-clip runs, probe-score identity plus
-   pooled wall): 1080p+1080p (expected poor: both metric-bound at ~86%
-   GPU, contending head-on; VRAM is not the constraint) and 4K+4K
-   (plausible on GPU at 2x40% and VRAM 11.8/16 GiB, but both contend for
-   CPU encode lanes/memory bandwidth). Decided 2026-07-04 with the
-   operator: same-tier pairing is IN SCOPE for Phase 5 as measurements;
-   enablement follows the numbers, weighted by the library's actual
-   resolution mix. Coordinate the vship cross-process prerequisite with
-   reel's open item before enabling any pair.
+3. Pairing policy: encode claims become per-tier concurrency caps sized
+   so one 1080p + one 4K pair (the complementary lanes reel projected at
+   15-35%: 1080p is metric-bound at ~86% GPU with ~2 of 8 encode slots
+   busy; 4K is encode-leaning at ~40% GPU; VRAM 3.9 + 5.9 GiB fits the
+   16 GiB card) while same-tier concurrency stays at 1. Coordinate the
+   vship cross-process prerequisite with reel's open item before
+   enabling. DEFERRED by operator decision (2026-07-04): same-tier
+   pairing (1080p+1080p, 4K+4K) is NOT in Phase 5 scope; if revisited
+   later, treat enablement as a measurement question (same A/B shape as
+   the 4c gate -- probe-score identity plus pooled wall on concurrent vs
+   sequential 5m-clip runs), noting 1080p+1080p contends head-on for the
+   metric-bound GPU and 4K+4K for CPU encode lanes/memory bandwidth.
 
 ## Validation
 
