@@ -280,8 +280,8 @@ pre-encode analysis window shows more than a substage string. Would flow
 through the existing Phase 5 wire as a new event and land in
 `encodingstate.Snapshot.Substage` detail.
 
-- 2026-07-05: PHASE B IMPLEMENTED (flyer repo, uncommitted pending operator
-  validation). types.go regenerated against the Phase A shapes (rip-spec
+- 2026-07-05: PHASE B IMPLEMENTED (flyer commit 629a1ff, pushed).
+  types.go regenerated against the Phase A shapes (rip-spec
   derivation shim and dead fields deleted); ONE stage catalog
   (internal/ui/stages.go) + task board (internal/ui/taskboard.go) replace
   all ten hardcoded stage maps, the pipeline checklist, the separate
