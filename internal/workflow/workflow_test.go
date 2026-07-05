@@ -18,6 +18,17 @@ import (
 	"github.com/five82/spindle/internal/stage"
 )
 
+// Test wait ceilings. CI runners stall for whole seconds under load, so
+// outcome waits are generous -- every wait exits early on success, so
+// local runs never pay the ceiling. branchDeadlockAfter is how long a
+// branch handler waits for its sibling before declaring the branches
+// deadlocked; it must stay well under testWait so a true deadlock fails
+// the test with its specific message instead of the generic timeout.
+const (
+	testWait            = 30 * time.Second
+	branchDeadlockAfter = 10 * time.Second
+)
+
 type stubHandler struct {
 	run func(context.Context, *stage.Session) error
 }
@@ -89,7 +100,7 @@ func TestCompletedItemHasAllTasksDone(t *testing.T) {
 		<-done
 	}()
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(testWait)
 	for time.Now().Before(deadline) {
 		got, err := store.GetByID(item.ID)
 		if err != nil {
@@ -172,7 +183,7 @@ func TestFinalPersistenceFailureSignalsWorkflowStop(t *testing.T) {
 
 	select {
 	case <-manager.persistenceFailures:
-	case <-time.After(time.Second):
+	case <-time.After(testWait):
 		t.Fatal("expected persistence failure signal")
 	}
 }
@@ -344,7 +355,7 @@ func TestSchedulerRunsChainedStagesAndRecordsTasks(t *testing.T) {
 		<-done
 	}()
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(testWait)
 	for time.Now().Before(deadline) {
 		got, err := store.GetByID(item.ID)
 		if err != nil {
@@ -418,7 +429,7 @@ func TestSchedulerBudgetSerializesSameClaim(t *testing.T) {
 		<-done
 	}()
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(testWait)
 	for time.Now().Before(deadline) {
 		mu.Lock()
 		t2 := total
@@ -468,7 +479,7 @@ func TestSchedulerFailureMarksTaskFailedAndStopsItem(t *testing.T) {
 	// The item's stage flips to failed (executor) momentarily before the
 	// scheduler records the task state, so poll for the COMPLETE terminal
 	// state rather than asserting at first sight of the failed stage.
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(testWait)
 	for time.Now().Before(deadline) {
 		got, err := store.GetByID(item.ID)
 		if err != nil {
@@ -534,7 +545,7 @@ func TestSchedulerCancelsWorkerOnUserStop(t *testing.T) {
 
 	select {
 	case <-handlerRunning:
-	case <-time.After(3 * time.Second):
+	case <-time.After(testWait):
 		t.Fatal("handler never started")
 	}
 
@@ -547,11 +558,11 @@ func TestSchedulerCancelsWorkerOnUserStop(t *testing.T) {
 
 	select {
 	case <-handlerCanceled:
-	case <-time.After(8 * time.Second):
+	case <-time.After(testWait):
 		t.Fatal("worker was not cancelled after user stop")
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(testWait)
 	for time.Now().Before(deadline) {
 		got, err := store.GetByID(item.ID)
 		if err != nil {
@@ -600,7 +611,7 @@ func TestSchedulerRunsParallelBranchesOfOneItemConcurrently(t *testing.T) {
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(3 * time.Second):
+		case <-time.After(branchDeadlockAfter):
 			return errTestBoom // deadlock: branches did not overlap
 		}
 	}}
@@ -629,7 +640,7 @@ func TestSchedulerRunsParallelBranchesOfOneItemConcurrently(t *testing.T) {
 		<-done
 	}()
 
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(testWait)
 	for time.Now().Before(deadline) {
 		got, err := store.GetByID(item.ID)
 		if err != nil {
@@ -794,7 +805,7 @@ func TestClaimsFuncEnablesCrossTierPairing(t *testing.T) {
 	}()
 
 	// Wait until A and B run concurrently (cross-tier pair).
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testWait)
 	for time.Now().Before(deadline) {
 		mu.Lock()
 		paired := running[itemA.ID] && running[itemB.ID]
@@ -816,7 +827,7 @@ func TestClaimsFuncEnablesCrossTierPairing(t *testing.T) {
 	}
 
 	close(release)
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(testWait)
 	for time.Now().Before(deadline) {
 		items, _ := store.List(queue.StageCompleted)
 		if len(items) == 3 {
