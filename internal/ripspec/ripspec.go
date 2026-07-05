@@ -41,6 +41,7 @@ type Metadata struct {
 	VoteAverage  float64 `json:"vote_average,omitempty"`
 	VoteCount    int     `json:"vote_count,omitempty"`
 	Movie        bool    `json:"movie,omitempty"`
+	UHD          bool    `json:"uhd,omitempty"`
 	Cached       bool    `json:"cached,omitempty"`
 	Filename     string  `json:"filename,omitempty"`
 	DiscSource   string  `json:"disc_source,omitempty"`

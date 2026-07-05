@@ -254,7 +254,7 @@ func TestBuildEnvelope_Valid(t *testing.T) {
 		VoteCount:   1000,
 	}
 
-	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "movie", "bluray")
+	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "movie", "bluray", false)
 
 	if env.Version != ripspec.CurrentVersion {
 		t.Errorf("Version = %d, want %d", env.Version, ripspec.CurrentVersion)
@@ -313,7 +313,7 @@ func TestBuildEnvelope_TV(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "tv", "bluray")
+	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "tv", "bluray", false)
 
 	if env.Metadata.MediaType != "tv" {
 		t.Errorf("MediaType = %q, want %q", env.Metadata.MediaType, "tv")
@@ -346,7 +346,7 @@ func TestBuildEnvelopeFromCache(t *testing.T) {
 			},
 		}
 
-		env := h.buildEnvelopeFromCache(discardLogger(), item, entry, discInfo, "bluray")
+		env := h.buildEnvelopeFromCache(discardLogger(), item, entry, discInfo, "bluray", false)
 
 		if env.Version != ripspec.CurrentVersion {
 			t.Errorf("Version = %d, want %d", env.Version, ripspec.CurrentVersion)
@@ -388,7 +388,7 @@ func TestBuildEnvelopeFromCache(t *testing.T) {
 			},
 		}
 
-		env := h.buildEnvelopeFromCache(discardLogger(), item, entry, discInfo, "bluray")
+		env := h.buildEnvelopeFromCache(discardLogger(), item, entry, discInfo, "bluray", false)
 
 		if env.Metadata.MediaType != "tv" {
 			t.Errorf("MediaType = %q, want %q", env.Metadata.MediaType, "tv")
@@ -417,7 +417,7 @@ func TestBuildEnvelopeFromCache(t *testing.T) {
 			Year:      "2022",
 		}
 
-		env := h.buildEnvelopeFromCache(discardLogger(), item, entry, nil, "bluray")
+		env := h.buildEnvelopeFromCache(discardLogger(), item, entry, nil, "bluray", false)
 
 		if len(env.Titles) != 0 {
 			t.Errorf("len(Titles) = %d, want 0 for nil discInfo", len(env.Titles))
@@ -642,7 +642,7 @@ func TestBuildEnvelope_TVCreatesEpisodes(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "tv", "bluray")
+	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "tv", "bluray", false)
 
 	if env.Metadata.SeasonNumber != 2 {
 		t.Errorf("SeasonNumber = %d, want 2", env.Metadata.SeasonNumber)
@@ -1056,5 +1056,29 @@ func TestCreateEpisodePlaceholders_TNGLikeSelection(t *testing.T) {
 		if ep.TitleID != wantTitleIDs[i] {
 			t.Fatalf("Episodes[%d].TitleID = %d, want %d", i, ep.TitleID, wantTitleIDs[i])
 		}
+	}
+}
+
+func TestDetectUHD(t *testing.T) {
+	tests := []struct {
+		name  string
+		title string
+		bd    *BDInfoResult
+		want  bool
+	}{
+		{"uhd marker", "MOVIE_UHD", nil, true},
+		{"4k marker", "Movie 4K Ultra HD", nil, true},
+		{"2160p marker", "MOVIE_2160P", nil, true},
+		{"plain bluray", "MOVIE_S1_D1", nil, false},
+		{"bdinfo volume", "MOVIE", &BDInfoResult{VolumeIdentifier: "MOVIE_4K_UHD"}, true},
+		{"bdinfo disc name", "MOVIE", &BDInfoResult{DiscName: "Movie Ultra HD"}, true},
+		{"no markers anywhere", "MOVIE", &BDInfoResult{VolumeIdentifier: "MOVIE_D1", DiscName: "Movie"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detectUHD(tt.title, tt.bd); got != tt.want {
+				t.Fatalf("detectUHD(%q) = %v, want %v", tt.title, got, tt.want)
+			}
+		})
 	}
 }

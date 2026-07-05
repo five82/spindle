@@ -24,7 +24,14 @@ import (
 type PipelineStage struct {
 	Handler stage.Handler
 	Stage   queue.Stage
-	Claims  map[string]int
+	// Claims declares every resource this stage may consume; capacities are
+	// registered from it. When ClaimsFunc is nil, Claims is also what each
+	// dispatch reserves.
+	Claims map[string]int
+	// ClaimsFunc, when set, picks the per-item subset of Claims to reserve
+	// at dispatch time (e.g. the encode tier slot matching the item's
+	// resolution). It must return claims whose resources appear in Claims.
+	ClaimsFunc func(*queue.Item) map[string]int
 	// DependsOn names the stages whose tasks must complete before this
 	// stage's task is ready. Empty means: depend on the previously
 	// registered stage (linear default); the first stage is a root.
@@ -360,7 +367,11 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		}
 		ps := p.stages[idx]
 
-		if !m.reserve(ps.Claims) {
+		claims := ps.Claims
+		if ps.ClaimsFunc != nil {
+			claims = ps.ClaimsFunc(item)
+		}
+		if !m.reserve(claims) {
 			continue
 		}
 
@@ -369,7 +380,7 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		// this so it cannot stomp the progress owner's columns.
 		if item.InProgress == 0 {
 			if err := m.store.StartStage(item, ps.Stage); err != nil {
-				m.release(ps.Claims)
+				m.release(claims)
 				p.logger.Error("persist in_progress failed",
 					"event_type", "progress_persist_failed",
 					"error_hint", "failed to persist in_progress flag",
@@ -380,7 +391,7 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 			}
 		}
 		if err := m.store.StartTask(task); err != nil {
-			m.release(ps.Claims)
+			m.release(claims)
 			_ = m.store.ClearInProgress(item)
 			p.logger.Error("persist task start failed",
 				"event_type", "task_persist_failed",
@@ -395,7 +406,7 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		if !m.trackWorker(item.ID, task.ID, cancelTask) {
 			// Lost a race with another dispatch pass; revert.
 			cancelTask()
-			m.release(ps.Claims)
+			m.release(claims)
 			_ = m.store.FinishTask(task, queue.TaskPending, "")
 			_ = m.store.ClearInProgress(item)
 			continue
@@ -406,15 +417,15 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		// fields (Refresh, progress) concurrently.
 		itemCopy := *item
 		workers.Add(1)
-		go func(task *queue.Task, item *queue.Item, ps PipelineStage, taskCtx context.Context, cancelTask context.CancelFunc) {
+		go func(task *queue.Task, item *queue.Item, ps PipelineStage, claims map[string]int, taskCtx context.Context, cancelTask context.CancelFunc) {
 			defer workers.Done()
 			defer m.signalWake()
-			defer m.release(ps.Claims)
+			defer m.release(claims)
 			defer cancelTask()
 			m.runTask(taskCtx, task, item, ps)
 			m.untrackWorker(item.ID, task.ID)
 			m.finalizeItem(item.ID)
-		}(task, &itemCopy, ps, taskCtx, cancelTask)
+		}(task, &itemCopy, ps, claims, taskCtx, cancelTask)
 	}
 }
 

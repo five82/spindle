@@ -29,6 +29,7 @@ import (
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripcache"
+	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/tmdb"
 	"github.com/five82/spindle/internal/transcription"
 	"github.com/five82/spindle/internal/workflow"
@@ -42,6 +43,18 @@ import (
 	"github.com/five82/spindle/internal/ripper"
 	"github.com/five82/spindle/internal/subtitle"
 )
+
+// encodeTierClaims picks the encode slot matching the item's resolution
+// tier: encode_4k on a positive UHD signal from identification, encode_1080p
+// otherwise (unknown tiers default to 1080p so pairing stays available for
+// the common non-UHD library; see the Phase 5 notes in the task-graph plan).
+func encodeTierClaims(item *queue.Item) map[string]int {
+	env, err := ripspec.Parse(item.RipSpecData)
+	if err == nil && env.Metadata.UHD {
+		return map[string]int{"encode_4k": 1}
+	}
+	return map[string]int{"encode_1080p": 1}
+}
 
 // Run starts the daemon and blocks until shutdown signal.
 func Run(ctx context.Context, cfg *config.Config) error {
@@ -194,7 +207,18 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		{Stage: queue.StageIdentification, Handler: identifyHandler, Claims: map[string]int{"drive": 1}},
 		{Stage: queue.StageRipping, Handler: ripperHandler, Claims: map[string]int{"drive": 1}, DependsOn: []queue.Stage{queue.StageIdentification}},
 		{Stage: queue.StageEpisodeIdentification, Handler: contentidHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageRipping}},
-		{Stage: queue.StageEncoding, Handler: encoderHandler, Claims: map[string]int{"encode": 1}, DependsOn: []queue.Stage{queue.StageIdentification}},
+		{Stage: queue.StageEncoding, Handler: encoderHandler,
+			// Cross-title pairing (task-graph plan, Phase 5): one encode slot
+			// per resolution tier, so a 1080p encode and a 4K encode pair
+			// (validated 2026-07-04: probe scores bit-identical cross-process,
+			// +23.9% pooled wall on the air+sully pair) while same-tier
+			// concurrency stays 1. The tier claim resolves per item from the
+			// UHD flag identification stamps into the envelope; a missed UHD
+			// marker degrades to a disguised same-tier pair (slower, never
+			// incorrect).
+			Claims:     map[string]int{"encode_1080p": 1, "encode_4k": 1},
+			ClaimsFunc: encodeTierClaims,
+			DependsOn:  []queue.Stage{queue.StageIdentification}},
 		{Stage: queue.StageAnalysis, Handler: analysisHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageEpisodeIdentification}},
 		{Stage: queue.StageSubtitling, Handler: subtitleHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageAnalysis}},
 		{Stage: queue.StageApply, Handler: applyHandler, DependsOn: []queue.Stage{queue.StageSubtitling, queue.StageEncoding}},

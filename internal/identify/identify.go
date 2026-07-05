@@ -236,7 +236,7 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 					"decision_reason", "disc_id_cache_entry",
 					"disc_id", discID,
 				)
-				result.Envelope = h.buildEnvelopeFromCache(logger, item, entry, result.DiscInfo, result.DiscSource)
+				result.Envelope = h.buildEnvelopeFromCache(logger, item, entry, result.DiscInfo, result.DiscSource, detectUHD(result.RawTitle, result.BDInfo))
 				return nil
 			}
 		}
@@ -352,7 +352,7 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 	item.DiscTitle = canonicalTitle(*result.Best, result.MediaType, item.DiscTitle, result.DiscInfo)
 
 	// Step 6: Build RipSpec envelope.
-	result.Envelope = h.buildEnvelope(logger, item, result.DiscInfo, result.Best, result.MediaType, result.DiscSource)
+	result.Envelope = h.buildEnvelope(logger, item, result.DiscInfo, result.Best, result.MediaType, result.DiscSource, detectUHD(result.RawTitle, result.BDInfo))
 
 	return nil
 }
@@ -568,6 +568,25 @@ func extractDiscNumber(sources ...string) int {
 	return extractFirstIntMatch(discNumberPattern, sources...)
 }
 
+// uhdMarkerPattern detects UHD/4K markers in raw disc labels and bd_info
+// volume identifiers. Encode-tier claims (task-graph plan, Phase 5 pairing)
+// key off this POSITIVE signal: a missed marker only produces a disguised
+// same-tier pair (slower, never incorrect), while defaulting unknowns to 4K
+// would block pairing for the common non-UHD library.
+var uhdMarkerPattern = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:UHD|4K|ULTRA[\s_-]?HD|2160P?)(?:$|[^a-z0-9])`)
+
+// detectUHD reports whether the raw disc label or bd_info volume identifier
+// carries a UHD/4K marker.
+func detectUHD(rawTitle string, bdinfo *BDInfoResult) bool {
+	if uhdMarkerPattern.MatchString(rawTitle) {
+		return true
+	}
+	if bdinfo != nil && (uhdMarkerPattern.MatchString(bdinfo.VolumeIdentifier) || uhdMarkerPattern.MatchString(bdinfo.DiscName)) {
+		return true
+	}
+	return false
+}
+
 // mapDiscSource converts a discmonitor disc type string to a ripspec disc_source value.
 func mapDiscSource(discType string) string {
 	switch discType {
@@ -617,6 +636,7 @@ func (h *Handler) buildEnvelope(
 	best *tmdb.SearchResult,
 	mediaType string,
 	discSource string,
+	uhd bool,
 ) ripspec.Envelope {
 	// Extract season and disc numbers from disc title / MakeMKV disc name.
 	discName := discInfoName(discInfo)
@@ -639,6 +659,7 @@ func (h *Handler) buildEnvelope(
 			SeasonNumber: seasonNum,
 			DiscNumber:   discNum,
 			DiscSource:   discSource,
+			UHD:          uhd,
 		},
 	}
 
@@ -743,7 +764,7 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 // buildEnvelopeFromCache constructs an envelope from a disc ID cache entry
 // and MakeMKV scan results. The cache provides TMDB metadata (skipping the
 // TMDB search), while the scan provides title data for ripping.
-func (h *Handler) buildEnvelopeFromCache(logger *slog.Logger, item *queue.Item, entry *discidcache.Entry, discInfo *makemkv.DiscInfo, discSource string) ripspec.Envelope {
+func (h *Handler) buildEnvelopeFromCache(logger *slog.Logger, item *queue.Item, entry *discidcache.Entry, discInfo *makemkv.DiscInfo, discSource string, uhd bool) ripspec.Envelope {
 	discName := discInfoName(discInfo)
 	seasonNum := extractSeasonNumber(item.DiscTitle, discName)
 	discNum := extractDiscNumber(item.DiscTitle, discName)
@@ -759,6 +780,7 @@ func (h *Handler) buildEnvelopeFromCache(logger *slog.Logger, item *queue.Item, 
 			Movie:        entry.MediaType == "movie",
 			Cached:       true,
 			DiscSource:   discSource,
+			UHD:          uhd,
 			SeasonNumber: seasonNum,
 			DiscNumber:   discNum,
 		},

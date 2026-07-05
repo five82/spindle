@@ -703,3 +703,115 @@ func TestRefreshDisplayStageUpdatesLabelDuringOverlap(t *testing.T) {
 		t.Fatalf("in_progress = %d, want 1 (label-only refresh must not clear it)", got.InProgress)
 	}
 }
+
+func TestClaimsFuncEnablesCrossTierPairing(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	// Item A is 1080p, item B is 4K, item C is 1080p. A and B must encode
+	// concurrently (different tier slots); C must wait for A (same tier).
+	itemA, _ := store.NewDisc("A-1080p", "fpA")
+	itemB, _ := store.NewDisc("B-4k", "fpB")
+	itemC, _ := store.NewDisc("C-1080p", "fpC")
+	tiers := map[int64]string{itemA.ID: "encode_1080p", itemB.ID: "encode_4k", itemC.ID: "encode_1080p"}
+
+	var mu sync.Mutex
+	running := map[int64]bool{}
+	maxPair := 0
+	sameTierOverlap := false
+	release := make(chan struct{})
+	handler := stubHandler{run: func(ctx context.Context, sess *stage.Session) error {
+		mu.Lock()
+		running[sess.Item.ID] = true
+		if running[itemA.ID] && running[itemC.ID] {
+			sameTierOverlap = true
+		}
+		count := 0
+		for _, on := range running {
+			if on {
+				count++
+			}
+		}
+		if count > maxPair {
+			maxPair = count
+		}
+		mu.Unlock()
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		mu.Lock()
+		running[sess.Item.ID] = false
+		mu.Unlock()
+		return nil
+	}}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, nil, nil, logger)
+	manager.ConfigureStages([]PipelineStage{
+		{
+			Stage:   queue.StageIdentification,
+			Handler: handler,
+			Claims:  map[string]int{"encode_1080p": 1, "encode_4k": 1},
+			ClaimsFunc: func(item *queue.Item) map[string]int {
+				return map[string]int{tiers[item.ID]: 1}
+			},
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		manager.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	// Wait until A and B run concurrently (cross-tier pair).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		paired := running[itemA.ID] && running[itemB.ID]
+		mu.Unlock()
+		if paired {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	mu.Lock()
+	paired := running[itemA.ID] && running[itemB.ID]
+	cWaiting := !running[itemC.ID]
+	mu.Unlock()
+	if !paired {
+		t.Fatal("1080p + 4K items did not pair")
+	}
+	if !cWaiting {
+		t.Fatal("second 1080p item ran while the 1080p slot was held")
+	}
+
+	close(release)
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		items, _ := store.List(queue.StageCompleted)
+		if len(items) == 3 {
+			mu.Lock()
+			defer mu.Unlock()
+			if sameTierOverlap {
+				t.Fatal("same-tier items overlapped")
+			}
+			if maxPair != 2 {
+				t.Fatalf("max concurrent = %d, want 2 (one per tier)", maxPair)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("items did not complete")
+}

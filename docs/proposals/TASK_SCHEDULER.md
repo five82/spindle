@@ -699,6 +699,28 @@ dependent failure, per-asset outcomes and review state).
   critical finding is the KNOWN pre-existing pilot title-selection bug
   (separate operator-owned item), unchanged in shape. 4d is fully
   unblocked.
+- 2026-07-04: PHASE 5 IMPLEMENTED (check-ci.sh green). (1) Encode worker
+  subprocesses: the daemon no longer runs reel in-process; encodeJob
+  spawns `spindle encode-worker` (same binary re-executed) which streams
+  the nine reporter callbacks as JSON lines; the daemon replays them into
+  the unchanged spindleReporter. Validated with a real encode through the
+  worker binary (full event lifecycle, clean output). A cgo crash now
+  fails one job instead of the daemon. (2) vship CROSS-PROCESS GATE
+  PASSED: one 1080p + one 4K encode as two concurrent reel processes,
+  probe scores BIT-IDENTICAL at all 72 shared (chunk, CRF) points vs the
+  4c solo baselines; pooled wall 510s vs 670s sequential = +23.9%
+  throughput, inside reel's 15-35% projection (artifacts:
+  ~/testing/coex-20260704/pair). This closes reel's cross-title pairing
+  prerequisite. (3) PAIRING POLICY: encoding claims one slot per
+  resolution tier (encode_1080p / encode_4k, capacity 1 each) via a new
+  per-item ClaimsFunc; the tier comes from a UHD flag identification
+  stamps into the envelope from disc-label/bd_info markers (positive
+  signal claims 4K; unknowns default 1080p so pairing stays available for
+  the common library; a missed marker degrades to a disguised same-tier
+  pair -- slower, never incorrect). Cross-tier pairing and same-tier
+  serialization covered by a workflow test. PRODUCTION VALIDATION
+  PENDING: queue one UHD and one BD item together and observe paired
+  encodes; also the first daemon-driven worker encode on a real disc.
 - 2026-07-04: 4c executed and PASSED (details in the 4c sub-phase entry):
   probe scores bit-identical under WhisperX load at all 56 shared points,
   WhisperX VRAM peak 3.3 GiB recorded in the resource model, gpu capacity
