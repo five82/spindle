@@ -39,6 +39,16 @@ type ItemResponse struct {
 	PrimaryAudioDescription string             `json:"primaryAudioDescription,omitempty"`
 	CommentaryCount         int                `json:"commentaryCount,omitempty"`
 	ContentID               *ContentIDResponse `json:"contentId,omitempty"`
+	Source                  *SourceResponse    `json:"source,omitempty"`
+}
+
+// SourceResponse summarizes the primary rip-spec title (the movie main
+// title; TV clients use per-episode SourceTitle instead), so no client
+// needs the raw envelope for it.
+type SourceResponse struct {
+	TitleID         int    `json:"titleId"`
+	Name            string `json:"name,omitempty"`
+	DurationSeconds int    `json:"durationSeconds,omitempty"`
 }
 
 // TaskResponse is one scheduler task of an item. DependsOn names task types,
@@ -372,6 +382,16 @@ func populateRipSpecDerived(resp *ItemResponse, env *ripspec.Envelope, activeKey
 	if aa := env.Attributes.AudioAnalysis; aa != nil {
 		resp.PrimaryAudioDescription = aa.PrimaryDescription
 		resp.CommentaryCount = len(aa.CommentaryTracks)
+	}
+
+	// Primary source title (movie main title)
+	if len(env.Titles) > 0 {
+		t := env.Titles[0]
+		resp.Source = &SourceResponse{
+			TitleID:         t.ID,
+			Name:            t.Name,
+			DurationSeconds: t.Duration,
+		}
 	}
 
 	// Episode identification provenance
