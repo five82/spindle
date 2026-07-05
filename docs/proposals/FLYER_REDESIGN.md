@@ -299,6 +299,26 @@ through the existing Phase 5 wire as a new event and land in
   active episode" noise on terminal items; detail sections still keyed to
   one context rather than per running task; episode-by-task grid.
 
+- 2026-07-05: PHASE C IMPLEMENTED (flyer commit edceeee, pushed). Detail sections now key off RUNNING tasks: each
+  running task contributes its own section (encoding -> specs/config/
+  size/crop; episode_identification -> content-ID match stats; analysis ->
+  audio/commentary; subtitling -> generated-so-far; organizing -> file
+  states; any task -> its active episode + track). Overlap windows render
+  multiple sections at once. Focus renders nothing when nothing is active
+  and is dropped from completed items (kills the "No active episode"
+  noise). Episode rows gained the per-asset grid (R/E/S/F cells:
+  done/active/failed/pending from paths + running tasks' asset keys; pure
+  derivation function, unit tested); the redundant file-states text line
+  under each row was removed. Problems view leads with the failed task
+  (label, attempts, error; failedAtStage fallback). Log lines are styled
+  directly from structured LogEvent fields -- the format-then-regex-reparse
+  round trip and its five regexes are deleted (problems' warn/error tail
+  migrated to structured events too). Flyer check-ci.sh fully green;
+  verified against the live daemon on the completed item (task board,
+  episode grid, problems, no Focus noise). Live-overlap rendering of the
+  per-task sections still validates with the next disc. Phase C diff:
+  +282/-149 production, +75 tests.
+
 ## Hazards
 
 - **Task rows are deleted and recompiled** on retry/move. `/api/queue` may
