@@ -22,7 +22,7 @@ func TestListReturnsAPIItemShape(t *testing.T) {
 		if r.URL.Path != "/api/queue" {
 			t.Fatalf("path = %s, want /api/queue", r.URL.Path)
 		}
-		body := `{"items":[{"id":7,"discTitle":"Disc","stage":"encoding","progress":{"message":"Encoding","percent":42},"episodes":[{"key":"s01e01","season":1,"episode":1}],"episodeTotals":{"planned":1,"encoded":1}}]}`
+		body := `{"items":[{"id":7,"discTitle":"Disc","stage":"encoding","tasks":[{"type":"encoding","state":"running","progress":{"message":"Encoding","percent":42}}],"episodes":[{"key":"s01e01","season":1,"episode":1}],"episodeTotals":{"planned":1,"encoded":1}}]}`
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})}}
 
@@ -34,8 +34,8 @@ func TestListReturnsAPIItemShape(t *testing.T) {
 		t.Fatalf("got %d items, want 1", len(items))
 	}
 	item := items[0]
-	if item.Progress.Message != "Encoding" || item.Progress.Percent != 42 {
-		t.Fatalf("progress = %+v, want API progress", item.Progress)
+	if len(item.Tasks) != 1 || item.Tasks[0].Progress.Message != "Encoding" || item.Tasks[0].Progress.Percent != 42 {
+		t.Fatalf("tasks = %+v, want API task progress", item.Tasks)
 	}
 	if len(item.Episodes) != 1 || item.Episodes[0].Key != "s01e01" {
 		t.Fatalf("episodes = %+v, want API episodes preserved", item.Episodes)

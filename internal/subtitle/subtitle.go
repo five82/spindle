@@ -356,7 +356,7 @@ func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Sessi
 		Transcript:  transcriptArtifact(sess, key),
 		Transcriber: h.transcriber,
 		Progress: func(phase transcription.Phase, elapsed time.Duration) {
-			message := item.ProgressMessage
+			message := sess.Task.ProgressMessage
 			switch phase {
 			case transcription.PhaseExtract:
 				if elapsed == 0 {

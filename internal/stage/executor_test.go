@@ -33,40 +33,13 @@ func openExecutorTestStore(t *testing.T) *queue.Store {
 	return store
 }
 
-func TestStartStageInitializesActiveProgress(t *testing.T) {
-	store := openExecutorTestStore(t)
-	item, err := store.NewDisc("A", "fp1")
-	if err != nil {
-		t.Fatalf("new disc: %v", err)
-	}
-	item.ProgressPercent = 72
-	item.ProgressMessage = "old"
-	item.ActiveEpisodeKey = "s01e02"
-	item.ProgressBytesCopied = 10
-	item.ProgressTotalBytes = 20
-
-	if err := store.StartStage(item, queue.StageEncoding); err != nil {
-		t.Fatalf("StartStage: %v", err)
-	}
-	got, err := store.GetByID(item.ID)
-	if err != nil {
-		t.Fatalf("get item: %v", err)
-	}
-	if got.InProgress != 1 || got.ProgressStage != string(queue.StageEncoding) || got.ProgressPercent != 0 || got.ProgressMessage != "" {
-		t.Fatalf("started state = in_progress:%d stage:%q percent:%v message:%q", got.InProgress, got.ProgressStage, got.ProgressPercent, got.ProgressMessage)
-	}
-	if got.ActiveEpisodeKey != "" || got.ProgressBytesCopied != 0 || got.ProgressTotalBytes != 0 {
-		t.Fatalf("stale progress not cleared = episode:%q bytes:%d/%d", got.ActiveEpisodeKey, got.ProgressBytesCopied, got.ProgressTotalBytes)
-	}
-}
-
-func TestExecuteWorkflowStageAdvancesAndSetsCompletedProgress(t *testing.T) {
+func TestExecuteWorkflowStageAdvancesAndClearsInProgress(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
 	if err := store.MoveToStage(item, queue.StageOrganizing); err != nil {
 		t.Fatalf("move item: %v", err)
 	}
-	if err := store.StartStage(item, queue.StageOrganizing); err != nil {
+	if err := store.StartStage(item); err != nil {
 		t.Fatalf("StartStage: %v", err)
 	}
 
@@ -81,15 +54,15 @@ func TestExecuteWorkflowStageAdvancesAndSetsCompletedProgress(t *testing.T) {
 		t.Fatalf("ExecuteWorkflowStage: %v", err)
 	}
 	got, _ := store.GetByID(item.ID)
-	if got.Stage != queue.StageCompleted || got.InProgress != 0 || got.ProgressStage != string(queue.StageCompleted) || got.ProgressPercent != 100 || got.ProgressMessage != "Completed" {
-		t.Fatalf("completed state = stage:%q in_progress:%d progress:%q %.1f %q", got.Stage, got.InProgress, got.ProgressStage, got.ProgressPercent, got.ProgressMessage)
+	if got.Stage != queue.StageCompleted || got.InProgress != 0 {
+		t.Fatalf("completed state = stage:%q in_progress:%d", got.Stage, got.InProgress)
 	}
 }
 
 func TestExecuteWorkflowStageMarksFailure(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
-	if err := store.StartStage(item, queue.StageIdentification); err != nil {
+	if err := store.StartStage(item); err != nil {
 		t.Fatalf("StartStage: %v", err)
 	}
 	stageErr := errors.New("boom")
@@ -118,7 +91,7 @@ func TestExecuteWorkflowStageTreatsDegradedAsSuccess(t *testing.T) {
 	if err := store.UpdateWorkState(item); err != nil {
 		t.Fatalf("update work state: %v", err)
 	}
-	if err := store.StartStage(item, queue.StageIdentification); err != nil {
+	if err := store.StartStage(item); err != nil {
 		t.Fatalf("StartStage: %v", err)
 	}
 
@@ -139,7 +112,7 @@ func TestExecuteWorkflowStageTreatsDegradedAsSuccess(t *testing.T) {
 func TestExecuteWorkflowStageCancellationClearsInProgress(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
-	if err := store.StartStage(item, queue.StageIdentification); err != nil {
+	if err := store.StartStage(item); err != nil {
 		t.Fatalf("StartStage: %v", err)
 	}
 
@@ -173,8 +146,8 @@ func TestExecuteWorkflowStageOneShotClearsWithoutAdvancing(t *testing.T) {
 		t.Fatalf("result err=%v failed=%v degraded=%v canceled=%v", err, res.Failed, res.Degraded, res.Canceled)
 	}
 	got, _ := store.GetByID(item.ID)
-	if got.Stage != queue.StageIdentification || got.InProgress != 0 || got.ProgressStage != string(queue.StageIdentification) {
-		t.Fatalf("one-shot state = stage:%q in_progress:%d progress_stage:%q", got.Stage, got.InProgress, got.ProgressStage)
+	if got.Stage != queue.StageIdentification || got.InProgress != 0 {
+		t.Fatalf("one-shot state = stage:%q in_progress:%d", got.Stage, got.InProgress)
 	}
 }
 
@@ -241,7 +214,7 @@ func TestExecuteWorkflowStageOneShotIgnoresCompletionPersistenceError(t *testing
 func TestExecuteWorkflowStageReturnsPersistenceError(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
-	if err := store.StartStage(item, queue.StageIdentification); err != nil {
+	if err := store.StartStage(item); err != nil {
 		t.Fatalf("StartStage: %v", err)
 	}
 	_ = store.Close()

@@ -225,9 +225,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		{Stage: queue.StageOrganizing, Handler: organizerHandler, DependsOn: []queue.Stage{queue.StageApply}},
 	})
 
-	// Create HTTP API with shutdown channel.
+	// Create HTTP API with shutdown channel. The manager supplies the
+	// pipeline template and live resource occupancy for /api/status.
 	shutdownCh := make(chan struct{})
-	api := httpapi.New(store, cfg.API.Token, discMon, shutdownCh, logger, httpapi.NewStatusInfo(cfg), logBuffer, statusTracker)
+	api := httpapi.New(store, cfg.API.Token, discMon, shutdownCh, logger, httpapi.NewStatusInfo(cfg), logBuffer, statusTracker, manager.PipelineInfo(), manager)
 
 	// Create netlink monitor if optical drive is configured.
 	var netlinkMon *discmonitor.NetlinkMonitor

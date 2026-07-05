@@ -21,15 +21,35 @@ func newTestSession(t *testing.T) (*queue.Store, *queue.Item, *Session) {
 	if err != nil {
 		t.Fatalf("new disc: %v", err)
 	}
-	s, err := NewSession(context.Background(), store, item)
+	s, err := NewSession(context.Background(), store, item, nil)
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
 	return store, item, s
 }
 
+// newTestSessionWithTask is like newTestSession but attaches a real,
+// persisted task row so Session.Progress writes reach the database instead
+// of staying in the detached in-memory task.
+func newTestSessionWithTask(t *testing.T) (*queue.Store, *queue.Item, *Session) {
+	t.Helper()
+	store, item, s := newTestSession(t)
+	if err := store.EnsureTasks(item, []queue.TaskSpec{{Type: queue.StageIdentification}}); err != nil {
+		t.Fatalf("ensure tasks: %v", err)
+	}
+	tasks, err := store.TasksForItem(item.ID)
+	if err != nil {
+		t.Fatalf("tasks for item: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(tasks))
+	}
+	s.Task = tasks[0]
+	return store, item, s
+}
+
 func TestNewSessionRequiresStore(t *testing.T) {
-	_, err := NewSession(context.Background(), nil, &queue.Item{})
+	_, err := NewSession(context.Background(), nil, &queue.Item{}, nil)
 	if err == nil {
 		t.Fatal("NewSession succeeded with nil store")
 	}
@@ -42,7 +62,7 @@ func TestNewSessionRejectsInvalidRipSpec(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	_, err = NewSession(context.Background(), store, &queue.Item{RipSpecData: "{bad json"})
+	_, err = NewSession(context.Background(), store, &queue.Item{RipSpecData: "{bad json"}, nil)
 	if err == nil {
 		t.Fatal("NewSession succeeded with invalid RipSpec")
 	}
@@ -51,28 +71,59 @@ func TestNewSessionRejectsInvalidRipSpec(t *testing.T) {
 	}
 }
 
-func TestSessionProgressPersistsItem(t *testing.T) {
-	store, item, s := newTestSession(t)
+func TestSessionProgressPersistsTask(t *testing.T) {
+	store, item, s := newTestSessionWithTask(t)
 
-	if err := s.Progress(42, "Phase 1/1 - Testing", WithActiveEpisode("s01e02"), WithProgressBytes(10, 20)); err != nil {
+	if err := s.Progress(42, "Phase 1/1 - Testing", WithActiveEpisode("s01e02"), WithProgressBytes(10, 20), WithEncodingDetails(`{"substage":"encoding"}`)); err != nil {
 		t.Fatalf("Progress: %v", err)
 	}
 
-	got, err := store.GetByID(item.ID)
+	tasks, err := store.TasksForItem(item.ID)
 	if err != nil {
-		t.Fatalf("get item: %v", err)
+		t.Fatalf("tasks for item: %v", err)
 	}
+	if len(tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(tasks))
+	}
+	got := tasks[0]
 	if got.ProgressPercent != 42 {
 		t.Fatalf("ProgressPercent = %v, want 42", got.ProgressPercent)
 	}
 	if got.ProgressMessage != "Phase 1/1 - Testing" {
 		t.Fatalf("ProgressMessage = %q", got.ProgressMessage)
 	}
-	if got.ActiveEpisodeKey != "s01e02" {
-		t.Fatalf("ActiveEpisodeKey = %q", got.ActiveEpisodeKey)
+	if got.ActiveAssetKey != "s01e02" {
+		t.Fatalf("ActiveAssetKey = %q", got.ActiveAssetKey)
 	}
 	if got.ProgressBytesCopied != 10 || got.ProgressTotalBytes != 20 {
 		t.Fatalf("bytes = %d/%d, want 10/20", got.ProgressBytesCopied, got.ProgressTotalBytes)
+	}
+
+	gotItem, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatalf("get item: %v", err)
+	}
+	if gotItem.EncodingDetailsJSON != `{"substage":"encoding"}` {
+		t.Fatalf("EncodingDetailsJSON = %q", gotItem.EncodingDetailsJSON)
+	}
+}
+
+func TestSessionProgressDetachedTaskStaysInMemory(t *testing.T) {
+	store, item, s := newTestSession(t)
+
+	if err := s.Progress(42, "Phase 1/1 - Testing"); err != nil {
+		t.Fatalf("Progress: %v", err)
+	}
+
+	if s.Task.ProgressPercent != 42 || s.Task.ProgressMessage != "Phase 1/1 - Testing" {
+		t.Fatalf("detached task not updated in memory: %+v", s.Task)
+	}
+	tasks, err := store.TasksForItem(item.ID)
+	if err != nil {
+		t.Fatalf("tasks for item: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("detached task should not persist a row, got %d", len(tasks))
 	}
 }
 
@@ -184,44 +235,5 @@ func TestSessionReviewHelpers(t *testing.T) {
 	}
 	if got := s.Env.Episodes[0].ReviewReason; got != "episode review" {
 		t.Fatalf("episode review reason = %q", got)
-	}
-}
-
-func TestProgressSilentPersistsOnlyEncodingDetails(t *testing.T) {
-	store, item, s := newTestSession(t)
-
-	if err := s.Progress(25, "ripping title 1"); err != nil {
-		t.Fatalf("progress: %v", err)
-	}
-
-	// Silent mode: shared progress columns are owned by another stage
-	// (rip-to-encode streaming); only encoding telemetry may persist.
-	s.SetProgressSilent(true)
-	if err := s.Progress(90, "encoding chunk", WithEncodingDetails(`{"substage":"encoding"}`)); err != nil {
-		t.Fatalf("silent progress with details: %v", err)
-	}
-	if err := s.Progress(95, "encoding chunk 2"); err != nil {
-		t.Fatalf("silent progress without details: %v", err)
-	}
-
-	got, err := store.GetByID(item.ID)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if got.ProgressPercent != 25 || got.ProgressMessage != "ripping title 1" {
-		t.Fatalf("shared progress columns overwritten in silent mode: %v %q", got.ProgressPercent, got.ProgressMessage)
-	}
-	if got.EncodingDetailsJSON != `{"substage":"encoding"}` {
-		t.Fatalf("encoding details not persisted in silent mode: %q", got.EncodingDetailsJSON)
-	}
-
-	// Loud again: shared columns update.
-	s.SetProgressSilent(false)
-	if err := s.Progress(50, "encoding e01"); err != nil {
-		t.Fatalf("loud progress: %v", err)
-	}
-	got, _ = store.GetByID(item.ID)
-	if got.ProgressPercent != 50 || got.ProgressMessage != "encoding e01" {
-		t.Fatalf("progress not restored after silent mode: %v %q", got.ProgressPercent, got.ProgressMessage)
 	}
 }

@@ -29,10 +29,13 @@ type Server struct {
 	statusInfo    StatusInfo
 	logBuffer     *LogBuffer
 	statusTracker *StatusTracker
+	pipeline      []PipelineStageInfo
+	scheduler     SchedulerSource
 }
 
-// New creates an HTTP API server. discMon, shutdownCh, logBuffer, and statusTracker may be nil.
-func New(store *queue.Store, token string, discMon *discmonitor.Monitor, shutdownCh chan struct{}, logger *slog.Logger, statusInfo StatusInfo, logBuffer *LogBuffer, statusTracker *StatusTracker) *Server {
+// New creates an HTTP API server. discMon, shutdownCh, logBuffer,
+// statusTracker, pipeline, and scheduler may be nil.
+func New(store *queue.Store, token string, discMon *discmonitor.Monitor, shutdownCh chan struct{}, logger *slog.Logger, statusInfo StatusInfo, logBuffer *LogBuffer, statusTracker *StatusTracker, pipeline []PipelineStageInfo, scheduler SchedulerSource) *Server {
 	s := &Server{
 		store:         store,
 		token:         token,
@@ -43,6 +46,8 @@ func New(store *queue.Store, token string, discMon *discmonitor.Monitor, shutdow
 		statusInfo:    statusInfo,
 		logBuffer:     logBuffer,
 		statusTracker: statusTracker,
+		pipeline:      pipeline,
+		scheduler:     scheduler,
 	}
 	s.registerRoutes()
 	s.httpServer = &http.Server{
@@ -136,7 +141,7 @@ func (s *Server) handleQueueList(w http.ResponseWriter, r *http.Request) {
 	}
 	responses := make([]ItemResponse, 0, len(items))
 	for _, item := range items {
-		responses = append(responses, toItemResponse(item))
+		responses = append(responses, toItemResponse(item, s.tasksFor(item.ID), false))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": responses})
 }
@@ -157,7 +162,24 @@ func (s *Server) handleQueueGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "item not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"item": toItemResponse(item)})
+	writeJSON(w, http.StatusOK, map[string]any{"item": toItemResponse(item, s.tasksFor(item.ID), true)})
+}
+
+// tasksFor loads an item's task rows for response building; a load failure
+// degrades to no tasks (the response's core fields still stand on their own).
+func (s *Server) tasksFor(itemID int64) []*queue.Task {
+	tasks, err := s.store.TasksForItem(itemID)
+	if err != nil {
+		s.logger.Warn("load tasks for response failed",
+			"event_type", "queue_fetch_error",
+			"error_hint", "task rows omitted from item response",
+			"impact", "client sees item without task detail this poll",
+			"item_id", itemID,
+			"error", err,
+		)
+		return nil
+	}
+	return tasks
 }
 
 func (s *Server) handleQueueRetry(w http.ResponseWriter, r *http.Request) {
@@ -252,7 +274,7 @@ func (s *Server) handleQueueEnqueueCached(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to enqueue cached rip")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"item": toItemResponse(item)})
+	writeJSON(w, http.StatusOK, map[string]any{"item": toItemResponse(item, nil, false)})
 }
 
 func (s *Server) handleQueueRemove(w http.ResponseWriter, r *http.Request) {
@@ -359,12 +381,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	deps := []DependencyResponse{}
 
 	if s.statusTracker != nil {
-		lastErr, lastItem, trackerDeps := s.statusTracker.Snapshot()
+		lastErr, trackerDeps := s.statusTracker.Snapshot()
 		wf.LastError = lastErr
-		if lastItem != nil {
-			ir := toItemResponse(lastItem)
-			wf.LastItem = &ir
-		}
 		if len(trackerDeps) > 0 {
 			deps = trackerDeps
 		}
@@ -377,6 +395,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		LockFilePath: s.statusInfo.LockFilePath,
 		Workflow:     wf,
 		Dependencies: deps,
+		Pipeline:     s.pipeline,
+	}
+	if s.scheduler != nil {
+		resp.Scheduler = &SchedulerStatus{Resources: s.scheduler.SchedulerSnapshot()}
+	}
+	if s.discMonitor != nil {
+		resp.Disc = &DiscStatus{Paused: s.discMonitor.IsPaused()}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

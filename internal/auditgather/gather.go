@@ -147,13 +147,11 @@ func buildItemSummary(item *httpapi.ItemResponse, env *ripspec.Envelope) ItemSum
 		FailedAtStage:   item.FailedAtStage,
 		ErrorMessage:    item.ErrorMessage,
 		NeedsReview:     item.NeedsReview,
-		ReviewReason:    item.ReviewReason,
+		ReviewReasons:   item.ReviewReasons,
 		DiscFingerprint: item.DiscFingerprint,
 		CreatedAt:       item.CreatedAt,
 		UpdatedAt:       item.UpdatedAt,
-		ProgressStage:   item.Progress.Stage,
-		ProgressPercent: item.Progress.Percent,
-		ProgressMessage: item.Progress.Message,
+		Tasks:           buildTaskSummaries(item.Tasks),
 	}
 	if env != nil {
 		summary.RippedFile = lastCompletedAssetPath(env.Assets.Ripped)
@@ -161,6 +159,27 @@ func buildItemSummary(item *httpapi.ItemResponse, env *ripspec.Envelope) ItemSum
 		summary.FinalFile = lastCompletedAssetPath(env.Assets.Final)
 	}
 	return summary
+}
+
+// buildTaskSummaries condenses the item's task rows into the audit report's
+// compact per-task shape.
+func buildTaskSummaries(tasks []httpapi.TaskResponse) []TaskSummary {
+	if len(tasks) == 0 {
+		return nil
+	}
+	out := make([]TaskSummary, 0, len(tasks))
+	for _, t := range tasks {
+		out = append(out, TaskSummary{
+			Type:            t.Type,
+			State:           t.State,
+			Attempts:        t.Attempts,
+			Error:           t.Error,
+			ProgressPercent: t.Progress.Percent,
+			ProgressMessage: t.Progress.Message,
+			ActiveAssetKey:  t.ActiveAssetKey,
+		})
+	}
+	return out
 }
 
 func lastCompletedAssetPath(assets []ripspec.Asset) string {

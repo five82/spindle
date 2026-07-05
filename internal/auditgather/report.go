@@ -29,24 +29,38 @@ type AuditPaths struct {
 	LibraryDir string `json:"library_dir,omitempty"`
 }
 
-// ItemSummary holds queue item identification and status fields.
+// ItemSummary holds queue item identification and status fields. Per-task
+// progress lives in Tasks (sourced from the scheduler's tasks table); the
+// item's Stage is the scheduler's coarse position and lags running tasks
+// during overlap windows.
 type ItemSummary struct {
-	ID              int64   `json:"id"`
-	DiscTitle       string  `json:"disc_title"`
-	Stage           string  `json:"stage"`
-	FailedAtStage   string  `json:"failed_at_stage,omitempty"`
-	ErrorMessage    string  `json:"error_message,omitempty"`
-	NeedsReview     bool    `json:"needs_review"`
-	ReviewReason    string  `json:"review_reason,omitempty"`
-	DiscFingerprint string  `json:"disc_fingerprint,omitempty"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
-	ProgressStage   string  `json:"progress_stage,omitempty"`
+	ID              int64         `json:"id"`
+	DiscTitle       string        `json:"disc_title"`
+	Stage           string        `json:"stage"`
+	FailedAtStage   string        `json:"failed_at_stage,omitempty"`
+	ErrorMessage    string        `json:"error_message,omitempty"`
+	NeedsReview     bool          `json:"needs_review"`
+	ReviewReasons   []string      `json:"review_reasons,omitempty"`
+	DiscFingerprint string        `json:"disc_fingerprint,omitempty"`
+	CreatedAt       string        `json:"created_at"`
+	UpdatedAt       string        `json:"updated_at"`
+	Tasks           []TaskSummary `json:"tasks,omitempty"`
+	RippedFile      string        `json:"ripped_file,omitempty"`
+	EncodedFile     string        `json:"encoded_file,omitempty"`
+	FinalFile       string        `json:"final_file,omitempty"`
+}
+
+// TaskSummary is a compact per-task status entry sourced from the item's
+// task rows. Progress fields are populated only while the task is running or
+// once it has run; pending tasks show zero values.
+type TaskSummary struct {
+	Type            string  `json:"type"`
+	State           string  `json:"state"`
+	Attempts        int     `json:"attempts,omitempty"`
+	Error           string  `json:"error,omitempty"`
 	ProgressPercent float64 `json:"progress_percent,omitempty"`
 	ProgressMessage string  `json:"progress_message,omitempty"`
-	RippedFile      string  `json:"ripped_file,omitempty"`
-	EncodedFile     string  `json:"encoded_file,omitempty"`
-	FinalFile       string  `json:"final_file,omitempty"`
+	ActiveAssetKey  string  `json:"active_asset_key,omitempty"`
 }
 
 // StageGate determines which audit phases are applicable.

@@ -5,15 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
 // Session is the mutable work envelope for a single stage invocation. It keeps
-// queue item progress, review state, and RipSpec persistence in one place so
-// stage handlers can focus on domain work.
+// task progress, review state, and RipSpec persistence in one place so stage
+// handlers can focus on domain work.
 type Session struct {
 	Ctx    context.Context
 	Store  *queue.Store
@@ -21,16 +20,16 @@ type Session struct {
 	Env    *ripspec.Envelope
 	Logger *slog.Logger
 
-	// progressSilent suppresses writes to the shared progress columns while
-	// another stage of the same item owns the display (rip-to-encode
-	// streaming: ripping owns progress until it completes). Encoding
-	// telemetry still persists through the details-only path. Atomic:
-	// reporters invoke Progress from encoder callback goroutines.
-	progressSilent atomic.Bool
+	// Task is the running task this session reports progress against. Each
+	// concurrent branch of an item has its own task row, so progress writes
+	// never contend. A detached task (ID 0) keeps progress in memory only
+	// (OneShot CLI execution, where no scheduler task exists).
+	Task *queue.Task
 }
 
 // NewSession creates a stage session and parses the item's RipSpec envelope.
-func NewSession(ctx context.Context, store *queue.Store, item *queue.Item) (*Session, error) {
+// task may be nil; a detached in-memory task is substituted.
+func NewSession(ctx context.Context, store *queue.Store, item *queue.Item, task *queue.Task) (*Session, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -44,12 +43,16 @@ func NewSession(ctx context.Context, store *queue.Store, item *queue.Item) (*Ses
 	if err != nil {
 		return nil, fmt.Errorf("invalid rip spec: %w", err)
 	}
+	if task == nil {
+		task = &queue.Task{ItemID: item.ID}
+	}
 	return &Session{
 		Ctx:    ctx,
 		Store:  store,
 		Item:   item,
 		Env:    &env,
 		Logger: slog.Default(),
+		Task:   task,
 	}, nil
 }
 
@@ -143,14 +146,6 @@ func (s *Session) MergeSave(mutate func(*ripspec.Envelope) error) error {
 	return nil
 }
 
-// SetProgressSilent toggles suppression of shared progress-column writes
-// (see the progressSilent field).
-func (s *Session) SetProgressSilent(v bool) {
-	if s != nil {
-		s.progressSilent.Store(v)
-	}
-}
-
 // RefreshEnvelope reloads the item's envelope from the store under the
 // per-item lock, adopting fresh state as the session's view. ONLY safe for
 // handlers whose every envelope write goes through merge operations: any
@@ -241,7 +236,7 @@ type progressUpdate struct {
 	encodingJSON  *string
 }
 
-// WithActiveEpisode sets active_episode_key during a progress update.
+// WithActiveEpisode sets the task's active asset key during a progress update.
 func WithActiveEpisode(key string) ProgressOption {
 	return func(u *progressUpdate) { u.activeEpisode = &key }
 }
@@ -259,9 +254,11 @@ func WithEncodingDetails(json string) ProgressOption {
 	return func(u *progressUpdate) { u.encodingJSON = &json }
 }
 
-// Progress updates the item progress fields and persists them with UpdateProgress.
+// Progress updates the running task's progress columns. Encoding telemetry
+// rides along on the item (single writer: the encoding task). A detached
+// task (ID 0) keeps progress in memory only.
 func (s *Session) Progress(percent float64, message string, opts ...ProgressOption) error {
-	if s == nil || s.Store == nil || s.Item == nil {
+	if s == nil || s.Store == nil || s.Item == nil || s.Task == nil {
 		return fmt.Errorf("stage session: incomplete progress state")
 	}
 	update := progressUpdate{}
@@ -269,38 +266,36 @@ func (s *Session) Progress(percent float64, message string, opts ...ProgressOpti
 		opt(&update)
 	}
 
-	s.Item.ProgressPercent = percent
-	s.Item.ProgressMessage = message
+	s.Task.ProgressPercent = percent
+	s.Task.ProgressMessage = message
 	if update.activeEpisode != nil {
-		s.Item.ActiveEpisodeKey = *update.activeEpisode
+		s.Task.ActiveAssetKey = *update.activeEpisode
 	}
 	if update.bytesCopied != nil {
-		s.Item.ProgressBytesCopied = *update.bytesCopied
+		s.Task.ProgressBytesCopied = *update.bytesCopied
 	}
 	if update.totalBytes != nil {
-		s.Item.ProgressTotalBytes = *update.totalBytes
+		s.Task.ProgressTotalBytes = *update.totalBytes
 	}
 	if update.encodingJSON != nil {
 		s.Item.EncodingDetailsJSON = *update.encodingJSON
-	}
-	if s.progressSilent.Load() {
-		// Another stage owns the shared progress columns; persist only the
-		// encoding telemetry when it changed.
-		if update.encodingJSON != nil {
-			return s.Store.UpdateEncodingDetails(s.Item)
+		if err := s.Store.UpdateEncodingDetails(s.Item); err != nil {
+			return err
 		}
+	}
+	if s.Task.ID == 0 {
 		return nil
 	}
-	return s.Store.UpdateProgress(s.Item)
+	return s.Store.UpdateTaskProgress(s.Task)
 }
 
-// SetActiveEpisode persists a change to active_episode_key without changing
-// the current percent or message.
+// SetActiveEpisode persists a change to the task's active asset key without
+// changing the current percent or message.
 func (s *Session) SetActiveEpisode(key string) error {
-	return s.Progress(s.Item.ProgressPercent, s.Item.ProgressMessage, WithActiveEpisode(key))
+	return s.Progress(s.Task.ProgressPercent, s.Task.ProgressMessage, WithActiveEpisode(key))
 }
 
-// ClearActiveEpisode clears active_episode_key without changing current progress.
+// ClearActiveEpisode clears the active asset key without changing current progress.
 func (s *Session) ClearActiveEpisode() error { return s.SetActiveEpisode("") }
 
 // AddReviewReason marks the item for review and appends a queue-level reason.

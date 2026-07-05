@@ -146,7 +146,7 @@ func TestRetryFailedRecompilesTasksFromFailedStage(t *testing.T) {
 	if err := store.EnsureTasks(item, testSpecs); err != nil {
 		t.Fatalf("ensure tasks: %v", err)
 	}
-	if err := store.StartStage(item, StageEncoding); err != nil {
+	if err := store.StartStage(item); err != nil {
 		t.Fatalf("start stage: %v", err)
 	}
 	if err := store.FailStage(item, StageEncoding, "boom"); err != nil {
@@ -206,7 +206,7 @@ func TestStopItemsRecordsStoppedStageForRetry(t *testing.T) {
 	if err := store.MoveToStage(item, StageEncoding); err != nil {
 		t.Fatalf("move: %v", err)
 	}
-	if err := store.StartStage(item, StageEncoding); err != nil {
+	if err := store.StartStage(item); err != nil {
 		t.Fatalf("start stage: %v", err)
 	}
 

@@ -127,7 +127,7 @@ func TestLifecycleAndTitleUpdates(t *testing.T) {
 	if err := store.MoveToStage(item, StageEncoding); err != nil {
 		t.Fatalf("move stage: %v", err)
 	}
-	if err := store.StartStage(item, StageEncoding); err != nil {
+	if err := store.StartStage(item); err != nil {
 		t.Fatalf("start stage: %v", err)
 	}
 	if err := store.UpdateDiscTitle(item, "Updated Title"); err != nil {
@@ -149,7 +149,7 @@ func TestLifecycleAndTitleUpdates(t *testing.T) {
 	}
 }
 
-func TestUpdateProgress(t *testing.T) {
+func TestUpdateTaskProgress(t *testing.T) {
 	store := openTestStore(t)
 
 	item, err := store.NewDisc("Disc", "fp1")
@@ -157,30 +157,43 @@ func TestUpdateProgress(t *testing.T) {
 		t.Fatalf("new disc: %v", err)
 	}
 
-	item.ProgressStage = "encoding"
-	item.ProgressPercent = 42.5
-	item.ProgressMessage = "Encoding track 1"
-	item.ProgressBytesCopied = 1000
-	item.ProgressTotalBytes = 5000
-	item.ActiveEpisodeKey = "s01e03"
-	item.EncodingDetailsJSON = `{"speed": 1.5}`
-
-	if err := store.UpdateProgress(item); err != nil {
-		t.Fatalf("update progress: %v", err)
+	if err := store.EnsureTasks(item, []TaskSpec{{Type: StageIdentification}}); err != nil {
+		t.Fatalf("ensure tasks: %v", err)
 	}
-
-	got, err := store.GetByID(item.ID)
+	tasks, err := store.TasksForItem(item.ID)
 	if err != nil {
-		t.Fatalf("get: %v", err)
+		t.Fatalf("tasks for item: %v", err)
 	}
-	if got.ProgressPercent != 42.5 {
-		t.Errorf("percent = %f, want 42.5", got.ProgressPercent)
+	if len(tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(tasks))
 	}
-	if got.ProgressMessage != "Encoding track 1" {
-		t.Errorf("message = %q, want %q", got.ProgressMessage, "Encoding track 1")
+	task := tasks[0]
+
+	task.ProgressPercent = 42.5
+	task.ProgressMessage = "Encoding track 1"
+	task.ProgressBytesCopied = 1000
+	task.ProgressTotalBytes = 5000
+	task.ActiveAssetKey = "s01e03"
+
+	if err := store.UpdateTaskProgress(task); err != nil {
+		t.Fatalf("update task progress: %v", err)
 	}
-	if got.ActiveEpisodeKey != "s01e03" {
-		t.Errorf("episode key = %q, want %q", got.ActiveEpisodeKey, "s01e03")
+
+	got, err := store.TasksForItem(item.ID)
+	if err != nil {
+		t.Fatalf("tasks for item: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(got))
+	}
+	if got[0].ProgressPercent != 42.5 {
+		t.Errorf("percent = %f, want 42.5", got[0].ProgressPercent)
+	}
+	if got[0].ProgressMessage != "Encoding track 1" {
+		t.Errorf("message = %q, want %q", got[0].ProgressMessage, "Encoding track 1")
+	}
+	if got[0].ActiveAssetKey != "s01e03" {
+		t.Errorf("active asset key = %q, want %q", got[0].ActiveAssetKey, "s01e03")
 	}
 }
 
@@ -228,7 +241,7 @@ func TestNextForStatuses(t *testing.T) {
 	item1, _ := store.NewDisc("A", "fp1")
 	item2, _ := store.NewDisc("B", "fp2")
 	// Mark item1 as in progress.
-	_ = store.StartStage(item1, StageIdentification)
+	_ = store.StartStage(item1)
 
 	// Should skip item1 (in_progress=1) and return item2.
 	next, err := store.NextForStatuses(StageIdentification)
@@ -294,11 +307,58 @@ func TestStats(t *testing.T) {
 	}
 }
 
+// TestStatsCountsRunningTaskDuringOverlap reproduces the rip-to-encode
+// overlap: the item's stage column lags at ripping while the encoding task
+// runs, and Stats must count the item under encoding, not ripping.
+func TestStatsCountsRunningTaskDuringOverlap(t *testing.T) {
+	store := openTestStore(t)
+
+	item, _ := store.NewDisc("A", "fp1")
+	_ = store.MoveToStage(item, StageRipping)
+	specs := []TaskSpec{
+		{Type: StageRipping},
+		{Type: StageEncoding, DependsOn: []Stage{StageRipping}},
+	}
+	if err := store.EnsureTasks(item, specs); err != nil {
+		t.Fatalf("ensure tasks: %v", err)
+	}
+	tasks, err := store.TasksForItem(item.ID)
+	if err != nil || len(tasks) != 2 {
+		t.Fatalf("tasks: %v (%d)", err, len(tasks))
+	}
+	if err := store.FinishTask(tasks[0], TaskDone, ""); err != nil {
+		t.Fatalf("finish ripping: %v", err)
+	}
+	if err := store.StartTask(tasks[1]); err != nil {
+		t.Fatalf("start encoding: %v", err)
+	}
+
+	stats, err := store.Stats()
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if stats[StageEncoding] != 1 || stats[StageRipping] != 0 {
+		t.Errorf("stats = %v, want encoding:1 and no ripping", stats)
+	}
+
+	// A failed item counts as failed even with leftover task rows.
+	if err := store.FailStage(item, StageEncoding, "boom"); err != nil {
+		t.Fatalf("fail stage: %v", err)
+	}
+	stats, err = store.Stats()
+	if err != nil {
+		t.Fatalf("stats after fail: %v", err)
+	}
+	if stats[StageFailed] != 1 || stats[StageEncoding] != 0 {
+		t.Errorf("stats after fail = %v, want failed:1", stats)
+	}
+}
+
 func TestResetInProgress(t *testing.T) {
 	store := openTestStore(t)
 
 	item, _ := store.NewDisc("A", "fp1")
-	_ = store.StartStage(item, StageIdentification)
+	_ = store.StartStage(item)
 
 	if err := store.ResetInProgress(); err != nil {
 		t.Fatalf("reset: %v", err)
@@ -378,7 +438,7 @@ func TestStopItemsAndOverride(t *testing.T) {
 
 	item, _ := store.NewDisc("A", "fp1")
 	_ = store.MoveToStage(item, StageEncoding)
-	_ = store.StartStage(item, StageEncoding)
+	_ = store.StartStage(item)
 
 	if _, err := store.StopItems(item.ID); err != nil {
 		t.Fatalf("stop: %v", err)
@@ -414,7 +474,7 @@ func TestStopItemsAndOverride(t *testing.T) {
 func TestLifecycleMethodsDoNotOverrideUserStoppedItem(t *testing.T) {
 	store := openTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
-	if err := store.StartStage(item, StageEncoding); err != nil {
+	if err := store.StartStage(item); err != nil {
 		t.Fatalf("start stage: %v", err)
 	}
 	if _, err := store.StopItems(item.ID); err != nil {
@@ -574,16 +634,25 @@ func TestHasDiscDependentItem(t *testing.T) {
 		t.Error("expected false with no items")
 	}
 
-	// Item in identification, in progress.
+	// Item with a running identification task.
 	item, _ := store.NewDisc("A", "fp1")
-	_ = store.StartStage(item, StageIdentification)
+	if err := store.EnsureTasks(item, []TaskSpec{{Type: StageIdentification}}); err != nil {
+		t.Fatalf("ensure tasks: %v", err)
+	}
+	tasks, err := store.TasksForItem(item.ID)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("tasks for item: %v (%d tasks)", err, len(tasks))
+	}
+	if err := store.StartTask(tasks[0]); err != nil {
+		t.Fatalf("start task: %v", err)
+	}
 
 	has, err = store.HasDiscDependentItem()
 	if err != nil {
 		t.Fatalf("has disc dependent: %v", err)
 	}
 	if !has {
-		t.Error("expected true with identification in progress")
+		t.Error("expected true with identification task running")
 	}
 }
 
@@ -619,13 +688,13 @@ func TestFormatAlsoProcessingHumanizesAndCaps(t *testing.T) {
 	item4, _ := store.NewDisc("The Matrix (1999)", "fp4")
 
 	_ = store.MoveToStage(item1, StageRipping)
-	_ = store.StartStage(item1, StageRipping)
+	_ = store.StartStage(item1)
 	_ = store.MoveToStage(item2, StageEncoding)
-	_ = store.StartStage(item2, StageEncoding)
+	_ = store.StartStage(item2)
 	_ = store.MoveToStage(item3, StageSubtitling)
-	_ = store.StartStage(item3, StageSubtitling)
+	_ = store.StartStage(item3)
 	_ = store.MoveToStage(item4, StageAnalysis)
-	_ = store.StartStage(item4, StageAnalysis)
+	_ = store.StartStage(item4)
 
 	got := FormatAlsoProcessing(store, item1.ID)
 	want := "\nAlso processing: Breaking Bad Season 01 (encoding), Fringe Season 01 (subtitles), +1 more"

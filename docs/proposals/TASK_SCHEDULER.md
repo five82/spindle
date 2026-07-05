@@ -721,6 +721,10 @@ dependent failure, per-asset outcomes and review state).
   serialization covered by a workflow test. PRODUCTION VALIDATION
   PENDING: queue one UHD and one BD item together and observe paired
   encodes; also the first daemon-driven worker encode on a real disc.
+  2026-07-05 update: the worker-encode half PASSED during the Phase A
+  validation of docs/proposals/FLYER_REDESIGN.md (Breaking Bad S1 D1:
+  three subprocess encodes, validation 7/7, clean audit). Remaining:
+  the UHD+BD paired-encode observation.
 - 2026-07-04: 4c executed and PASSED (details in the 4c sub-phase entry):
   probe scores bit-identical under WhisperX load at all 56 shared points,
   WhisperX VRAM peak 3.3 GiB recorded in the resource model, gpu capacity

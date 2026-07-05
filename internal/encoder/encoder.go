@@ -89,9 +89,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		if err != nil {
 			return err
 		}
-		// Ripping owns the shared progress columns while it runs; encoding
-		// telemetry still persists through the details-only path.
-		sess.SetProgressSilent(ripping)
 
 		if len(jobs) == 0 {
 			if !ripping {
@@ -117,7 +114,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			return err
 		}
 	}
-	sess.SetProgressSilent(false)
 
 	// No whole-envelope Save here: encoding runs concurrently with the
 	// analysis branch, and every envelope write in this stage already
@@ -240,17 +236,17 @@ func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encodedDir
 		)
 	}
 
-	item.ProgressMessage = job.PhaseMessage("Encoding " + filepath.Base(job.Input.Path))
-	logger.Info(item.ProgressMessage,
+	message := job.PhaseMessage("Encoding " + filepath.Base(job.Input.Path))
+	logger.Info(message,
 		"event_type", "encode_start",
 		"episode_key", job.Key,
 	)
-	_ = sess.Progress(job.Percent(0), item.ProgressMessage, stage.WithActiveEpisode(job.Key))
+	_ = sess.Progress(job.Percent(0), message, stage.WithActiveEpisode(job.Key))
 
 	// Reset encoding snapshot and force-persist.
 	snap := h.initialEncodingSnapshot(ctx, logger, job)
 	item.EncodingDetailsJSON = snap.Marshal()
-	if err := sess.Progress(item.ProgressPercent, item.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); err != nil {
+	if err := sess.Progress(sess.Task.ProgressPercent, sess.Task.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); err != nil {
 		logger.Warn("failed to persist initial snapshot",
 			"event_type", "progress_persist_error",
 			"error_hint", err.Error(),
@@ -315,7 +311,7 @@ func (h *Handler) handleEncodeFailure(logger *slog.Logger, sess *stage.Session, 
 		Message: encErr.Error(),
 	}
 	item.EncodingDetailsJSON = snap.Marshal()
-	if persistErr := sess.Progress(job.CompletionPercent(), item.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); persistErr != nil {
+	if persistErr := sess.Progress(job.CompletionPercent(), sess.Task.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); persistErr != nil {
 		logger.Warn("failed to persist error snapshot",
 			"event_type", "progress_persist_error",
 			"error_hint", persistErr.Error(),
@@ -336,7 +332,7 @@ func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, 
 	snap.AverageSpeed = float64(result.EncodingSpeed)
 
 	item.EncodingDetailsJSON = snap.Marshal()
-	if err := sess.Progress(job.CompletionPercent(), item.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); err != nil {
+	if err := sess.Progress(job.CompletionPercent(), sess.Task.ProgressMessage, stage.WithEncodingDetails(item.EncodingDetailsJSON)); err != nil {
 		logger.Warn("failed to persist final snapshot",
 			"event_type", "progress_persist_error",
 			"error_hint", err.Error(),
@@ -427,7 +423,7 @@ func (r *spindleReporter) updateSnapshot(mutate func(*encodingstate.Snapshot)) e
 	}
 	mutate(&snap)
 	r.item.EncodingDetailsJSON = snap.Marshal()
-	return r.sess.Progress(r.item.ProgressPercent, r.item.ProgressMessage, stage.WithEncodingDetails(r.item.EncodingDetailsJSON))
+	return r.sess.Progress(r.sess.Task.ProgressPercent, r.sess.Task.ProgressMessage, stage.WithEncodingDetails(r.item.EncodingDetailsJSON))
 }
 
 func (r *spindleReporter) EncodingProgress(p reel.ProgressSnapshot) {
@@ -445,7 +441,7 @@ func (r *spindleReporter) EncodingProgress(p reel.ProgressSnapshot) {
 		snap.ETASeconds = p.ETA.Seconds()
 		snap.CurrentFrame = int64(p.CurrentFrame)
 		snap.TotalFrames = int64(p.TotalFrames)
-		r.item.ProgressPercent = stage.OverallPercent(r.completedJobs, r.totalJobs, float64(p.Percent))
+		r.sess.Task.ProgressPercent = stage.OverallPercent(r.completedJobs, r.totalJobs, float64(p.Percent))
 	}); err != nil {
 		r.logger.Warn("failed to persist encoding progress",
 			"event_type", "progress_persist_error",

@@ -62,7 +62,7 @@ func TestConfigureStagesBuildsStageMap(t *testing.T) {
 	}
 }
 
-func TestCompletedItemKeepsTerminalProgress(t *testing.T) {
+func TestCompletedItemHasAllTasksDone(t *testing.T) {
 	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
 	if err != nil {
 		t.Fatalf("open queue: %v", err)
@@ -96,14 +96,17 @@ func TestCompletedItemKeepsTerminalProgress(t *testing.T) {
 			t.Fatalf("get item: %v", err)
 		}
 		if got.Stage == queue.StageCompleted {
-			if got.ProgressStage != string(queue.StageCompleted) {
-				t.Fatalf("progress stage = %q, want %q", got.ProgressStage, queue.StageCompleted)
+			tasks, err := store.TasksForItem(item.ID)
+			if err != nil {
+				t.Fatalf("tasks for item: %v", err)
 			}
-			if got.ProgressPercent != 100 {
-				t.Fatalf("progress percent = %v, want 100", got.ProgressPercent)
+			if len(tasks) == 0 {
+				t.Fatal("expected compiled task rows for completed item")
 			}
-			if got.ProgressMessage != "Completed" {
-				t.Fatalf("progress message = %q, want Completed", got.ProgressMessage)
+			for _, task := range tasks {
+				if task.State != queue.TaskDone {
+					t.Fatalf("task %s state = %q, want done", task.Type, task.State)
+				}
 			}
 			return
 		}
@@ -123,7 +126,7 @@ func TestUserStoppedItemIsNotRecordedAsStageSuccess(t *testing.T) {
 	if err := store.MoveToStage(item, queue.StageOrganizing); err != nil {
 		t.Fatalf("move item: %v", err)
 	}
-	if err := store.StartStage(item, queue.StageOrganizing); err != nil {
+	if err := store.StartStage(item); err != nil {
 		t.Fatalf("start stage: %v", err)
 	}
 
@@ -137,11 +140,11 @@ func TestUserStoppedItemIsNotRecordedAsStageSuccess(t *testing.T) {
 		},
 	}}})
 
-	manager.processItem(context.Background(), item, manager.pipeline.stages[0])
+	manager.processItem(context.Background(), nil, item, manager.pipeline.stages[0])
 
-	lastErr, lastItem, _ := statusTracker.Snapshot()
-	if lastErr != "" || lastItem != nil {
-		t.Fatalf("status tracker lastErr=%q lastItem=%v, want no stage outcome", lastErr, lastItem)
+	lastErr, _ := statusTracker.Snapshot()
+	if lastErr != "" {
+		t.Fatalf("status tracker lastErr=%q, want no stage outcome recorded", lastErr)
 	}
 	got, err := store.GetByID(item.ID)
 	if err != nil {
@@ -165,7 +168,7 @@ func TestFinalPersistenceFailureSignalsWorkflowStop(t *testing.T) {
 	manager := New(store, nil, nil, logger)
 	manager.ConfigureStages([]PipelineStage{{Stage: queue.StageOrganizing, Handler: stubHandler{}}})
 
-	manager.processItem(context.Background(), item, manager.pipeline.stages[0])
+	manager.processItem(context.Background(), nil, item, manager.pipeline.stages[0])
 
 	select {
 	case <-manager.persistenceFailures:
@@ -652,7 +655,13 @@ func TestSchedulerRunsParallelBranchesOfOneItemConcurrently(t *testing.T) {
 	t.Fatal("item did not complete")
 }
 
-func TestRefreshDisplayStageUpdatesLabelDuringOverlap(t *testing.T) {
+// TestFinalizeItemLagsStageLabelDuringOverlap verifies the replacement
+// invariant for the deleted refreshDisplayStage: finalizeItem leaves the
+// item's coarse stage label alone while a sibling worker (here, encoding) is
+// still live, even though the ripping task underneath it has already
+// finished. Observers must read task state, not the item stage, during
+// overlap.
+func TestFinalizeItemLagsStageLabelDuringOverlap(t *testing.T) {
 	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
 	if err != nil {
 		t.Fatalf("open queue: %v", err)
@@ -672,7 +681,7 @@ func TestRefreshDisplayStageUpdatesLabelDuringOverlap(t *testing.T) {
 	if err := store.EnsureTasks(item, manager.pipeline.specs); err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	if err := store.StartStage(item, queue.StageRipping); err != nil {
+	if err := store.StartStage(item); err != nil {
 		t.Fatalf("start stage: %v", err)
 	}
 
@@ -696,11 +705,21 @@ func TestRefreshDisplayStageUpdatesLabelDuringOverlap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.Stage != queue.StageEncoding {
-		t.Fatalf("stage label = %q, want encoding (refreshed during overlap)", got.Stage)
+	if got.Stage != queue.StageRipping {
+		t.Fatalf("stage label = %q, want ripping (label lags while sibling worker is live)", got.Stage)
 	}
 	if got.InProgress != 1 {
-		t.Fatalf("in_progress = %d, want 1 (label-only refresh must not clear it)", got.InProgress)
+		t.Fatalf("in_progress = %d, want 1 (must stay set while a worker is live)", got.InProgress)
+	}
+
+	tasks, err = store.TasksForItem(item.ID)
+	if err != nil {
+		t.Fatalf("tasks for item: %v", err)
+	}
+	for _, task := range tasks {
+		if task.Type == queue.StageRipping && task.State != queue.TaskDone {
+			t.Fatalf("ripping task state = %q, want done (task truth is ahead of the lagging label)", task.State)
+		}
 	}
 }
 

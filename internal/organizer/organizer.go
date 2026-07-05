@@ -280,7 +280,7 @@ func truncatePathSegmentBytes(segment string, maxBytes int) string {
 func throttledProgressUpdater(sess *stage.Session, minInterval time.Duration) func() {
 	var lastUpdate time.Time
 	return func() {
-		if sess == nil || sess.Item == nil {
+		if sess == nil || sess.Task == nil {
 			return
 		}
 		now := time.Now()
@@ -288,8 +288,8 @@ func throttledProgressUpdater(sess *stage.Session, minInterval time.Duration) fu
 			return
 		}
 		lastUpdate = now
-		_ = sess.Progress(sess.Item.ProgressPercent, sess.Item.ProgressMessage,
-			stage.WithProgressBytes(sess.Item.ProgressBytesCopied, sess.Item.ProgressTotalBytes))
+		_ = sess.Progress(sess.Task.ProgressPercent, sess.Task.ProgressMessage,
+			stage.WithProgressBytes(sess.Task.ProgressBytesCopied, sess.Task.ProgressTotalBytes))
 	}
 }
 
@@ -317,7 +317,6 @@ func moveOrCopyWithProgress(src, dst string, progress fileutil.ProgressFunc) err
 }
 
 func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess *stage.Session, meta *mediameta.Metadata, sourceStage, destDir string, keys []string, target string) (string, int, error) {
-	item := sess.Item
 	env := sess.Env
 	if len(keys) == 0 {
 		return "", 0, nil
@@ -396,9 +395,9 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 		copyStart := time.Now()
 		var lastCopyLog time.Time
 		if err := transfer(asset.Path, destPath, func(p fileutil.CopyProgress) {
-			item.ProgressBytesCopied = completedBytes + p.BytesCopied
-			item.ProgressTotalBytes = totalBytes
-			item.ProgressPercent = overallBytePercent(item.ProgressBytesCopied, totalBytes)
+			sess.Task.ProgressBytesCopied = completedBytes + p.BytesCopied
+			sess.Task.ProgressTotalBytes = totalBytes
+			sess.Task.ProgressPercent = overallBytePercent(sess.Task.ProgressBytesCopied, totalBytes)
 			pushProgress()
 
 			now := time.Now()
@@ -410,9 +409,9 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 					"organize_target", target,
 					"bytes_copied", p.BytesCopied,
 					"total_bytes", p.TotalBytes,
-					"overall_bytes_copied", item.ProgressBytesCopied,
+					"overall_bytes_copied", sess.Task.ProgressBytesCopied,
 					"overall_total_bytes", totalBytes,
-					"overall_percent", item.ProgressPercent,
+					"overall_percent", sess.Task.ProgressPercent,
 				)
 			}
 		}); err != nil {
@@ -439,7 +438,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 		if info, statErr := os.Stat(asset.Path); statErr == nil {
 			completedBytes += info.Size()
 		}
-		_ = sess.Progress(overallBytePercent(completedBytes, totalBytes), item.ProgressMessage, stage.WithProgressBytes(completedBytes, totalBytes))
+		_ = sess.Progress(overallBytePercent(completedBytes, totalBytes), sess.Task.ProgressMessage, stage.WithProgressBytes(completedBytes, totalBytes))
 	}
 	return lastPath, copied, nil
 }

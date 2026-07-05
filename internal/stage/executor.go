@@ -26,6 +26,9 @@ type WorkflowOptions struct {
 	// from task states, since with DAG templates a single completing stage
 	// no longer determines the next one.
 	NoAdvance bool
+	// Task is the scheduler task this execution runs; the session reports
+	// progress against its row. Nil (OneShot) means in-memory progress only.
+	Task *queue.Task
 }
 
 // ExecuteResult describes the queue-visible outcome of a stage invocation.
@@ -69,12 +72,12 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 		return res, fmt.Errorf("stage execution: nil queue store")
 	}
 	if opts.OneShot {
-		if err := opts.Store.StartStage(item, stageName); err != nil {
+		if err := opts.Store.StartStage(item); err != nil {
 			return res, fmt.Errorf("set in_progress: %w", err)
 		}
 	}
 
-	sess, err := NewSession(ctx, opts.Store, item)
+	sess, err := NewSession(ctx, opts.Store, item, opts.Task)
 	if err == nil {
 		sess.Logger = logger.With("item_id", item.ID)
 		err = opts.Handler.Run(ctx, sess)

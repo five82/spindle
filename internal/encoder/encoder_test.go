@@ -191,7 +191,7 @@ func TestRippingActiveStates(t *testing.T) {
 	if err := store.EnsureTasks(item, specs); err != nil {
 		t.Fatalf("ensure tasks: %v", err)
 	}
-	sess, err := stage.NewSession(context.Background(), store, item)
+	sess, err := stage.NewSession(context.Background(), store, item, nil)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}

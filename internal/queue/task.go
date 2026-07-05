@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"time"
 )
 
 // Task states. Readiness (all deps done) is derived at query time, never
@@ -29,6 +28,11 @@ CREATE TABLE IF NOT EXISTS tasks (
     attempts INTEGER NOT NULL DEFAULT 0,
     error_message TEXT NOT NULL DEFAULT '',
     deps TEXT NOT NULL DEFAULT '[]',
+    progress_percent REAL NOT NULL DEFAULT 0,
+    progress_message TEXT NOT NULL DEFAULT '',
+    progress_bytes_copied INTEGER NOT NULL DEFAULT 0,
+    progress_total_bytes INTEGER NOT NULL DEFAULT 0,
+    active_asset_key TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     started_at TIMESTAMP,
     finished_at TIMESTAMP
@@ -38,24 +42,32 @@ CREATE INDEX IF NOT EXISTS idx_tasks_item ON tasks(item_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_state ON tasks(state);
 `
 
-// Task is one schedulable unit of work for an item. At the current
-// (Phase 3) granularity there is exactly one task per pipeline stage and
-// deps form a linear chain, so an item's task rows are a pure projection of
+// Task is one schedulable unit of work for an item. Granularity is one task
+// per pipeline stage, so an item's task rows are a pure projection of
 // (template, item.Stage): they are compiled lazily and simply deleted and
 // recompiled whenever the item's position is mutated externally (retry,
 // move). Do not repair task rows in place -- delete and let the scheduler
-// recompile.
+// recompile. Recompiled rows start at zero progress, which is also the
+// progress reset on retry.
+//
+// Progress columns are written ONLY by the handler running the task
+// (through stage.Session); the scheduler owns state/attempts/timestamps.
 type Task struct {
-	ID         int64
-	ItemID     int64
-	Type       Stage
-	AssetKey   string
-	State      string
-	Attempts   int
-	ErrorMsg   string
-	Deps       []int64
-	StartedAt  time.Time
-	FinishedAt time.Time
+	ID                  int64
+	ItemID              int64
+	Type                Stage
+	AssetKey            string
+	State               string
+	Attempts            int
+	ErrorMsg            string
+	Deps                []int64
+	ProgressPercent     float64
+	ProgressMessage     string
+	ProgressBytesCopied int64
+	ProgressTotalBytes  int64
+	ActiveAssetKey      string
+	StartedAt           string
+	FinishedAt          string
 }
 
 // TaskSpec describes one task type for compilation. Specs must be listed in
@@ -141,7 +153,7 @@ func (s *Store) EnsureTasks(item *Item, specs []TaskSpec) error {
 // signal, and same-item dispatch policy belongs to the scheduler.
 func (s *Store) ReadyTasks() ([]*Task, error) {
 	rows, err := s.db.Query(`
-		SELECT t.id, t.item_id, t.type, t.asset_key, t.state, t.attempts, t.error_message, t.deps
+		SELECT `+taskColumnsPrefixed+`
 		FROM tasks t
 		JOIN queue_items i ON i.id = t.item_id
 		WHERE t.state = ?
@@ -207,13 +219,27 @@ func (s *Store) taskStates() (map[int64]string, error) {
 	return states, rows.Err()
 }
 
+// taskColumns is the column list scanTask expects, in order.
+const taskColumns = `id, item_id, type, asset_key, state, attempts, error_message, deps,
+    progress_percent, progress_message, progress_bytes_copied, progress_total_bytes,
+    active_asset_key, started_at, finished_at`
+
+const taskColumnsPrefixed = `t.id, t.item_id, t.type, t.asset_key, t.state, t.attempts, t.error_message, t.deps,
+    t.progress_percent, t.progress_message, t.progress_bytes_copied, t.progress_total_bytes,
+    t.active_asset_key, t.started_at, t.finished_at`
+
 func scanTask(rows *sql.Rows) (*Task, error) {
 	t := &Task{}
 	var typ, deps string
-	if err := rows.Scan(&t.ID, &t.ItemID, &typ, &t.AssetKey, &t.State, &t.Attempts, &t.ErrorMsg, &deps); err != nil {
+	var startedAt, finishedAt sql.NullString
+	if err := rows.Scan(&t.ID, &t.ItemID, &typ, &t.AssetKey, &t.State, &t.Attempts, &t.ErrorMsg, &deps,
+		&t.ProgressPercent, &t.ProgressMessage, &t.ProgressBytesCopied, &t.ProgressTotalBytes,
+		&t.ActiveAssetKey, &startedAt, &finishedAt); err != nil {
 		return nil, fmt.Errorf("scan task: %w", err)
 	}
 	t.Type = Stage(typ)
+	t.StartedAt = startedAt.String
+	t.FinishedAt = finishedAt.String
 	if err := json.Unmarshal([]byte(deps), &t.Deps); err != nil {
 		return nil, fmt.Errorf("parse task deps: %w", err)
 	}
@@ -277,10 +303,31 @@ func (s *Store) DeleteTasks(itemIDs ...int64) error {
 	})
 }
 
+// UpdateTaskProgress persists the task's progress columns. The row is the
+// single progress slot for the running handler; a write against a deleted
+// row (a zombie worker after retry recompiled the tasks) affects nothing.
+func (s *Store) UpdateTaskProgress(t *Task) error {
+	return retryOnBusy(func() error {
+		_, err := s.db.Exec(`
+			UPDATE tasks SET
+				progress_percent = ?, progress_message = ?,
+				progress_bytes_copied = ?, progress_total_bytes = ?,
+				active_asset_key = ?
+			WHERE id = ?`,
+			t.ProgressPercent, t.ProgressMessage,
+			t.ProgressBytesCopied, t.ProgressTotalBytes,
+			t.ActiveAssetKey, t.ID)
+		if err != nil {
+			return fmt.Errorf("update task %d progress: %w", t.ID, err)
+		}
+		return nil
+	})
+}
+
 // TasksForItem returns the item's tasks in insertion (pipeline) order.
 func (s *Store) TasksForItem(itemID int64) ([]*Task, error) {
 	rows, err := s.db.Query(`
-		SELECT id, item_id, type, asset_key, state, attempts, error_message, deps
+		SELECT `+taskColumns+`
 		FROM tasks WHERE item_id = ? ORDER BY id`, itemID)
 	if err != nil {
 		return nil, fmt.Errorf("query item tasks: %w", err)

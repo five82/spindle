@@ -102,7 +102,6 @@ type WorkflowStatus struct {
 	Running    bool
 	QueueStats map[queue.Stage]int
 	LastError  string
-	LastItem   *Item
 }
 
 // DependencyStatus reports an external dependency health check.
@@ -155,11 +154,6 @@ func (a *HTTPAccess) Status() (*Status, error) {
 		stats[queue.Stage(k)] = v
 	}
 
-	var lastItem *Item
-	if resp.Workflow.LastItem != nil {
-		lastItem = resp.Workflow.LastItem
-	}
-
 	deps := make([]DependencyStatus, 0, len(resp.Dependencies))
 	for _, dep := range resp.Dependencies {
 		deps = append(deps, DependencyStatus(dep))
@@ -174,7 +168,6 @@ func (a *HTTPAccess) Status() (*Status, error) {
 			Running:    resp.Workflow.Running,
 			QueueStats: stats,
 			LastError:  resp.Workflow.LastError,
-			LastItem:   lastItem,
 		},
 		Dependencies: deps,
 	}, nil

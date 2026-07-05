@@ -10,9 +10,32 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/five82/spindle/internal/daemonctl"
+	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/queueops"
 )
+
+// printTaskLines renders per-task status lines: running tasks show percent
+// and message (bytes and active asset key in verbose mode), failed tasks
+// show their error. Progress now lives per task (the scheduler's tasks
+// table), so what used to be a single item-level "Progress: X% message"
+// line is one line per running task.
+func printTaskLines(indent string, tasks []httpapi.TaskResponse, verbose bool) {
+	for _, t := range tasks {
+		switch t.State {
+		case queue.TaskRunning:
+			fmt.Printf("%s%s %s (%.0f%%)\n", indent, labelStyle(fmt.Sprintf("Progress (%s):", t.Type)), t.Progress.Message, t.Progress.Percent)
+			if verbose && t.Progress.TotalBytes > 0 {
+				fmt.Printf("%s  %s %s / %s\n", indent, labelStyle("Bytes:"), formatBytes(t.Progress.BytesCopied), formatBytes(t.Progress.TotalBytes))
+			}
+			if verbose && t.ActiveAssetKey != "" {
+				fmt.Printf("%s  %s %s\n", indent, labelStyle("Asset:"), t.ActiveAssetKey)
+			}
+		case queue.TaskFailed:
+			fmt.Printf("%s%s %s: %s\n", indent, failStyle("Failed:"), t.Type, t.Error)
+		}
+	}
+}
 
 func newQueueCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -86,9 +109,7 @@ func newQueueListCmd() *cobra.Command {
 						item.UpdatedAt,
 						item.DiscFingerprint,
 					)
-					if item.Progress.Message != "" {
-						fmt.Printf("       %s %s (%.0f%%)\n", labelStyle("Progress:"), item.Progress.Message, item.Progress.Percent)
-					}
+					printTaskLines("       ", item.Tasks, flagVerbose)
 					if item.ErrorMessage != "" {
 						fmt.Printf("       %s %s\n", failStyle("Error:"), item.ErrorMessage)
 					}
@@ -158,19 +179,9 @@ func newQueueShowCmd() *cobra.Command {
 			fmt.Printf("%s %s\n", labelStyle("Created:    "), item.CreatedAt)
 			fmt.Printf("%s %s\n", labelStyle("Updated:    "), item.UpdatedAt)
 			fmt.Printf("%s %s\n", labelStyle("Fingerprint:"), item.DiscFingerprint)
-			if item.Progress.Message != "" {
-				fmt.Printf("%s %s (%.0f%%)\n", labelStyle("Progress:   "), item.Progress.Message, item.Progress.Percent)
-			}
-			if flagVerbose && item.Progress.TotalBytes > 0 {
-				fmt.Printf("%s %s / %s\n", labelStyle("Bytes:      "),
-					formatBytes(item.Progress.BytesCopied),
-					formatBytes(item.Progress.TotalBytes))
-			}
-			if flagVerbose && item.ActiveEpisodeKey != "" {
-				fmt.Printf("%s %s\n", labelStyle("Episode:    "), item.ActiveEpisodeKey)
-			}
+			printTaskLines("", item.Tasks, flagVerbose)
 			if item.NeedsReview {
-				fmt.Printf("%s %s\n", labelStyle("Review:     "), item.ReviewReason)
+				fmt.Printf("%s %s\n", labelStyle("Review:     "), strings.Join(item.ReviewReasons, "; "))
 			}
 			if item.ErrorMessage != "" {
 				fmt.Printf("%s %s\n", failStyle("Error:      "), item.ErrorMessage)

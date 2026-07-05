@@ -1150,7 +1150,7 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 		anomalies = append(anomalies, Anomaly{
 			Severity: "warning",
 			Category: "item_state",
-			Message:  fmt.Sprintf("item needs review: %s", r.Item.ReviewReason),
+			Message:  fmt.Sprintf("item needs review: %s", strings.Join(r.Item.ReviewReasons, "; ")),
 		})
 	}
 

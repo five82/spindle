@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -58,10 +59,11 @@ type Manager struct {
 	persistenceFailures    chan error
 	persistenceFailureOnce sync.Once
 
-	wake       chan struct{}
-	budgetMu   sync.Mutex
-	budgetCap  map[string]int
-	budgetUsed map[string]int
+	wake          chan struct{}
+	budgetMu      sync.Mutex
+	budgetCap     map[string]int
+	budgetUsed    map[string]int
+	budgetHolders map[string][]httpapi.ResourceHolder
 
 	// running tracks the cancel function of each item's active workers,
 	// keyed by item then task. It guards against dispatching work for an
@@ -120,6 +122,7 @@ func (m *Manager) ConfigureStages(stages []PipelineStage) {
 	// gated by the GPU coexistence validation (see the plan doc).
 	m.budgetCap = make(map[string]int)
 	m.budgetUsed = make(map[string]int)
+	m.budgetHolders = make(map[string][]httpapi.ResourceHolder)
 	for _, s := range stages {
 		for res := range s.Claims {
 			m.budgetCap[res] = 1
@@ -127,8 +130,9 @@ func (m *Manager) ConfigureStages(stages []PipelineStage) {
 	}
 }
 
-// reserve attempts to claim the stage's resources. It is all-or-nothing.
-func (m *Manager) reserve(claims map[string]int) bool {
+// reserve attempts to claim the stage's resources for a task. It is
+// all-or-nothing; holders are recorded for the status API.
+func (m *Manager) reserve(claims map[string]int, holder httpapi.ResourceHolder) bool {
 	m.budgetMu.Lock()
 	defer m.budgetMu.Unlock()
 	for res, n := range claims {
@@ -138,17 +142,67 @@ func (m *Manager) reserve(claims map[string]int) bool {
 	}
 	for res, n := range claims {
 		m.budgetUsed[res] += n
+		m.budgetHolders[res] = append(m.budgetHolders[res], holder)
 	}
 	return true
 }
 
-// release returns a stage's claimed resources to the budget.
-func (m *Manager) release(claims map[string]int) {
+// release returns a task's claimed resources to the budget.
+func (m *Manager) release(claims map[string]int, holder httpapi.ResourceHolder) {
 	m.budgetMu.Lock()
 	defer m.budgetMu.Unlock()
 	for res, n := range claims {
 		m.budgetUsed[res] -= n
+		holders := m.budgetHolders[res]
+		for i, h := range holders {
+			if h == holder {
+				m.budgetHolders[res] = append(holders[:i], holders[i+1:]...)
+				break
+			}
+		}
 	}
+}
+
+// PipelineInfo describes the registered template for the status API, with
+// linear-default dependencies already resolved, so clients render the DAG
+// data-driven instead of hardcoding it.
+func (m *Manager) PipelineInfo() []httpapi.PipelineStageInfo {
+	p := m.pipeline
+	info := make([]httpapi.PipelineStageInfo, len(p.stages))
+	for i, s := range p.stages {
+		deps := make([]string, 0, len(p.specs[i].DependsOn))
+		for _, dep := range p.specs[i].DependsOn {
+			deps = append(deps, string(dep))
+		}
+		claims := make([]string, 0, len(s.Claims))
+		for res := range s.Claims {
+			claims = append(claims, res)
+		}
+		sort.Strings(claims)
+		info[i] = httpapi.PipelineStageInfo{
+			Stage:     string(s.Stage),
+			DependsOn: deps,
+			Claims:    claims,
+		}
+	}
+	return info
+}
+
+// SchedulerSnapshot reports resource occupancy for the status API.
+func (m *Manager) SchedulerSnapshot() map[string]httpapi.ResourceStatus {
+	m.budgetMu.Lock()
+	defer m.budgetMu.Unlock()
+	snap := make(map[string]httpapi.ResourceStatus, len(m.budgetCap))
+	for res, capacity := range m.budgetCap {
+		holders := make([]httpapi.ResourceHolder, len(m.budgetHolders[res]))
+		copy(holders, m.budgetHolders[res])
+		snap[res] = httpapi.ResourceStatus{
+			Capacity: capacity,
+			Used:     m.budgetUsed[res],
+			Holders:  holders,
+		}
+	}
+	return snap
 }
 
 // signalWake nudges the scheduler loop without blocking.
@@ -371,16 +425,16 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		if ps.ClaimsFunc != nil {
 			claims = ps.ClaimsFunc(item)
 		}
-		if !m.reserve(claims) {
+		holder := httpapi.ResourceHolder{ItemID: item.ID, Task: string(task.Type)}
+		if !m.reserve(claims, holder) {
 			continue
 		}
 
-		// Mark in_progress and reset progress for the first worker of an
-		// overlap window; a sibling branch already holding the item skips
-		// this so it cannot stomp the progress owner's columns.
+		// Mark in_progress for the first worker of an overlap window;
+		// sibling branches already hold the flag.
 		if item.InProgress == 0 {
-			if err := m.store.StartStage(item, ps.Stage); err != nil {
-				m.release(claims)
+			if err := m.store.StartStage(item); err != nil {
+				m.release(claims, holder)
 				p.logger.Error("persist in_progress failed",
 					"event_type", "progress_persist_failed",
 					"error_hint", "failed to persist in_progress flag",
@@ -391,7 +445,7 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 			}
 		}
 		if err := m.store.StartTask(task); err != nil {
-			m.release(claims)
+			m.release(claims, holder)
 			_ = m.store.ClearInProgress(item)
 			p.logger.Error("persist task start failed",
 				"event_type", "task_persist_failed",
@@ -406,7 +460,7 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		if !m.trackWorker(item.ID, task.ID, cancelTask) {
 			// Lost a race with another dispatch pass; revert.
 			cancelTask()
-			m.release(claims)
+			m.release(claims, holder)
 			_ = m.store.FinishTask(task, queue.TaskPending, "")
 			_ = m.store.ClearInProgress(item)
 			continue
@@ -417,15 +471,15 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		// fields (Refresh, progress) concurrently.
 		itemCopy := *item
 		workers.Add(1)
-		go func(task *queue.Task, item *queue.Item, ps PipelineStage, claims map[string]int, taskCtx context.Context, cancelTask context.CancelFunc) {
+		go func(task *queue.Task, item *queue.Item, ps PipelineStage, claims map[string]int, holder httpapi.ResourceHolder, taskCtx context.Context, cancelTask context.CancelFunc) {
 			defer workers.Done()
 			defer m.signalWake()
-			defer m.release(claims)
+			defer m.release(claims, holder)
 			defer cancelTask()
 			m.runTask(taskCtx, task, item, ps)
 			m.untrackWorker(item.ID, task.ID)
 			m.finalizeItem(item.ID)
-		}(task, &itemCopy, ps, claims, taskCtx, cancelTask)
+		}(task, &itemCopy, ps, claims, holder, taskCtx, cancelTask)
 	}
 }
 
@@ -433,7 +487,7 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 // state. Cancellation, user stops, and persistence failures revert the task
 // to pending: the item-level filters decide whether it ever runs again.
 func (m *Manager) runTask(ctx context.Context, task *queue.Task, item *queue.Item, ps PipelineStage) {
-	outcome := m.processItem(ctx, item, ps)
+	outcome := m.processItem(ctx, task, item, ps)
 
 	var state, errMsg string
 	switch outcome {
@@ -467,7 +521,7 @@ const (
 // processItem executes a single stage handler for an item and reports the
 // outcome. Item-level persistence (advance, failure, review, notifications)
 // happens here; task-level bookkeeping is the scheduler caller's job.
-func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps PipelineStage) itemOutcome {
+func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue.Item, ps PipelineStage) itemOutcome {
 	p := m.pipeline
 
 	itemLogger := p.logger.With("item_id", item.ID)
@@ -486,6 +540,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 		Logger:    p.logger,
 		Stage:     ps.Stage,
 		NoAdvance: true,
+		Task:      task,
 	})
 	if res.Canceled {
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -512,7 +567,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 		var persistenceErr *stage.PersistenceError
 		if errors.As(err, &persistenceErr) {
 			if m.statusTracker != nil {
-				m.statusTracker.RecordFailure(item, "queue persistence failed: "+persistenceErr.Err.Error())
+				m.statusTracker.RecordFailure("queue persistence failed: " + persistenceErr.Err.Error())
 			}
 			eventType := "completion_persist_failed"
 			hint := "failed to persist after stage completion"
@@ -545,7 +600,7 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 	)
 
 	if m.statusTracker != nil {
-		m.statusTracker.RecordSuccess(item)
+		m.statusTracker.RecordSuccess()
 	}
 
 	m.maybeCompleteQueueCycle(ctx, itemLogger)
@@ -559,12 +614,10 @@ func (m *Manager) processItem(ctx context.Context, item *queue.Item, ps Pipeline
 // rather than in the executor.
 func (m *Manager) finalizeItem(itemID int64) {
 	if m.hasLiveWorker(itemID) {
-		// Sibling workers still running: keep the display label honest
-		// without touching in_progress or completion (a long encode after
-		// ripping finishes should show encoding, and dropping the ripping
-		// label also releases the disc-detection gate once the drive is
-		// genuinely free).
-		m.refreshDisplayStage(itemID)
+		// Sibling workers still running: the item's coarse stage stays put
+		// until the overlap window drains. Observers read task rows, and
+		// the disc-detection gate reads running drive tasks, so nothing
+		// depends on refreshing the label mid-flight.
 		return
 	}
 	p := m.pipeline
@@ -620,50 +673,6 @@ func (m *Manager) finalizeItem(itemID int64) {
 	)
 }
 
-// refreshDisplayStage updates the item's stage label to the earliest
-// not-done task while workers are still running. Label-only: in_progress
-// and terminal transitions belong to the idle finalize path.
-func (m *Manager) refreshDisplayStage(itemID int64) {
-	p := m.pipeline
-	item, err := m.store.GetByID(itemID)
-	if err != nil || item == nil {
-		return
-	}
-	if item.Stage == queue.StageFailed || item.Stage == queue.StageCompleted || item.UserStopped() {
-		return
-	}
-	tasks, err := m.store.TasksForItem(itemID)
-	if err != nil || len(tasks) == 0 {
-		return
-	}
-	derived := item.Stage
-	for _, t := range tasks {
-		if t.State != queue.TaskDone {
-			derived = t.Type
-			break
-		}
-	}
-	if derived == item.Stage {
-		return
-	}
-	if err := m.store.SetStageLabel(item, derived); err != nil {
-		p.logger.Warn("stage label refresh failed",
-			"event_type", "progress_persist_failed",
-			"error_hint", "failed to update display stage label",
-			"item_id", itemID,
-			"error", err,
-		)
-		return
-	}
-	p.logger.Info("item stage label refreshed",
-		"decision_type", logs.DecisionStageExecution,
-		"decision_result", "label_updated",
-		"decision_reason", fmt.Sprintf("earliest incomplete task is %s; sibling workers still running", derived),
-		"item_id", itemID,
-		"stage", derived,
-	)
-}
-
 // recordStageFailure records status/notification state after stage execution
 // has persisted the failed queue state.
 func (m *Manager) recordStageFailure(ctx context.Context, item *queue.Item, err error, ps PipelineStage, duration time.Duration) {
@@ -679,7 +688,7 @@ func (m *Manager) recordStageFailure(ctx context.Context, item *queue.Item, err 
 	)
 
 	if m.statusTracker != nil {
-		m.statusTracker.RecordFailure(item, err.Error())
+		m.statusTracker.RecordFailure(err.Error())
 	}
 
 	title := fmt.Sprintf("Failed: %s during %s", item.DisplayTitle(), queue.HumanStage(ps.Stage))

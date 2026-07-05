@@ -267,7 +267,6 @@ func (h *Handler) ripTitles(ctx context.Context, sess *stage.Session, rippedDir 
 }
 
 func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir string, title ripspec.Title, index, total int, episodeKey string) error {
-	item := sess.Item
 	logger := sess.Logger
 
 	logger.Info(fmt.Sprintf("Phase %d/%d - Ripping title %d", index+1, total, title.ID),
@@ -289,7 +288,7 @@ func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir s
 		time.Duration(h.cfg.MakeMKV.RipTimeout)*time.Second,
 		h.cfg.MakeMKV.MinTitleLength,
 		func(p makemkv.RipProgress) {
-			message := item.ProgressMessage
+			message := sess.Task.ProgressMessage
 			if strings.TrimSpace(p.Message) != "" {
 				message = p.Message
 			}

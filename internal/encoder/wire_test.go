@@ -48,7 +48,7 @@ func TestWireRoundTrip(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 	item, _ := store.NewDisc("A", "fp1")
-	sess, err := stage.NewSession(context.Background(), store, item)
+	sess, err := stage.NewSession(context.Background(), store, item, nil)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}

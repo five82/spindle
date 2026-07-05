@@ -29,7 +29,7 @@ spindle audit-gather <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
 ```
 
 This produces an agent-facing JSON report. The schema may evolve with this skill; treat it as diagnostic input rather than a stable public API. It contains:
-- **`item`**: Queue item summary (`stage`, progress, review flags, paths, timestamps)
+- **`item`**: Queue item summary (`stage`, `tasks[]` per-task state/progress, review flags, paths, timestamps). `item.stage` is the scheduler's coarse position and lags running tasks during rip/encode overlap -- read `item.tasks[]` for what is actually happening (`type`, `state`, `attempts`, `error`, `progress_percent`, `progress_message`, `active_asset_key`)
 - **`stage_gate`**: Pre-computed phase applicability (which analyses apply, resolved media type, media hint, disc source)
 - **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), item-specific INFO events/progress (`logs.events` with `event_type` and extras), and stage timing events (`ts`, `event_type`, `stage`, `duration_seconds`)
 - **`rip_cache`**: Cache metadata (disc title, cached_at, title_count, total_bytes). Serialized `rip_spec_data` and `metadata_json` blobs are omitted (already in parsed `envelope`).
@@ -314,8 +314,12 @@ audio refinement, commentary disposition, duration validation, sidecar
 placement, and subtitle muxing. Consequences for audits:
 - Log timelines legitimately interleave encoding events with analysis and
   subtitling events for the SAME item — not disorder.
-- The analysis branch is progress-silent (encoding owns the item progress
-  columns during overlap); its visibility is logs and task states.
+- Progress is per task (task-graph Phase A, 2026-07-05): each running stage
+  writes its own `tasks[]` row, so `item.tasks[]` shows independent live
+  progress for both branches during overlap (for example a `ripping` task
+  and an `encoding` task both `state=running` with their own
+  `progress_percent`/`progress_message`) instead of one arbitrated item-level
+  progress field.
 - `audio_analysis` no longer exists as a stage name; commentary detection
   decisions appear under stage `analysis`, remuxes/muxing under `apply`.
 - Commentary detection is PER-EPISODE (`envelope.attributes.audio_analysis
@@ -471,7 +475,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 ## Audit Report for Item #<id>
 
 **Title:** <item.disc_title>
-**Stage:** <item.stage> | **Progress:** <item.progress_stage>/<item.progress_percent> | **NeedsReview:** <item.needs_review> | **ReviewReason:** <item.review_reason>
+**Stage:** <item.stage> | **Running Tasks:** <comma-separated `type:progress_percent%` for each item.tasks[] with state=running> | **NeedsReview:** <item.needs_review> | **ReviewReasons:** <item.review_reasons joined with "; ">
 **Media Type:** <stage_gate.media_type> | **Source:** <stage_gate.disc_source>
 **Debug Logs:** <logs.is_debug>
 

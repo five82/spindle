@@ -25,12 +25,6 @@ CREATE TABLE IF NOT EXISTS queue_items (
     metadata_json TEXT,
     needs_review INTEGER NOT NULL DEFAULT 0,
     review_reason TEXT,
-    progress_stage TEXT,
-    progress_percent REAL DEFAULT 0.0,
-    progress_message TEXT,
-    active_episode_key TEXT,
-    progress_bytes_copied INTEGER DEFAULT 0,
-    progress_total_bytes INTEGER DEFAULT 0,
     encoding_details_json TEXT,
     user_stopped INTEGER NOT NULL DEFAULT 0
 );
@@ -126,9 +120,7 @@ func isBusyError(err error) bool {
 // allColumns is the column list for SELECT queries.
 const allColumns = `id, disc_title, stage, in_progress, failed_at_stage, error_message,
     created_at, updated_at, rip_spec_data, disc_fingerprint, metadata_json,
-    needs_review, review_reason, progress_stage, progress_percent, progress_message,
-    active_episode_key, progress_bytes_copied, progress_total_bytes, encoding_details_json,
-    user_stopped`
+    needs_review, review_reason, encoding_details_json, user_stopped`
 
 // scanItem scans a row into an Item.
 func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
@@ -136,8 +128,7 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 	var discTitle, failedAtStage, errorMessage sql.NullString
 	var createdAt, updatedAt sql.NullString
 	var ripSpecData, discFingerprint, metadataJSON sql.NullString
-	var reviewReason, progressStage, progressMessage sql.NullString
-	var activeEpisodeKey, encodingDetailsJSON sql.NullString
+	var reviewReason, encodingDetailsJSON sql.NullString
 	var stage string
 
 	err := row.Scan(
@@ -146,8 +137,6 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 		&createdAt, &updatedAt,
 		&ripSpecData, &discFingerprint, &metadataJSON,
 		&it.NeedsReview, &reviewReason,
-		&progressStage, &it.ProgressPercent, &progressMessage,
-		&activeEpisodeKey, &it.ProgressBytesCopied, &it.ProgressTotalBytes,
 		&encodingDetailsJSON, &it.userStopped,
 	)
 	if err != nil {
@@ -164,9 +153,6 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 	it.DiscFingerprint = discFingerprint.String
 	it.MetadataJSON = metadataJSON.String
 	it.ReviewReason = reviewReason.String
-	it.ProgressStage = progressStage.String
-	it.ProgressMessage = progressMessage.String
-	it.ActiveEpisodeKey = activeEpisodeKey.String
 	it.EncodingDetailsJSON = encodingDetailsJSON.String
 
 	return &it, nil
@@ -250,28 +236,18 @@ func (s *Store) FindByFingerprint(fp string) (*Item, error) {
 	return it, nil
 }
 
-// StartStage marks an item as actively processing a stage and resets stale
-// progress from the previous stage.
-func (s *Store) StartStage(item *Item, stage Stage) error {
+// StartStage marks an item as actively processing. Progress lives on the
+// task rows, so there is nothing to reset here.
+func (s *Store) StartStage(item *Item) error {
 	item.InProgress = 1
-	item.ProgressStage = string(stage)
-	item.ProgressPercent = 0
-	item.ProgressMessage = ""
-	item.ActiveEpisodeKey = ""
-	item.ProgressBytesCopied = 0
-	item.ProgressTotalBytes = 0
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`
-			UPDATE queue_items SET
-				in_progress = 1,
-				progress_stage = ?, progress_percent = 0, progress_message = '',
-				active_episode_key = '', progress_bytes_copied = 0, progress_total_bytes = 0,
-				updated_at = CURRENT_TIMESTAMP
+			UPDATE queue_items SET in_progress = 1, updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?`,
-			string(stage), item.ID,
+			item.ID,
 		)
 		if err != nil {
-			return fmt.Errorf("start %s item %d: %w", stage, item.ID, err)
+			return fmt.Errorf("start item %d: %w", item.ID, err)
 		}
 		return nil
 	})
@@ -325,23 +301,13 @@ func (s *Store) CompleteStage(item *Item, nextStage Stage, advance bool) error {
 	}
 
 	targetStage := nextStage
-	progressStage := ""
-	progressPercent := 0.0
-	progressMessage := ""
-	if targetStage == StageCompleted {
-		progressStage = string(StageCompleted)
-		progressPercent = 100
-		progressMessage = "Completed"
-	}
-
 	return retryOnBusy(func() error {
 		res, err := s.db.Exec(`
 			UPDATE queue_items SET
-				stage = ?, in_progress = 0, active_episode_key = '',
-				progress_stage = ?, progress_percent = ?, progress_message = ?,
+				stage = ?, in_progress = 0,
 				updated_at = CURRENT_TIMESTAMP
 			WHERE id = ? AND user_stopped = 0`,
-			string(targetStage), progressStage, progressPercent, progressMessage, item.ID,
+			string(targetStage), item.ID,
 		)
 		if err != nil {
 			return fmt.Errorf("complete stage item %d: %w", item.ID, err)
@@ -355,10 +321,6 @@ func (s *Store) CompleteStage(item *Item, nextStage Stage, advance bool) error {
 		}
 		item.Stage = targetStage
 		item.InProgress = 0
-		item.ActiveEpisodeKey = ""
-		item.ProgressStage = progressStage
-		item.ProgressPercent = progressPercent
-		item.ProgressMessage = progressMessage
 		item.userStopped = 0
 		return nil
 	})
@@ -420,12 +382,12 @@ func (s *Store) UpdateWorkState(item *Item) error {
 				updated_at = CURRENT_TIMESTAMP,
 				rip_spec_data = ?, disc_fingerprint = ?, metadata_json = ?,
 				needs_review = ?, review_reason = ?,
-				active_episode_key = ?, encoding_details_json = ?
+				encoding_details_json = ?
 			WHERE id = ? AND user_stopped = 0`,
 			item.DiscTitle,
 			item.RipSpecData, item.DiscFingerprint, item.MetadataJSON,
 			item.NeedsReview, item.ReviewReason,
-			item.ActiveEpisodeKey, item.EncodingDetailsJSON,
+			item.EncodingDetailsJSON,
 			item.ID,
 		)
 		if err != nil {
@@ -442,65 +404,8 @@ func (s *Store) UpdateWorkState(item *Item) error {
 	})
 }
 
-// UpdateProgress updates only progress-related columns.
-func (s *Store) UpdateProgress(item *Item) error {
-	return retryOnBusy(func() error {
-		res, err := s.db.Exec(`
-			UPDATE queue_items SET
-				progress_stage = ?, progress_percent = ?, progress_message = ?,
-				progress_bytes_copied = ?, progress_total_bytes = ?,
-				encoding_details_json = ?, active_episode_key = ?,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ? AND user_stopped = 0`,
-			item.ProgressStage, item.ProgressPercent, item.ProgressMessage,
-			item.ProgressBytesCopied, item.ProgressTotalBytes,
-			item.EncodingDetailsJSON, item.ActiveEpisodeKey,
-			item.ID,
-		)
-		if err != nil {
-			return fmt.Errorf("update progress item %d: %w", item.ID, err)
-		}
-		rows, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("update progress item %d rows affected: %w", item.ID, err)
-		}
-		if rows == 0 {
-			return s.refreshItem(item)
-		}
-		return nil
-	})
-}
-
-// SetStageLabel updates ONLY the display stage label, leaving in_progress
-// and progress columns untouched. The scheduler uses it to keep the label
-// honest while sibling workers are still running (e.g. flipping ripping ->
-// encoding mid-overlap); full stage completion stays with CompleteStage.
-func (s *Store) SetStageLabel(item *Item, stage Stage) error {
-	return retryOnBusy(func() error {
-		res, err := s.db.Exec(`
-			UPDATE queue_items SET
-				stage = ?, updated_at = CURRENT_TIMESTAMP
-			WHERE id = ? AND user_stopped = 0 AND stage NOT IN (?, ?)`,
-			string(stage), item.ID, string(StageFailed), string(StageCompleted),
-		)
-		if err != nil {
-			return fmt.Errorf("set stage label item %d: %w", item.ID, err)
-		}
-		rows, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("set stage label item %d rows affected: %w", item.ID, err)
-		}
-		if rows == 0 {
-			return s.refreshItem(item)
-		}
-		item.Stage = stage
-		return nil
-	})
-}
-
-// UpdateEncodingDetails persists ONLY the encoding telemetry column,
-// leaving the shared progress columns untouched. Used while another stage
-// owns the progress display (rip-to-encode streaming overlap).
+// UpdateEncodingDetails persists ONLY the encoding telemetry column. The
+// encoding task is the column's single writer.
 func (s *Store) UpdateEncodingDetails(item *Item) error {
 	return retryOnBusy(func() error {
 		res, err := s.db.Exec(`
@@ -646,13 +551,15 @@ func (s *Store) ActiveFingerprints() (map[string]struct{}, error) {
 	return result, rows.Err()
 }
 
-// HasDiscDependentItem returns true if any item is in identification or ripping
-// stage with in_progress=1.
+// HasDiscDependentItem returns true if a drive-claiming task (identification
+// or ripping) is currently running. Task state is exact here where the item
+// stage label is not: during rip-to-encode overlap the item may still be
+// labeled ripping long after the drive is free.
 func (s *Store) HasDiscDependentItem() (bool, error) {
 	var count int
 	err := s.db.QueryRow(
-		"SELECT COUNT(*) FROM queue_items WHERE in_progress = 1 AND stage IN (?, ?)",
-		string(StageIdentification), string(StageRipping),
+		"SELECT COUNT(*) FROM tasks WHERE state = ? AND type IN (?, ?)",
+		TaskRunning, string(StageIdentification), string(StageRipping),
 	).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("has disc dependent item: %w", err)
@@ -660,9 +567,19 @@ func (s *Store) HasDiscDependentItem() (bool, error) {
 	return count > 0, nil
 }
 
-// Stats returns the count of items grouped by stage.
+// Stats returns the count of items grouped by displayed stage: the terminal
+// stage for failed/completed items, else the earliest running task's type,
+// else the item's coarse stage. The item stage column intentionally lags
+// running tasks during overlap windows (it only advances when the item goes
+// idle), so counting it raw would report a long-finished stage.
 func (s *Store) Stats() (map[Stage]int, error) {
-	rows, err := s.db.Query("SELECT stage, COUNT(*) FROM queue_items GROUP BY stage")
+	rows, err := s.db.Query(`
+		SELECT COALESCE(
+			CASE WHEN i.stage IN (?, ?) THEN i.stage END,
+			(SELECT t.type FROM tasks t WHERE t.item_id = i.id AND t.state = ? ORDER BY t.id LIMIT 1),
+			i.stage) AS display_stage, COUNT(*)
+		FROM queue_items i GROUP BY display_stage`,
+		string(StageFailed), string(StageCompleted), TaskRunning)
 	if err != nil {
 		return nil, fmt.Errorf("stats: %w", err)
 	}

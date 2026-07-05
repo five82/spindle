@@ -10,6 +10,9 @@ import (
 )
 
 // Item represents a single queue item with all database columns.
+// Progress lives on task rows (Task.Progress*), not here: each running
+// handler reports against its own task, so concurrent branches of one item
+// never share a progress slot.
 type Item struct {
 	ID                  int64
 	DiscTitle           string
@@ -24,12 +27,6 @@ type Item struct {
 	MetadataJSON        string
 	NeedsReview         int
 	ReviewReason        string
-	ProgressStage       string
-	ProgressPercent     float64
-	ProgressMessage     string
-	ActiveEpisodeKey    string
-	ProgressBytesCopied int64
-	ProgressTotalBytes  int64
 	EncodingDetailsJSON string
 	userStopped         int
 }
