@@ -280,6 +280,25 @@ pre-encode analysis window shows more than a substage string. Would flow
 through the existing Phase 5 wire as a new event and land in
 `encodingstate.Snapshot.Substage` detail.
 
+- 2026-07-05: PHASE B IMPLEMENTED (flyer repo, uncommitted pending operator
+  validation). types.go regenerated against the Phase A shapes (rip-spec
+  derivation shim and dead fields deleted); ONE stage catalog
+  (internal/ui/stages.go) + task board (internal/ui/taskboard.go) replace
+  all ten hardcoded stage maps, the pipeline checklist, the separate
+  activity bar, and the active-episode path-matching heuristics; header
+  gained the resource strip with the drive-free indicator; queue rows show
+  per-task glyph strips; per-task durations/ETAs come from server-side
+  task timestamps (client-side stageFirstSeen tracking deleted).
+  Spindle addition: ItemResponse.source (primary title name/duration) so
+  movie detail no longer needs the raw envelope. Flyer check-ci.sh fully
+  green. LOC: ~900 added / 1826 deleted (net about -900 with tests).
+  Verified against the live daemon with the completed validation item:
+  header strip (Drive: FREE), task strip, task board with real durations,
+  episodes summary, problems view all render. LIVE-OVERLAP RENDERING
+  UNVERIFIED until the next disc runs. Known Phase C work: "Focus: No
+  active episode" noise on terminal items; detail sections still keyed to
+  one context rather than per running task; episode-by-task grid.
+
 ## Hazards
 
 - **Task rows are deleted and recompiled** on retry/move. `/api/queue` may
