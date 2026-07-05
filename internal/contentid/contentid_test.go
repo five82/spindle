@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -511,7 +512,7 @@ func TestApplyMatchesSetsEpisodeFieldsWithoutRenamingKeys(t *testing.T) {
 		Assets:   ripspec.Assets{Ripped: []ripspec.Asset{{EpisodeKey: "s03_001", Path: "/rip/1.mkv", Status: ripspec.AssetStatusCompleted}, {EpisodeKey: "s03_002", Path: "/rip/2.mkv", Status: ripspec.AssetStatusCompleted}}},
 	}
 	season := &tmdb.Season{Episodes: []tmdb.Episode{{EpisodeNumber: 3, Name: "Three"}, {EpisodeNumber: 4, Name: "Four"}}}
-	h.applyMatches(logger, env, 3, season, []matchResult{{EpisodeKey: "s03_001", TargetEpisode: 3, Score: 0.91}, {EpisodeKey: "s03_002", TargetEpisode: 4, Score: 0.88}}, nil)
+	h.applyMatches(logger, env, 3, season, []matchResult{{EpisodeKey: "s03_001", TargetEpisode: 3, Score: 0.91}, {EpisodeKey: "s03_002", TargetEpisode: 4, Score: 0.88}}, nil, nil)
 	if env.Episodes[0].Key != "s03_001" || env.Episodes[1].Key != "s03_002" {
 		t.Fatalf("episode keys must stay permanent placeholders: %+v", env.Episodes)
 	}
@@ -540,7 +541,7 @@ func TestApplyMatchesInfersOpeningDoubleEpisode(t *testing.T) {
 		}},
 	}
 	season := &tmdb.Season{Episodes: []tmdb.Episode{{EpisodeNumber: 1, Name: "Pilot Part 1"}, {EpisodeNumber: 2, Name: "Pilot Part 2"}, {EpisodeNumber: 3, Name: "Third"}, {EpisodeNumber: 4, Name: "Fourth"}}}
-	h.applyMatches(logger, env, 1, season, []matchResult{{EpisodeKey: "s01_001", TargetEpisode: 1, Score: 0.91}, {EpisodeKey: "s01_002", TargetEpisode: 2, Score: 0.88}, {EpisodeKey: "s01_003", TargetEpisode: 3, Score: 0.89}}, nil)
+	h.applyMatches(logger, env, 1, season, []matchResult{{EpisodeKey: "s01_001", TargetEpisode: 1, Score: 0.91}, {EpisodeKey: "s01_002", TargetEpisode: 2, Score: 0.88}, {EpisodeKey: "s01_003", TargetEpisode: 3, Score: 0.89}}, nil, nil)
 	if env.Episodes[0].Key != "s01_001" || env.Episodes[0].Episode != 1 || env.Episodes[0].EpisodeEnd != 2 {
 		t.Fatalf("opening episode not converted to range: %+v", env.Episodes[0])
 	}
@@ -549,6 +550,132 @@ func TestApplyMatchesInfersOpeningDoubleEpisode(t *testing.T) {
 	}
 	if _, ok := env.Assets.FindAsset(ripspec.AssetKindRipped, "s01_001"); !ok {
 		t.Fatal("ripped asset for s01_001 not found")
+	}
+}
+
+func TestApplyMatchesProbableExtra(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := &Handler{policy: DefaultPolicy()}
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{DiscNumber: 1},
+		Episodes: []ripspec.Episode{
+			{Key: "s01_001", Season: 1},
+			{Key: "s01_002", Season: 1},
+		},
+	}
+	season := &tmdb.Season{Episodes: []tmdb.Episode{{EpisodeNumber: 1, Name: "One"}}}
+	noClaimRips := map[string]struct{}{"s01_002": {}}
+	h.applyMatches(logger, env, 1, season, []matchResult{{EpisodeKey: "s01_001", TargetEpisode: 1, Score: 0.91, Confidence: 0.91}}, nil, noClaimRips)
+
+	if env.Episodes[0].NeedsReview {
+		t.Fatalf("matched episode s01_001 should not need review: %+v", env.Episodes[0])
+	}
+	if !env.Episodes[1].NeedsReview {
+		t.Fatalf("unmatched no-claim episode s01_002 should need review: %+v", env.Episodes[1])
+	}
+	if !strings.Contains(env.Episodes[1].ReviewReason, "probable extra") {
+		t.Fatalf("ReviewReason = %q, want it to mention probable extra", env.Episodes[1].ReviewReason)
+	}
+}
+
+func TestStructuralReviewReasons(t *testing.T) {
+	tests := []struct {
+		name        string
+		episodes    []ripspec.Episode
+		discNumber  int
+		wantReasons []string
+	}{
+		{
+			name: "disc 1 matched subset starts above episode 1",
+			episodes: []ripspec.Episode{
+				{Episode: 2},
+				{Episode: 3},
+				{Episode: 4},
+			},
+			discNumber:  1,
+			wantReasons: []string{"disc 1 matched subset starts at episode 2"},
+		},
+		{
+			name: "disc 1 starts at episode 1",
+			episodes: []ripspec.Episode{
+				{Episode: 1},
+				{Episode: 2},
+				{Episode: 3},
+			},
+			discNumber:  1,
+			wantReasons: []string{},
+		},
+		{
+			name: "disc 2 does not require starting at episode 1",
+			episodes: []ripspec.Episode{
+				{Episode: 5},
+				{Episode: 6},
+			},
+			discNumber:  2,
+			wantReasons: []string{},
+		},
+		{
+			name: "episode range expansion covers the gap",
+			episodes: []ripspec.Episode{
+				{Episode: 1, EpisodeEnd: 2},
+				{Episode: 3},
+			},
+			discNumber:  1,
+			wantReasons: []string{},
+		},
+		{
+			name: "fragmented subset with multiple gaps",
+			episodes: []ripspec.Episode{
+				{Episode: 1},
+				{Episode: 3},
+				{Episode: 5},
+				{Episode: 7},
+			},
+			discNumber:  1,
+			wantReasons: []string{"accepted episode subset is fragmented"},
+		},
+		{
+			name: "all episodes unassigned",
+			episodes: []ripspec.Episode{
+				{Episode: 0},
+				{Episode: 0},
+			},
+			discNumber:  1,
+			wantReasons: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := structuralReviewReasons(tt.episodes, tt.discNumber)
+			if !reflect.DeepEqual(got, tt.wantReasons) {
+				t.Fatalf("structuralReviewReasons() = %v, want %v", got, tt.wantReasons)
+			}
+		})
+	}
+}
+
+func TestResolveEpisodeClaimsRipsWithoutClaims(t *testing.T) {
+	policy := DefaultPolicy()
+	rips := []ripFingerprint{
+		{EpisodeKey: "s01_001", TitleID: 1, Vector: textutil.NewFingerprint("justice edo rubicun wesley shore leave unique seven"), RawVector: textutil.NewFingerprint("justice edo rubicun wesley shore leave unique seven")},
+		{EpisodeKey: "s01_002", TitleID: 2, Vector: textutil.NewFingerprint("zzyzx quibbling blorf plonk gribble wonkabar snerf"), RawVector: textutil.NewFingerprint("zzyzx quibbling blorf plonk gribble wonkabar snerf")},
+	}
+	refs := []referenceFingerprint{
+		{EpisodeNumber: 7, Vector: textutil.NewFingerprint("justice edo rubicun wesley shore leave unique seven"), RawVector: textutil.NewFingerprint("justice edo rubicun wesley shore leave unique seven")},
+		{EpisodeNumber: 8, Vector: textutil.NewFingerprint("battle ferengi bok stargazer unique eight"), RawVector: textutil.NewFingerprint("battle ferengi bok stargazer unique eight")},
+	}
+	resolution := resolveEpisodeClaims(rips, refs, policy)
+
+	noClaim := make(map[string]struct{}, len(resolution.RipsWithoutClaims))
+	for _, key := range resolution.RipsWithoutClaims {
+		noClaim[strings.ToLower(key)] = struct{}{}
+	}
+	if _, ok := noClaim["s01_002"]; !ok {
+		t.Fatalf("expected s01_002 (disjoint vocabulary) in RipsWithoutClaims, got %v", resolution.RipsWithoutClaims)
+	}
+	if _, ok := noClaim["s01_001"]; ok {
+		t.Fatalf("did not expect s01_001 (matching rip) in RipsWithoutClaims, got %v", resolution.RipsWithoutClaims)
 	}
 }
 

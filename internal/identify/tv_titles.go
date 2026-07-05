@@ -8,13 +8,35 @@ import (
 	"strings"
 
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/tmdb"
 )
 
+// TV title selection keeps every title that could plausibly be an episode and
+// leaves final arbitration to content identification. Titles are dropped only
+// on structural evidence (length gate, duplicates, gross outliers, proven
+// play-all composites) or on a strong mismatch against TMDB expected episode
+// runtimes. Intra-disc runtime statistics order titles; they never drop them
+// on their own.
 const (
-	tvClusterMinGapSec        = 8 * 60
-	tvClusterRelativeGapRatio = 0.20
-	tvDoubleMinRatio          = 1.80
-	tvDoubleMaxRatio          = 2.40
+	// tvGrossOutlierRatio drops titles shorter than this fraction of the
+	// duration-weighted median candidate: menus, trailers, credit reels.
+	tvGrossOutlierRatio = 0.4
+	// tvDoubleMinRatio/tvDoubleMaxRatio describe a double-length episode
+	// relative to the median single episode. Used only to order a probable
+	// opening double first (contentid's opening-double inference reads
+	// episode order), never to exclude.
+	tvDoubleMinRatio = 1.80
+	tvDoubleMaxRatio = 2.40
+	// tvRuntimeToleranceRatio/tvRuntimeToleranceSec bound how far a title may
+	// deviate from the nearest TMDB expected episode runtime (or adjacent
+	// double-episode sum) before an expectation-backed disc drops it. The
+	// ratio is generous because TMDB runtimes are frequently rounded or
+	// slightly wrong for older shows.
+	tvRuntimeToleranceRatio = 0.25
+	tvRuntimeToleranceSec   = 300
+	// tvSameLengthRatio treats two long titles as alternates of the same
+	// program when their durations differ by less than this fraction.
+	tvSameLengthRatio = 0.10
 )
 
 type tvTitleDecision struct {
@@ -22,39 +44,28 @@ type tvTitleDecision struct {
 	Selected    bool
 	Reason      string
 	DuplicateOf int
-	ClusterID   int
 }
 
 type tvTitleSelectionResult struct {
-	Decisions          []tvTitleDecision
-	SelectedTitles     []ripspec.Title
-	DuplicateCount     int
-	AmbiguousLongCount int
-	ExtraCount         int
-	Ambiguous          bool
-	AmbiguityReasons   []string
+	Decisions        []tvTitleDecision
+	SelectedTitles   []ripspec.Title
+	DuplicateCount   int
+	ExtraCount       int
+	Ambiguous        bool
+	AmbiguityReasons []string
 }
 
 type tvTitleCandidate struct {
 	decisionIndex int
 	title         ripspec.Title
-	clusterID     int
 }
 
-type tvTitleCluster struct {
-	id         int
-	candidates []tvTitleCandidate
-	median     int
-	total      int
-	minTitleID int
-}
-
-type combinedDoubleCandidate struct {
+type compositeTitle struct {
 	candidate  tvTitleCandidate
 	components []tvTitleCandidate
 }
 
-func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSelectionResult {
+func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int, expected []tmdb.Episode) tvTitleSelectionResult {
 	result := tvTitleSelectionResult{Decisions: make([]tvTitleDecision, 0, len(titles))}
 	candidates := make([]tvTitleCandidate, 0, len(titles))
 	seen := make(map[string]int)
@@ -86,112 +97,16 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 		return result
 	}
 
-	sorted := append([]tvTitleCandidate(nil), candidates...)
-	slices.SortFunc(sorted, func(a, b tvTitleCandidate) int {
-		if a.title.Duration != b.title.Duration {
-			return a.title.Duration - b.title.Duration
-		}
-		return a.title.ID - b.title.ID
-	})
+	alive := excludeGrossOutliers(candidates, &result)
+	if len(alive) == 1 && len(candidates) > 1 {
+		result.Ambiguous = true
+		result.AmbiguityReasons = append(result.AmbiguityReasons, "single_episode_length_candidate")
+	}
+	alive = resolveComposites(alive, &result)
+	alive = excludeRuntimeMismatches(alive, expected, &result)
+	alive = capToExpectedCount(alive, expected, &result)
 
-	clusters := buildTVTitleClusters(sorted)
-	primary := choosePrimaryTVTitleCluster(clusters)
-	selectedByIndex := make(map[int]string, len(primary.candidates))
-	selectedReasonByTitleID := make(map[int]string, len(primary.candidates))
-	for _, candidate := range primary.candidates {
-		selectTVCandidate(selectedByIndex, selectedReasonByTitleID, candidate, "primary_runtime_cluster")
-	}
-
-	qualifyingDoubleCandidates := make([]tvTitleCandidate, 0)
-	if len(primary.candidates) >= 2 && primary.median > 0 {
-		minDur := int(float64(primary.median) * tvDoubleMinRatio)
-		maxDur := int(float64(primary.median) * tvDoubleMaxRatio)
-		for _, cluster := range clusters {
-			if cluster.id == primary.id {
-				continue
-			}
-			for _, candidate := range cluster.candidates {
-				dur := candidate.title.Duration
-				if dur >= minDur && dur <= maxDur {
-					qualifyingDoubleCandidates = append(qualifyingDoubleCandidates, candidate)
-				}
-			}
-		}
-	}
-	// Sort double candidates by rip-safety preference: fewer playlist
-	// segments first (single-segment precomposed playlists avoid
-	// seamless-branch key failures that silently corrupt composite
-	// rips), then by playlist number (lower mpls is typically the
-	// primary authoring), then by title ID and duration.
-	slices.SortFunc(qualifyingDoubleCandidates, compareDoubleCandidatesByRipSafety)
-	result.AmbiguousLongCount = len(qualifyingDoubleCandidates)
-	excludedReasonByIndex := make(map[int]string)
-	combinedFamilyResolved := false
-	combinedDoubles, independentDoubles := classifyDoubleEpisodeCandidates(primary.candidates, qualifyingDoubleCandidates)
-	for _, combined := range combinedDoubles {
-		excludedReasonByIndex[combined.candidate.decisionIndex] = "combined_play_all_extra"
-	}
-	switch {
-	case len(independentDoubles) > 0:
-		// Keep proven independent double-length content, but do not also keep
-		// hidden play-all playlists that merely concatenate already-selected
-		// primary episodes.
-		for _, candidate := range independentDoubles {
-			selectTVCandidate(selectedByIndex, selectedReasonByTitleID, candidate, "probable_double_episode_candidate")
-		}
-		combinedFamilyResolved = len(combinedDoubles) > 0
-	case len(combinedDoubles) == 1 && tvComponentsOverlap(combinedDoubles[0].components):
-		// A single overlapping segment-union title with no independent double
-		// candidate is probably a split double episode where the combined title is
-		// the safer artifact. Collapse the split components to the combined title.
-		combined := combinedDoubles[0]
-		selectTVCandidate(selectedByIndex, selectedReasonByTitleID, combined.candidate, "combined_double_episode_candidate")
-		delete(excludedReasonByIndex, combined.candidate.decisionIndex)
-		for _, component := range combined.components {
-			delete(selectedByIndex, component.decisionIndex)
-			delete(selectedReasonByTitleID, component.title.ID)
-		}
-		combinedFamilyResolved = true
-	case len(combinedDoubles) > 0:
-		// Multiple double-length titles that are explainable by primary episode
-		// segments are alternate play-all playlists, not additional episodes.
-		combinedFamilyResolved = true
-	case len(qualifyingDoubleCandidates) > 0:
-		selectTVCandidate(selectedByIndex, selectedReasonByTitleID, qualifyingDoubleCandidates[0], "probable_double_episode_candidate")
-	}
-
-	for _, cluster := range clusters {
-		for _, candidate := range cluster.candidates {
-			decision := &result.Decisions[candidate.decisionIndex]
-			decision.ClusterID = cluster.id
-			if reason, ok := selectedByIndex[candidate.decisionIndex]; ok {
-				decision.Selected = true
-				decision.Reason = reason
-				continue
-			}
-			if reason, ok := excludedReasonByIndex[candidate.decisionIndex]; ok {
-				decision.Reason = reason
-				result.ExtraCount++
-				continue
-			}
-			decision.Reason = "runtime_cluster_extra"
-			result.ExtraCount++
-		}
-	}
-
-	for i := range result.Decisions {
-		if result.Decisions[i].Selected {
-			result.SelectedTitles = append(result.SelectedTitles, result.Decisions[i].Title)
-		}
-	}
-	slices.SortFunc(result.SelectedTitles, func(a, b ripspec.Title) int {
-		if priorityA, priorityB := selectedTitleOrderPriority(selectedReasonByTitleID[a.ID]), selectedTitleOrderPriority(selectedReasonByTitleID[b.ID]); priorityA != priorityB {
-			return priorityA - priorityB
-		}
-		return a.ID - b.ID
-	})
-
-	if len(result.SelectedTitles) == 0 {
+	if len(alive) == 0 {
 		fallback := longestCandidate(candidates)
 		decision := &result.Decisions[fallback.decisionIndex]
 		decision.Selected = true
@@ -199,240 +114,378 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int) tvTitleSe
 		result.SelectedTitles = append(result.SelectedTitles, decision.Title)
 		result.ExtraCount = max(0, result.ExtraCount-1)
 		result.Ambiguous = true
-		result.AmbiguityReasons = append(result.AmbiguityReasons, "no_cluster_selection")
+		result.AmbiguityReasons = append(result.AmbiguityReasons, "no_episode_candidates")
+		return result
 	}
 
-	if len(primary.candidates) == 1 {
-		result.Ambiguous = true
-		result.AmbiguityReasons = append(result.AmbiguityReasons, "primary_cluster_single_title")
+	for _, candidate := range alive {
+		decision := &result.Decisions[candidate.decisionIndex]
+		if !decision.Selected {
+			decision.Selected = true
+			decision.Reason = "episode_candidate"
+		}
 	}
-	if hasNearEqualPrimaryCluster(clusters, primary) {
-		result.Ambiguous = true
-		result.AmbiguityReasons = append(result.AmbiguityReasons, "competing_runtime_clusters")
-	}
-	if len(candidates) > 0 && result.ExtraCount*2 > len(candidates) && !combinedFamilyResolved {
-		result.Ambiguous = true
-		result.AmbiguityReasons = append(result.AmbiguityReasons, "extras_dominate_candidates")
-	}
-	// Only flag ambiguity when we could not resolve the double-length
-	// relationship. A segment-union match is resolved either by collapsing
-	// split components into the union title or by keeping independent
-	// double-length content alongside the primary single episodes.
-	if len(qualifyingDoubleCandidates) >= 2 && !combinedFamilyResolved {
-		result.Ambiguous = true
-		result.AmbiguityReasons = append(result.AmbiguityReasons, "multiple_double_episode_candidates")
-	}
-
+	result.SelectedTitles = orderSelectedTitles(alive, result.Decisions)
 	return result
 }
 
-func selectTVCandidate(selectedByIndex map[int]string, selectedReasonByTitleID map[int]string, candidate tvTitleCandidate, reason string) {
-	selectedByIndex[candidate.decisionIndex] = reason
-	selectedReasonByTitleID[candidate.title.ID] = reason
-}
-
-func classifyDoubleEpisodeCandidates(primary, doubles []tvTitleCandidate) ([]combinedDoubleCandidate, []tvTitleCandidate) {
-	combined := make([]combinedDoubleCandidate, 0)
-	independent := make([]tvTitleCandidate, 0)
-	for _, candidate := range doubles {
-		components, ok := combinedDoubleEpisodeComponents(primary, candidate)
-		if !ok {
-			independent = append(independent, candidate)
+// excludeGrossOutliers drops candidates shorter than tvGrossOutlierRatio of
+// the duration-weighted median. The duration weighting keeps the bar anchored
+// to episode-length content even when short extras outnumber episodes.
+func excludeGrossOutliers(candidates []tvTitleCandidate, result *tvTitleSelectionResult) []tvTitleCandidate {
+	bar := int(float64(durationWeightedMedian(candidates)) * tvGrossOutlierRatio)
+	alive := make([]tvTitleCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.title.Duration < bar {
+			result.Decisions[candidate.decisionIndex].Reason = "gross_runtime_outlier"
+			result.ExtraCount++
 			continue
 		}
-		combined = append(combined, combinedDoubleCandidate{candidate: candidate, components: components})
+		alive = append(alive, candidate)
 	}
-	return combined, independent
+	return alive
 }
 
-func tvComponentsOverlap(components []tvTitleCandidate) bool {
-	seen := make(map[int]struct{})
-	for _, component := range components {
-		segments, ok := parseSegmentSet(component.title.SegmentMap)
-		if !ok {
-			return false
+// durationWeightedMedian returns the duration of the candidate at the
+// midpoint of cumulative duration mass.
+func durationWeightedMedian(candidates []tvTitleCandidate) int {
+	durations := make([]int, 0, len(candidates))
+	total := 0
+	for _, candidate := range candidates {
+		durations = append(durations, candidate.title.Duration)
+		total += candidate.title.Duration
+	}
+	slices.Sort(durations)
+	cumulative := 0
+	for _, duration := range durations {
+		cumulative += duration
+		if cumulative*2 >= total {
+			return duration
 		}
-		for segment := range segments {
-			if _, exists := seen[segment]; exists {
-				return true
+	}
+	return durations[len(durations)-1]
+}
+
+// resolveComposites detects titles whose segment maps are explainable as a
+// combination of other candidates. The normal disposition is play-all
+// exclusion: the composite is a hidden concatenation of real episodes. The
+// exception is a split double episode (e.g. a seamless-branch pilot): when
+// the disc has exactly one composite, its components share segments, and no
+// independent same-length alternate exists, the combined title is the real
+// program and the halves are partial cuts.
+func resolveComposites(alive []tvTitleCandidate, result *tvTitleSelectionResult) []tvTitleCandidate {
+	composites := detectComposites(alive)
+	if len(composites) == 0 {
+		return alive
+	}
+
+	if len(composites) == 1 {
+		composite := composites[0]
+		if tvComponentsOverlap(composite.components) && !hasSameLengthAlternate(alive, composite) {
+			decision := &result.Decisions[composite.candidate.decisionIndex]
+			decision.Selected = true
+			decision.Reason = "combined_double_episode_candidate"
+			dropped := make(map[int]struct{}, len(composite.components))
+			for _, component := range composite.components {
+				result.Decisions[component.decisionIndex].Reason = "combined_title_component"
+				result.ExtraCount++
+				dropped[component.decisionIndex] = struct{}{}
 			}
-			seen[segment] = struct{}{}
+			kept := make([]tvTitleCandidate, 0, len(alive)-len(dropped))
+			for _, candidate := range alive {
+				if _, ok := dropped[candidate.decisionIndex]; ok {
+					continue
+				}
+				kept = append(kept, candidate)
+			}
+			return kept
 		}
 	}
-	return false
+
+	excluded := make(map[int]struct{}, len(composites))
+	for _, composite := range composites {
+		result.Decisions[composite.candidate.decisionIndex].Reason = "combined_play_all_extra"
+		result.ExtraCount++
+		excluded[composite.candidate.decisionIndex] = struct{}{}
+	}
+	kept := make([]tvTitleCandidate, 0, len(alive)-len(excluded))
+	for _, candidate := range alive {
+		if _, ok := excluded[candidate.decisionIndex]; ok {
+			continue
+		}
+		kept = append(kept, candidate)
+	}
+	return kept
 }
 
-func selectedTitleOrderPriority(reason string) int {
-	switch reason {
-	case "combined_double_episode_candidate", "probable_double_episode_candidate":
-		return 0
-	case "primary_runtime_cluster":
-		return 1
-	default:
-		return 2
-	}
-}
-
-// compareDoubleCandidatesByRipSafety orders qualifying double-episode
-// candidates so that deterministic choices prefer simpler playlists first:
-//  1. Fewer playlist segments.
-//  2. Lower playlist number.
-//  3. Lower title ID.
-//  4. Shorter duration (stable final tiebreak).
-func compareDoubleCandidatesByRipSafety(a, b tvTitleCandidate) int {
-	aSegs := segmentCount(a.title)
-	bSegs := segmentCount(b.title)
-	if aSegs != bSegs {
-		return aSegs - bSegs
-	}
-	if cmp := strings.Compare(a.title.Playlist, b.title.Playlist); cmp != 0 {
-		return cmp
-	}
-	if a.title.ID != b.title.ID {
+// detectComposites scans candidates longest-first for titles explainable as a
+// combination of other non-composite candidates.
+func detectComposites(alive []tvTitleCandidate) []compositeTitle {
+	sorted := append([]tvTitleCandidate(nil), alive...)
+	slices.SortFunc(sorted, func(a, b tvTitleCandidate) int {
+		if a.title.Duration != b.title.Duration {
+			return b.title.Duration - a.title.Duration
+		}
 		return a.title.ID - b.title.ID
+	})
+
+	compositeIndexes := make(map[int]struct{})
+	composites := make([]compositeTitle, 0)
+	for _, candidate := range sorted {
+		others := make([]tvTitleCandidate, 0, len(sorted)-1)
+		for _, other := range sorted {
+			if other.decisionIndex == candidate.decisionIndex {
+				continue
+			}
+			if _, ok := compositeIndexes[other.decisionIndex]; ok {
+				continue
+			}
+			others = append(others, other)
+		}
+		components, ok := compositeComponents(others, candidate)
+		if !ok {
+			continue
+		}
+		composites = append(composites, compositeTitle{candidate: candidate, components: components})
+		compositeIndexes[candidate.decisionIndex] = struct{}{}
 	}
-	return a.title.Duration - b.title.Duration
+	return composites
 }
 
-// segmentCount returns the best available segment count for a title,
-// falling back to parsing SegmentMap when SegmentCount is unset.
-func segmentCount(title ripspec.Title) int {
-	if title.SegmentCount > 0 {
-		return title.SegmentCount
-	}
-	segs, ok := parseSegmentSet(title.SegmentMap)
+// compositeComponents proves candidate is a combination of other candidates:
+// either a pair whose segment union (or symmetric difference, for playlists
+// that share a common segment) matches, or three-plus candidates whose
+// segment sets partition the composite exactly. Durations must agree with the
+// combination in both forms.
+func compositeComponents(others []tvTitleCandidate, candidate tvTitleCandidate) ([]tvTitleCandidate, bool) {
+	combinedSegs, ok := parseSegmentSet(candidate.title.SegmentMap)
 	if !ok {
-		return 0
-	}
-	return len(segs)
-}
-
-func buildTVTitleClusters(sorted []tvTitleCandidate) []tvTitleCluster {
-	if len(sorted) == 0 {
-		return nil
-	}
-	clusters := []tvTitleCluster{{id: 1, minTitleID: sorted[0].title.ID}}
-	clusters[0].candidates = append(clusters[0].candidates, sorted[0])
-	for i := 1; i < len(sorted); i++ {
-		prev := sorted[i-1].title.Duration
-		cur := sorted[i].title.Duration
-		threshold := max(tvClusterMinGapSec, int(float64(prev)*tvClusterRelativeGapRatio))
-		clusterIdx := len(clusters) - 1
-		if cur-prev > threshold {
-			clusters = append(clusters, tvTitleCluster{id: len(clusters) + 1, minTitleID: sorted[i].title.ID})
-			clusterIdx++
-		}
-		clusters[clusterIdx].candidates = append(clusters[clusterIdx].candidates, sorted[i])
-		if sorted[i].title.ID < clusters[clusterIdx].minTitleID {
-			clusters[clusterIdx].minTitleID = sorted[i].title.ID
-		}
-	}
-	for i := range clusters {
-		durations := make([]int, 0, len(clusters[i].candidates))
-		for j := range clusters[i].candidates {
-			clusters[i].candidates[j].clusterID = clusters[i].id
-			durations = append(durations, clusters[i].candidates[j].title.Duration)
-			clusters[i].total += clusters[i].candidates[j].title.Duration
-		}
-		slices.Sort(durations)
-		clusters[i].median = durations[len(durations)/2]
-	}
-	return clusters
-}
-
-func choosePrimaryTVTitleCluster(clusters []tvTitleCluster) tvTitleCluster {
-	if paired, ok := choosePrimaryTVTitleClusterForDoublePattern(clusters); ok {
-		return paired
+		return nil, false
 	}
 
-	maxTotal := 0
-	for _, cluster := range clusters {
-		if cluster.total > maxTotal {
-			maxTotal = cluster.total
-		}
-	}
-
-	eligible := make([]tvTitleCluster, 0, len(clusters))
-	for _, cluster := range clusters {
-		if cluster.total*2 >= maxTotal {
-			eligible = append(eligible, cluster)
-		}
-	}
-	if len(eligible) == 0 {
-		eligible = clusters
-	}
-
-	best := eligible[0]
-	for _, cluster := range eligible[1:] {
-		if betterPrimaryTVCluster(cluster, best) {
-			best = cluster
-		}
-	}
-	return best
-}
-
-func choosePrimaryTVTitleClusterForDoublePattern(clusters []tvTitleCluster) (tvTitleCluster, bool) {
-	var best tvTitleCluster
-	found := false
-	for _, shorter := range clusters {
-		if len(shorter.candidates) < 2 || shorter.median <= 0 {
-			continue
-		}
-		minDur := int(float64(shorter.median) * tvDoubleMinRatio)
-		maxDur := int(float64(shorter.median) * tvDoubleMaxRatio)
-		for _, longer := range clusters {
-			if longer.id == shorter.id {
+	for i := 0; i < len(others); i++ {
+		for j := i + 1; j < len(others); j++ {
+			a, b := others[i], others[j]
+			segA, okA := parseSegmentSet(a.title.SegmentMap)
+			segB, okB := parseSegmentSet(b.title.SegmentMap)
+			if !okA || !okB {
 				continue
 			}
-			if longer.median < minDur || longer.median > maxDur {
+			if maps.Equal(segA, combinedSegs) || maps.Equal(segB, combinedSegs) {
 				continue
 			}
-			if !found || betterDoublePatternPrimary(shorter, best) {
-				best = shorter
-				found = true
+			if !segmentsLookCombined(segA, segB, combinedSegs) {
+				continue
 			}
+			if !durationsLookCombined(a.title.Duration+b.title.Duration, candidate.title.Duration) {
+				continue
+			}
+			return []tvTitleCandidate{a, b}, true
 		}
 	}
-	return best, found
-}
 
-func betterDoublePatternPrimary(candidate, best tvTitleCluster) bool {
-	if len(candidate.candidates) != len(best.candidates) {
-		return len(candidate.candidates) > len(best.candidates)
-	}
-	if candidate.median != best.median {
-		return candidate.median < best.median
-	}
-	if candidate.total != best.total {
-		return candidate.total > best.total
-	}
-	return candidate.minTitleID < best.minTitleID
-}
-
-func betterPrimaryTVCluster(candidate, best tvTitleCluster) bool {
-	if len(candidate.candidates) != len(best.candidates) {
-		return len(candidate.candidates) > len(best.candidates)
-	}
-	if candidate.median != best.median {
-		return candidate.median > best.median
-	}
-	if candidate.total != best.total {
-		return candidate.total > best.total
-	}
-	return candidate.minTitleID < best.minTitleID
-}
-
-func hasNearEqualPrimaryCluster(clusters []tvTitleCluster, primary tvTitleCluster) bool {
-	for _, cluster := range clusters {
-		if cluster.id == primary.id || len(cluster.candidates) != len(primary.candidates) {
+	subset := make([]tvTitleCandidate, 0, len(others))
+	union := make(map[int]struct{}, len(combinedSegs))
+	durationSum := 0
+	for _, other := range others {
+		segs, ok := parseSegmentSet(other.title.SegmentMap)
+		if !ok || maps.Equal(segs, combinedSegs) {
 			continue
 		}
-		threshold := max(tvClusterMinGapSec, int(float64(min(cluster.median, primary.median))*tvClusterRelativeGapRatio))
-		if abs(cluster.median-primary.median) <= threshold {
+		contained := true
+		for seg := range segs {
+			if _, ok := combinedSegs[seg]; !ok {
+				contained = false
+				break
+			}
+		}
+		if !contained {
+			continue
+		}
+		subset = append(subset, other)
+		maps.Copy(union, segs)
+		durationSum += other.title.Duration
+	}
+	if len(subset) >= 3 && maps.Equal(union, combinedSegs) && durationsLookCombined(durationSum, candidate.title.Duration) {
+		return subset, true
+	}
+	return nil, false
+}
+
+func hasSameLengthAlternate(alive []tvTitleCandidate, composite compositeTitle) bool {
+	componentIndexes := make(map[int]struct{}, len(composite.components))
+	for _, component := range composite.components {
+		componentIndexes[component.decisionIndex] = struct{}{}
+	}
+	threshold := int(float64(composite.candidate.title.Duration) * tvSameLengthRatio)
+	for _, candidate := range alive {
+		if candidate.decisionIndex == composite.candidate.decisionIndex {
+			continue
+		}
+		if _, ok := componentIndexes[candidate.decisionIndex]; ok {
+			continue
+		}
+		if abs(candidate.title.Duration-composite.candidate.title.Duration) <= threshold {
 			return true
 		}
 	}
 	return false
+}
+
+// excludeRuntimeMismatches drops candidates whose duration matches neither a
+// TMDB expected episode runtime nor an adjacent double-episode sum. The
+// filter only fires when the expectations demonstrably describe this disc:
+// at least one surviving candidate must match. Absent or incompatible
+// expectations never exclude anything, so a disc of extended cuts (or a
+// season with no TMDB runtimes) degrades to structural evidence only.
+func excludeRuntimeMismatches(alive []tvTitleCandidate, expected []tmdb.Episode, result *tvTitleSelectionResult) []tvTitleCandidate {
+	targets := expectedRuntimeTargets(expected)
+	if len(targets) == 0 || len(alive) == 0 {
+		return alive
+	}
+
+	matched := make([]tvTitleCandidate, 0, len(alive))
+	mismatched := make([]tvTitleCandidate, 0)
+	for _, candidate := range alive {
+		if fitsExpectedRuntime(candidate.title.Duration, targets) {
+			matched = append(matched, candidate)
+		} else {
+			mismatched = append(mismatched, candidate)
+		}
+	}
+	if len(mismatched) == 0 {
+		return alive
+	}
+	if len(matched) == 0 {
+		result.Ambiguous = true
+		result.AmbiguityReasons = append(result.AmbiguityReasons, "expected_runtimes_incompatible_with_disc")
+		return alive
+	}
+	for _, candidate := range mismatched {
+		result.Decisions[candidate.decisionIndex].Reason = "expected_runtime_mismatch"
+		result.ExtraCount++
+	}
+	return matched
+}
+
+// expectedRuntimeTargets converts TMDB episode runtimes (minutes) to seconds
+// and adds adjacent-pair sums so combined double-episode titles match.
+func expectedRuntimeTargets(expected []tmdb.Episode) []int {
+	targets := make([]int, 0, len(expected)*2)
+	for i, episode := range expected {
+		if episode.Runtime <= 0 {
+			continue
+		}
+		targets = append(targets, episode.Runtime*60)
+		if i+1 < len(expected) && expected[i+1].Runtime > 0 {
+			targets = append(targets, (episode.Runtime+expected[i+1].Runtime)*60)
+		}
+	}
+	return targets
+}
+
+func fitsExpectedRuntime(duration int, targets []int) bool {
+	for _, target := range targets {
+		tolerance := max(int(float64(target)*tvRuntimeToleranceRatio), tvRuntimeToleranceSec)
+		if abs(duration-target) <= tolerance {
+			return true
+		}
+	}
+	return false
+}
+
+// capToExpectedCount bounds the rip plan by the TMDB season episode count,
+// preferring the candidates whose durations best fit the expected runtimes.
+func capToExpectedCount(alive []tvTitleCandidate, expected []tmdb.Episode, result *tvTitleSelectionResult) []tvTitleCandidate {
+	if len(expected) == 0 || len(alive) <= len(expected) {
+		return alive
+	}
+	targets := expectedRuntimeTargets(expected)
+	ranked := append([]tvTitleCandidate(nil), alive...)
+	slices.SortFunc(ranked, func(a, b tvTitleCandidate) int {
+		fitA, fitB := runtimeFit(a.title.Duration, targets), runtimeFit(b.title.Duration, targets)
+		if fitA != fitB {
+			if fitA < fitB {
+				return -1
+			}
+			return 1
+		}
+		return a.title.ID - b.title.ID
+	})
+	for _, candidate := range ranked[len(expected):] {
+		result.Decisions[candidate.decisionIndex].Reason = "over_expected_episode_count"
+		result.ExtraCount++
+	}
+	result.Ambiguous = true
+	result.AmbiguityReasons = append(result.AmbiguityReasons, "candidates_exceed_expected_episodes")
+	kept := ranked[:len(expected)]
+	slices.SortFunc(kept, func(a, b tvTitleCandidate) int { return a.decisionIndex - b.decisionIndex })
+	return kept
+}
+
+// runtimeFit returns the best relative deviation from any expected runtime
+// target; 0 when no targets exist so ranking degrades to title order.
+func runtimeFit(duration int, targets []int) float64 {
+	if len(targets) == 0 {
+		return 0
+	}
+	best := -1.0
+	for _, target := range targets {
+		if target <= 0 {
+			continue
+		}
+		deviation := float64(abs(duration-target)) / float64(target)
+		if best < 0 || deviation < best {
+			best = deviation
+		}
+	}
+	if best < 0 {
+		return 0
+	}
+	return best
+}
+
+// orderSelectedTitles orders probable double-length titles first (contentid's
+// opening-double inference reads episode order), then the rest by title ID.
+func orderSelectedTitles(alive []tvTitleCandidate, decisions []tvTitleDecision) []ripspec.Title {
+	doubles := make([]tvTitleCandidate, 0, 1)
+	singles := make([]tvTitleCandidate, 0, len(alive))
+	for _, candidate := range alive {
+		if decisions[candidate.decisionIndex].Reason == "combined_double_episode_candidate" || looksDoubleLength(candidate, alive) {
+			doubles = append(doubles, candidate)
+		} else {
+			singles = append(singles, candidate)
+		}
+	}
+	byID := func(a, b tvTitleCandidate) int { return a.title.ID - b.title.ID }
+	slices.SortFunc(doubles, byID)
+	slices.SortFunc(singles, byID)
+
+	titles := make([]ripspec.Title, 0, len(alive))
+	for _, candidate := range append(doubles, singles...) {
+		titles = append(titles, candidate.title)
+	}
+	return titles
+}
+
+func looksDoubleLength(candidate tvTitleCandidate, alive []tvTitleCandidate) bool {
+	rest := make([]int, 0, len(alive)-1)
+	for _, other := range alive {
+		if other.decisionIndex == candidate.decisionIndex {
+			continue
+		}
+		rest = append(rest, other.title.Duration)
+	}
+	if len(rest) < 2 {
+		return false
+	}
+	slices.Sort(rest)
+	median := rest[len(rest)/2]
+	if median <= 0 {
+		return false
+	}
+	duration := candidate.title.Duration
+	return duration >= int(float64(median)*tvDoubleMinRatio) && duration <= int(float64(median)*tvDoubleMaxRatio)
 }
 
 func longestCandidate(candidates []tvTitleCandidate) tvTitleCandidate {
@@ -452,35 +505,6 @@ func dedupKey(title ripspec.Title) string {
 		return key
 	}
 	return strings.TrimSpace(title.TitleHash)
-}
-
-func combinedDoubleEpisodeComponents(primary []tvTitleCandidate, combined tvTitleCandidate) ([]tvTitleCandidate, bool) {
-	combinedSegs, ok := parseSegmentSet(combined.title.SegmentMap)
-	if !ok {
-		return nil, false
-	}
-	for i := 0; i < len(primary); i++ {
-		for j := i + 1; j < len(primary); j++ {
-			a := primary[i]
-			b := primary[j]
-			segA, okA := parseSegmentSet(a.title.SegmentMap)
-			segB, okB := parseSegmentSet(b.title.SegmentMap)
-			if !okA || !okB {
-				continue
-			}
-			if maps.Equal(segA, combinedSegs) || maps.Equal(segB, combinedSegs) {
-				continue
-			}
-			if !segmentsLookCombined(segA, segB, combinedSegs) {
-				continue
-			}
-			if !durationsLookCombined(a.title.Duration, b.title.Duration, combined.title.Duration) {
-				continue
-			}
-			return []tvTitleCandidate{a, b}, true
-		}
-	}
-	return nil, false
 }
 
 func segmentsLookCombined(a, b, combined map[int]struct{}) bool {
@@ -510,6 +534,23 @@ func segmentsLookCombined(a, b, combined map[int]struct{}) bool {
 	return len(symmetricDifference) > 0 && maps.Equal(symmetricDifference, combined)
 }
 
+func tvComponentsOverlap(components []tvTitleCandidate) bool {
+	seen := make(map[int]struct{})
+	for _, component := range components {
+		segments, ok := parseSegmentSet(component.title.SegmentMap)
+		if !ok {
+			return false
+		}
+		for segment := range segments {
+			if _, exists := seen[segment]; exists {
+				return true
+			}
+			seen[segment] = struct{}{}
+		}
+	}
+	return false
+}
+
 func parseSegmentSet(segmentMap string) (map[int]struct{}, bool) {
 	segmentMap = strings.TrimSpace(segmentMap)
 	if segmentMap == "" {
@@ -531,11 +572,11 @@ func parseSegmentSet(segmentMap string) (map[int]struct{}, bool) {
 	return result, len(result) > 0
 }
 
-func durationsLookCombined(a, b, combined int) bool {
-	if a <= 0 || b <= 0 || combined <= 0 {
+func durationsLookCombined(componentSum, combined int) bool {
+	if componentSum <= 0 || combined <= 0 {
 		return false
 	}
-	delta := abs((a + b) - combined)
+	delta := abs(componentSum - combined)
 	threshold := max(90, combined/20)
 	return delta <= threshold
 }

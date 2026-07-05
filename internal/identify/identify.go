@@ -236,7 +236,7 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 					"decision_reason", "disc_id_cache_entry",
 					"disc_id", discID,
 				)
-				result.Envelope = h.buildEnvelopeFromCache(logger, item, entry, result.DiscInfo, result.DiscSource, detectUHD(result.RawTitle, result.BDInfo))
+				result.Envelope = h.buildEnvelopeFromCache(ctx, logger, item, entry, result.DiscInfo, result.DiscSource, detectUHD(result.RawTitle, result.BDInfo))
 				return nil
 			}
 		}
@@ -322,7 +322,7 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 			"impact", impact,
 		)
 		item.AppendReviewReason("TMDB: no confident match found")
-		result.Envelope = h.buildFallbackEnvelope(logger, item, result.DiscInfo)
+		result.Envelope = h.buildFallbackEnvelope(ctx, logger, item, result.DiscInfo)
 		if noTMDBMatchIsFatal(mediaHint) {
 			result.Fatal = true
 			result.FatalMsg = "no TMDB match found for TV disc: " + result.QueryTitle
@@ -352,7 +352,7 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 	item.DiscTitle = canonicalTitle(*result.Best, result.MediaType, item.DiscTitle, result.DiscInfo)
 
 	// Step 6: Build RipSpec envelope.
-	result.Envelope = h.buildEnvelope(logger, item, result.DiscInfo, result.Best, result.MediaType, result.DiscSource, detectUHD(result.RawTitle, result.BDInfo))
+	result.Envelope = h.buildEnvelope(ctx, logger, item, result.DiscInfo, result.Best, result.MediaType, result.DiscSource, detectUHD(result.RawTitle, result.BDInfo))
 
 	return nil
 }
@@ -630,6 +630,7 @@ func convertTitles(discInfo *makemkv.DiscInfo) []ripspec.Title {
 
 // buildEnvelope constructs a full RipSpec envelope from scan and TMDB data.
 func (h *Handler) buildEnvelope(
+	ctx context.Context,
 	logger *slog.Logger,
 	item *queue.Item,
 	discInfo *makemkv.DiscInfo,
@@ -675,23 +676,24 @@ func (h *Handler) buildEnvelope(
 
 	// For TV content, create episode placeholders from eligible titles.
 	if mediaType == "tv" {
-		h.createEpisodePlaceholders(logger, &env)
+		h.createEpisodePlaceholders(ctx, logger, &env)
 	}
 
 	return env
 }
 
 // createEpisodePlaceholders adds episode entries for selected TV titles.
-// Selection is based on minimum duration, duplicate suppression, and runtime
-// clustering that prefers the dominant long-form program group while preserving
-// probable double-length episodes.
-func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.Envelope) {
+// Titles are excluded only on structural evidence (length gate, duplicates,
+// gross outliers, proven play-all composites) or on a strong mismatch against
+// TMDB expected episode runtimes; content identification arbitrates the rest.
+func (h *Handler) createEpisodePlaceholders(ctx context.Context, logger *slog.Logger, env *ripspec.Envelope) {
 	season := env.Metadata.SeasonNumber
 	if season <= 0 {
 		season = 1
 	}
 
-	selection := selectTVEpisodeTitles(env.Titles, h.cfg.MakeMKV.MinTitleLength)
+	expected := h.fetchExpectedEpisodes(ctx, logger, env.Metadata.ID, season)
+	selection := selectTVEpisodeTitles(env.Titles, h.cfg.MakeMKV.MinTitleLength, expected)
 	for _, decision := range selection.Decisions {
 		switch {
 		case decision.Selected:
@@ -701,7 +703,6 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 				"decision_reason", decision.Reason,
 				"title_id", decision.Title.ID,
 				"duration", decision.Title.Duration,
-				"cluster_id", decision.ClusterID,
 			)
 		case decision.Reason == "below_min_title_length":
 			logger.Debug("tv title excluded",
@@ -727,7 +728,6 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 				"decision_reason", decision.Reason,
 				"title_id", decision.Title.ID,
 				"duration", decision.Title.Duration,
-				"cluster_id", decision.ClusterID,
 			)
 		}
 	}
@@ -742,7 +742,7 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 	logger.Info("tv title selection summary",
 		"decision_type", logs.DecisionTitleSelection,
 		"decision_result", describeTVSelection(selection),
-		"decision_reason", fmt.Sprintf("duplicates=%d extras=%d double_candidates=%d", selection.DuplicateCount, selection.ExtraCount, selection.AmbiguousLongCount),
+		"decision_reason", fmt.Sprintf("duplicates=%d extras=%d expected_episodes=%d", selection.DuplicateCount, selection.ExtraCount, len(expected)),
 	)
 
 	for idx, title := range selection.SelectedTitles {
@@ -761,10 +761,38 @@ func (h *Handler) createEpisodePlaceholders(logger *slog.Logger, env *ripspec.En
 	)
 }
 
+// fetchExpectedEpisodes retrieves the TMDB season episode list so title
+// selection can bound and rank candidates against expected runtimes. Failures
+// degrade selection to structural evidence only; they never fail the stage.
+func (h *Handler) fetchExpectedEpisodes(ctx context.Context, logger *slog.Logger, tmdbID, season int) []tmdb.Episode {
+	if h.tmdbClient == nil || tmdbID <= 0 {
+		return nil
+	}
+	s, err := h.tmdbClient.GetSeason(ctx, tmdbID, season)
+	if err != nil {
+		logger.Warn("tmdb season lookup for title selection failed",
+			"event_type", "tmdb_season_error",
+			"error_hint", err.Error(),
+			"impact", "title selection proceeds without expected episode runtimes",
+		)
+		return nil
+	}
+	if s == nil || len(s.Episodes) == 0 {
+		return nil
+	}
+	logger.Info("expected episode profile fetched",
+		"decision_type", logs.DecisionTitleSelection,
+		"decision_result", fmt.Sprintf("%d expected episodes", len(s.Episodes)),
+		"decision_reason", "tmdb_season_episode_list",
+		"season", season,
+	)
+	return s.Episodes
+}
+
 // buildEnvelopeFromCache constructs an envelope from a disc ID cache entry
 // and MakeMKV scan results. The cache provides TMDB metadata (skipping the
 // TMDB search), while the scan provides title data for ripping.
-func (h *Handler) buildEnvelopeFromCache(logger *slog.Logger, item *queue.Item, entry *discidcache.Entry, discInfo *makemkv.DiscInfo, discSource string, uhd bool) ripspec.Envelope {
+func (h *Handler) buildEnvelopeFromCache(ctx context.Context, logger *slog.Logger, item *queue.Item, entry *discidcache.Entry, discInfo *makemkv.DiscInfo, discSource string, uhd bool) ripspec.Envelope {
 	discName := discInfoName(discInfo)
 	seasonNum := extractSeasonNumber(item.DiscTitle, discName)
 	discNum := extractDiscNumber(item.DiscTitle, discName)
@@ -795,14 +823,14 @@ func (h *Handler) buildEnvelopeFromCache(logger *slog.Logger, item *queue.Item, 
 
 	// For TV content, create episode placeholders from eligible titles.
 	if entry.MediaType == "tv" {
-		h.createEpisodePlaceholders(logger, &env)
+		h.createEpisodePlaceholders(ctx, logger, &env)
 	}
 
 	return env
 }
 
 // buildFallbackEnvelope constructs an envelope with unknown media type for review.
-func (h *Handler) buildFallbackEnvelope(logger *slog.Logger, item *queue.Item, discInfo *makemkv.DiscInfo) ripspec.Envelope {
+func (h *Handler) buildFallbackEnvelope(ctx context.Context, logger *slog.Logger, item *queue.Item, discInfo *makemkv.DiscInfo) ripspec.Envelope {
 	title := item.DiscTitle
 	if title == "" && discInfo != nil {
 		title = discInfo.Name
@@ -831,7 +859,7 @@ func (h *Handler) buildFallbackEnvelope(logger *slog.Logger, item *queue.Item, d
 
 	// If season number was extracted, this is likely TV — create episode placeholders.
 	if seasonNum > 0 {
-		h.createEpisodePlaceholders(logger, &env)
+		h.createEpisodePlaceholders(ctx, logger, &env)
 	}
 
 	return env

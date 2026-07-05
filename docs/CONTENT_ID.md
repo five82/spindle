@@ -139,6 +139,18 @@ result:
 Review is not failure by itself. It means Spindle produced the best available
 mapping but requires operator confirmation.
 
+Two dispositions carry structural meaning:
+
+- **Probable extra.** Title selection deliberately over-selects and lets
+  content evidence arbitrate. A rip whose similarity falls below the minimum
+  against every candidate reference is classified a probable extra (not an
+  unresolved episode), routed to the review directory, and does not block the
+  item's matched episodes.
+- **Incomplete episode set.** After matching (and opening-double correction),
+  a disc 1 set that does not start at episode 1, or a matched subset with
+  multiple gaps, marks every resolved episode for review. A known-incomplete
+  season set is never delivered to the library.
+
 ## Configuration
 
 Content ID policy is controlled by the `[content_id]` config section. Important

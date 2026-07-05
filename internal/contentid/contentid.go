@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/five82/spindle/internal/config"
@@ -261,16 +262,42 @@ func (h *Handler) matchEpisodes(
 		)
 	}
 
-	for _, reason := range structuralReviewReasons(matches, env.Metadata.DiscNumber) {
-		sess.AddReviewReason("Episode ID: " + reason)
-	}
 	if hasSuspectAcceptedMatch(matches) {
 		sess.AddReviewReason("Episode ID: one or more matches rely on suspect references")
 	}
 
 	_ = sess.Progress(80, "Phase 3/3 - Matching episodes")
 
-	h.applyMatches(logger, env, seasonNum, season, matches, sess)
+	noClaimRips := make(map[string]struct{}, len(resolution.RipsWithoutClaims))
+	for _, key := range resolution.RipsWithoutClaims {
+		noClaimRips[strings.ToLower(key)] = struct{}{}
+	}
+	h.applyMatches(logger, env, seasonNum, season, matches, sess, noClaimRips)
+
+	// Structural gaps are checked on the envelope after opening-double
+	// correction so a legitimately renumbered E1-E2 opener is not flagged. A
+	// known-incomplete episode set routes every resolved episode to review
+	// instead of delivering a partial season to the library.
+	if reasons := structuralReviewReasons(env.Episodes, env.Metadata.DiscNumber); len(reasons) > 0 {
+		joined := strings.Join(reasons, "; ")
+		for _, reason := range reasons {
+			sess.AddReviewReason("Episode ID: " + reason)
+		}
+		flagged := 0
+		for i := range env.Episodes {
+			if env.Episodes[i].Episode > 0 {
+				env.Episodes[i].AppendReviewReason("Episode ID: episode set incomplete: " + joined)
+				flagged++
+			}
+		}
+		logger.Info("episode set structurally incomplete",
+			"decision_type", logs.DecisionContentIDMatches,
+			"decision_result", "resolved_episodes_routed_to_review",
+			"decision_reason", joined,
+			"flagged_episodes", flagged,
+		)
+	}
+
 	env.Attributes.ContentID = buildContentIDSummary(env, matches, len(ripPrints), len(refs), h.policy.LowConfidenceReviewThreshold)
 
 	if err := sess.Save(); err != nil {
@@ -417,6 +444,7 @@ func (h *Handler) applyMatches(
 	season *tmdb.Season,
 	matches []matchResult,
 	sess *stage.Session,
+	noClaimRips map[string]struct{},
 ) {
 	matchMap := make(map[string]matchResult, len(matches))
 	for _, m := range matches {
@@ -429,13 +457,26 @@ func (h *Handler) applyMatches(
 	}
 
 	unresolvedCount := 0
+	probableExtraCount := 0
 	lowConfCount := 0
 	for i := range env.Episodes {
 		ep := &env.Episodes[i]
 		m, ok := matchMap[strings.ToLower(ep.Key)]
 		if !ok {
-			unresolvedCount++
-			ep.AppendReviewReason("Episode ID: unresolved")
+			if _, noClaim := noClaimRips[strings.ToLower(ep.Key)]; noClaim {
+				probableExtraCount++
+				ep.AppendReviewReason("Episode ID: probable extra; no candidate episode matched")
+				logger.Info("rip classified as probable extra",
+					"decision_type", logs.DecisionEpisodeMatch,
+					"decision_result", fmt.Sprintf("%s -> probable_extra", ep.Key),
+					"decision_reason", "similarity below minimum against every candidate reference",
+					"episode_key", ep.Key,
+					"title_id", ep.TitleID,
+				)
+			} else {
+				unresolvedCount++
+				ep.AppendReviewReason("Episode ID: unresolved")
+			}
 			continue
 		}
 		details := episodeDetails[m.TargetEpisode]
@@ -497,24 +538,38 @@ func (h *Handler) applyMatches(
 	if unresolvedCount > 0 {
 		sess.AddReviewReason(fmt.Sprintf("Episode ID: %d of %d episodes unresolved", unresolvedCount, len(env.Episodes)))
 	}
+	if probableExtraCount > 0 {
+		sess.AddReviewReason(fmt.Sprintf("Episode ID: %d rip(s) classified as probable extras", probableExtraCount))
+	}
 	if lowConfCount > 0 {
 		sess.AddReviewReason(fmt.Sprintf("Episode ID: %d matches below confidence threshold %.2f", lowConfCount, h.policy.LowConfidenceReviewThreshold))
 	}
 }
 
-func structuralReviewReasons(matches []matchResult, discNumber int) []string {
-	if len(matches) == 0 {
+// structuralReviewReasons inspects the final episode numbering (after
+// opening-double correction) for gaps that indicate the disc's episode set is
+// incomplete: disc 1 output that does not start at episode 1, or a matched
+// subset with multiple holes.
+func structuralReviewReasons(episodes []ripspec.Episode, discNumber int) []string {
+	numbers := make([]int, 0, len(episodes))
+	for _, ep := range episodes {
+		if ep.Episode <= 0 {
+			continue
+		}
+		for n := ep.Episode; n <= ep.EpisodeLast(); n++ {
+			numbers = append(numbers, n)
+		}
+	}
+	if len(numbers) == 0 {
 		return nil
 	}
-	episodes := assignedEpisodes(matches)
-	if len(episodes) == 0 {
-		return nil
-	}
+	sort.Ints(numbers)
+	numbers = compactInts(numbers)
 	reasons := make([]string, 0, 2)
-	if discNumber == 1 && episodes[0] > 1 {
-		reasons = append(reasons, fmt.Sprintf("disc 1 matched subset starts at episode %d", episodes[0]))
+	if discNumber == 1 && numbers[0] > 1 {
+		reasons = append(reasons, fmt.Sprintf("disc 1 matched subset starts at episode %d", numbers[0]))
 	}
-	if fragmentedEpisodeSubset(episodes) {
+	if fragmentedEpisodeSubset(numbers) {
 		reasons = append(reasons, "accepted episode subset is fragmented")
 	}
 	return reasons

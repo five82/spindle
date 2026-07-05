@@ -1,6 +1,7 @@
 package identify
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -254,7 +255,7 @@ func TestBuildEnvelope_Valid(t *testing.T) {
 		VoteCount:   1000,
 	}
 
-	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "movie", "bluray", false)
+	env := h.buildEnvelope(context.Background(), discardLogger(), item, discInfo, best, "movie", "bluray", false)
 
 	if env.Version != ripspec.CurrentVersion {
 		t.Errorf("Version = %d, want %d", env.Version, ripspec.CurrentVersion)
@@ -313,7 +314,7 @@ func TestBuildEnvelope_TV(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "tv", "bluray", false)
+	env := h.buildEnvelope(context.Background(), discardLogger(), item, discInfo, best, "tv", "bluray", false)
 
 	if env.Metadata.MediaType != "tv" {
 		t.Errorf("MediaType = %q, want %q", env.Metadata.MediaType, "tv")
@@ -346,7 +347,7 @@ func TestBuildEnvelopeFromCache(t *testing.T) {
 			},
 		}
 
-		env := h.buildEnvelopeFromCache(discardLogger(), item, entry, discInfo, "bluray", false)
+		env := h.buildEnvelopeFromCache(context.Background(), discardLogger(), item, entry, discInfo, "bluray", false)
 
 		if env.Version != ripspec.CurrentVersion {
 			t.Errorf("Version = %d, want %d", env.Version, ripspec.CurrentVersion)
@@ -388,7 +389,7 @@ func TestBuildEnvelopeFromCache(t *testing.T) {
 			},
 		}
 
-		env := h.buildEnvelopeFromCache(discardLogger(), item, entry, discInfo, "bluray", false)
+		env := h.buildEnvelopeFromCache(context.Background(), discardLogger(), item, entry, discInfo, "bluray", false)
 
 		if env.Metadata.MediaType != "tv" {
 			t.Errorf("MediaType = %q, want %q", env.Metadata.MediaType, "tv")
@@ -417,7 +418,7 @@ func TestBuildEnvelopeFromCache(t *testing.T) {
 			Year:      "2022",
 		}
 
-		env := h.buildEnvelopeFromCache(discardLogger(), item, entry, nil, "bluray", false)
+		env := h.buildEnvelopeFromCache(context.Background(), discardLogger(), item, entry, nil, "bluray", false)
 
 		if len(env.Titles) != 0 {
 			t.Errorf("len(Titles) = %d, want 0 for nil discInfo", len(env.Titles))
@@ -430,7 +431,7 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 
 	t.Run("uses item title", func(t *testing.T) {
 		item := &queue.Item{DiscTitle: "My Disc", DiscFingerprint: "fp1"}
-		env := h.buildFallbackEnvelope(discardLogger(), item, nil)
+		env := h.buildFallbackEnvelope(context.Background(), discardLogger(), item, nil)
 		if env.Metadata.Title != "My Disc" {
 			t.Errorf("Title = %q, want %q", env.Metadata.Title, "My Disc")
 		}
@@ -442,7 +443,7 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 	t.Run("uses disc name when item title empty", func(t *testing.T) {
 		item := &queue.Item{DiscTitle: ""}
 		discInfo := &makemkv.DiscInfo{Name: "Disc Name"}
-		env := h.buildFallbackEnvelope(discardLogger(), item, discInfo)
+		env := h.buildFallbackEnvelope(context.Background(), discardLogger(), item, discInfo)
 		if env.Metadata.Title != "Disc Name" {
 			t.Errorf("Title = %q, want %q", env.Metadata.Title, "Disc Name")
 		}
@@ -451,7 +452,7 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 	t.Run("uses Unknown Disc when both empty", func(t *testing.T) {
 		item := &queue.Item{}
 		discInfo := &makemkv.DiscInfo{}
-		env := h.buildFallbackEnvelope(discardLogger(), item, discInfo)
+		env := h.buildFallbackEnvelope(context.Background(), discardLogger(), item, discInfo)
 		if env.Metadata.Title != "Unknown Disc" {
 			t.Errorf("Title = %q, want %q", env.Metadata.Title, "Unknown Disc")
 		}
@@ -464,7 +465,7 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 				{ID: 0, Name: "Title 1", Duration: 3600},
 			},
 		}
-		env := h.buildFallbackEnvelope(discardLogger(), item, discInfo)
+		env := h.buildFallbackEnvelope(context.Background(), discardLogger(), item, discInfo)
 		if len(env.Titles) != 1 {
 			t.Fatalf("len(Titles) = %d, want 1", len(env.Titles))
 		}
@@ -484,7 +485,7 @@ func TestBuildFallbackEnvelope(t *testing.T) {
 				{ID: 2, Name: "Title 3", Duration: 3000},
 			},
 		}
-		env := h.buildFallbackEnvelope(discardLogger(), item, discInfo)
+		env := h.buildFallbackEnvelope(context.Background(), discardLogger(), item, discInfo)
 		if env.Metadata.SeasonNumber != 2 {
 			t.Errorf("SeasonNumber = %d, want 2", env.Metadata.SeasonNumber)
 		}
@@ -642,7 +643,7 @@ func TestBuildEnvelope_TVCreatesEpisodes(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(discardLogger(), item, discInfo, best, "tv", "bluray", false)
+	env := h.buildEnvelope(context.Background(), discardLogger(), item, discInfo, best, "tv", "bluray", false)
 
 	if env.Metadata.SeasonNumber != 2 {
 		t.Errorf("SeasonNumber = %d, want 2", env.Metadata.SeasonNumber)
@@ -683,7 +684,7 @@ func TestCreateEpisodePlaceholders_DeduplicatesBySegmentMap(t *testing.T) {
 			{ID: 2, Duration: 1320, SegmentMap: "00001.m2ts"}, // duplicate of title 0
 		},
 	}
-	h.createEpisodePlaceholders(discardLogger(), env)
+	h.createEpisodePlaceholders(context.Background(), discardLogger(), env)
 
 	if len(env.Episodes) != 2 {
 		t.Fatalf("len(Episodes) = %d, want 2 (title 2 should be deduped)", len(env.Episodes))
@@ -706,7 +707,7 @@ func TestCreateEpisodePlaceholders_DifferentSegmentMapSameDuration(t *testing.T)
 			{ID: 1, Duration: 1320, SegmentMap: "00002.m2ts"},
 		},
 	}
-	h.createEpisodePlaceholders(discardLogger(), env)
+	h.createEpisodePlaceholders(context.Background(), discardLogger(), env)
 
 	if len(env.Episodes) != 2 {
 		t.Fatalf("len(Episodes) = %d, want 2 (different SegmentMap = different content)", len(env.Episodes))
@@ -724,7 +725,7 @@ func TestCreateEpisodePlaceholders_FallsBackToTitleHash(t *testing.T) {
 			{ID: 2, Duration: 1320, TitleHash: "abc123"}, // duplicate by hash
 		},
 	}
-	h.createEpisodePlaceholders(discardLogger(), env)
+	h.createEpisodePlaceholders(context.Background(), discardLogger(), env)
 
 	if len(env.Episodes) != 2 {
 		t.Fatalf("len(Episodes) = %d, want 2 (TitleHash fallback dedup)", len(env.Episodes))
@@ -747,7 +748,7 @@ func TestCreateEpisodePlaceholders_NoDedupWhenBothKeysEmpty(t *testing.T) {
 			{ID: 1, Duration: 1320},
 		},
 	}
-	h.createEpisodePlaceholders(discardLogger(), env)
+	h.createEpisodePlaceholders(context.Background(), discardLogger(), env)
 
 	if len(env.Episodes) != 2 {
 		t.Fatalf("len(Episodes) = %d, want 2 (no dedup when keys empty)", len(env.Episodes))
@@ -764,7 +765,7 @@ func TestCreateEpisodePlaceholders_SegmentMapTakesPriorityOverTitleHash(t *testi
 			{ID: 1, Duration: 1320, SegmentMap: "00010.m2ts", TitleHash: "bbb"},
 		},
 	}
-	h.createEpisodePlaceholders(discardLogger(), env)
+	h.createEpisodePlaceholders(context.Background(), discardLogger(), env)
 
 	if len(env.Episodes) != 1 {
 		t.Fatalf("len(Episodes) = %d, want 1 (same SegmentMap dedupes despite different TitleHash)", len(env.Episodes))
@@ -776,9 +777,9 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 		name           string
 		minTitleLength int
 		titles         []ripspec.Title
+		expected       []tmdb.Episode
 		wantIDs        []int
 		wantAmbiguous  bool
-		wantDoubleLong int
 		wantDuplicates int
 		wantExtras     int
 		wantReasonByID map[int]string
@@ -795,7 +796,7 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 			},
 			wantIDs:        []int{0, 1, 2},
 			wantExtras:     2,
-			wantReasonByID: map[int]string{3: "runtime_cluster_extra", 4: "runtime_cluster_extra"},
+			wantReasonByID: map[int]string{3: "gross_runtime_outlier", 4: "gross_runtime_outlier"},
 		},
 		{
 			name:           "45 minute episodes with extras",
@@ -821,10 +822,37 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 				{ID: 4, Duration: 4 * 60},
 				{ID: 5, Duration: 2 * 60},
 			},
-			wantIDs:        []int{0, 1, 2},
-			wantDoubleLong: 1,
-			wantExtras:     3,
-			wantReasonByID: map[int]string{0: "probable_double_episode_candidate"},
+			wantIDs:    []int{0, 1, 2},
+			wantExtras: 3,
+			wantReasonByID: map[int]string{
+				0: "episode_candidate",
+				3: "gross_runtime_outlier",
+				4: "gross_runtime_outlier",
+				5: "gross_runtime_outlier",
+			},
+		},
+		{
+			name:           "long pilot episode is kept when TMDB expects it",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 3486, Chapters: 7},
+				{ID: 1, Duration: 2892},
+				{ID: 2, Duration: 2891},
+				{ID: 3, Duration: 2895},
+			},
+			expected: []tmdb.Episode{
+				{EpisodeNumber: 1, Runtime: 58},
+				{EpisodeNumber: 2, Runtime: 48},
+				{EpisodeNumber: 3, Runtime: 48},
+				{EpisodeNumber: 4, Runtime: 48},
+				{EpisodeNumber: 5, Runtime: 48},
+				{EpisodeNumber: 6, Runtime: 48},
+				{EpisodeNumber: 7, Runtime: 48},
+			},
+			wantIDs:        []int{0, 1, 2, 3},
+			wantExtras:     0,
+			wantAmbiguous:  false,
+			wantReasonByID: map[int]string{0: "episode_candidate"},
 		},
 		{
 			name:           "combined playlist replaces split pilot halves when segment union matches",
@@ -835,11 +863,15 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 				{ID: 2, Duration: 2734, SegmentMap: "1,64"},
 				{ID: 3, Duration: 140, SegmentMap: "29,30"},
 			},
-			wantIDs:        []int{0},
-			wantAmbiguous:  false,
-			wantDoubleLong: 1,
-			wantExtras:     3,
-			wantReasonByID: map[int]string{0: "combined_double_episode_candidate", 1: "runtime_cluster_extra", 2: "runtime_cluster_extra", 3: "runtime_cluster_extra"},
+			wantIDs:       []int{0},
+			wantAmbiguous: false,
+			wantExtras:    3,
+			wantReasonByID: map[int]string{
+				0: "combined_double_episode_candidate",
+				1: "combined_title_component",
+				2: "combined_title_component",
+				3: "gross_runtime_outlier",
+			},
 		},
 		{
 			name:           "disjoint play-all playlist does not replace individual episodes",
@@ -850,11 +882,15 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 				{ID: 2, Duration: 5469, SegmentCount: 2, SegmentMap: "0,1", Playlist: "00039.mpls"},
 				{ID: 3, Duration: 140, SegmentCount: 2, SegmentMap: "6,9", Playlist: "00011.mpls"},
 			},
-			wantIDs:        []int{0, 1},
-			wantAmbiguous:  false,
-			wantDoubleLong: 1,
-			wantExtras:     2,
-			wantReasonByID: map[int]string{0: "primary_runtime_cluster", 1: "primary_runtime_cluster", 2: "combined_play_all_extra", 3: "runtime_cluster_extra"},
+			wantIDs:       []int{0, 1},
+			wantAmbiguous: false,
+			wantExtras:    2,
+			wantReasonByID: map[int]string{
+				0: "episode_candidate",
+				1: "episode_candidate",
+				2: "combined_play_all_extra",
+				3: "gross_runtime_outlier",
+			},
 		},
 		{
 			// TNG S1 D1 real disc layout: 00027.mpls is a play-all
@@ -871,16 +907,15 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 				{ID: 3, Duration: 5481, SegmentCount: 1, SegmentMap: "0", Playlist: "00040.mpls"},
 				{ID: 4, Duration: 140, SegmentCount: 2, SegmentMap: "29,30", Playlist: "00013.mpls"},
 			},
-			wantIDs:        []int{3, 1, 2},
-			wantAmbiguous:  false,
-			wantDoubleLong: 2,
-			wantExtras:     2,
+			wantIDs:       []int{3, 1, 2},
+			wantAmbiguous: false,
+			wantExtras:    2,
 			wantReasonByID: map[int]string{
-				3: "probable_double_episode_candidate",
+				3: "episode_candidate",
+				1: "episode_candidate",
+				2: "episode_candidate",
 				0: "combined_play_all_extra",
-				1: "primary_runtime_cluster",
-				2: "primary_runtime_cluster",
-				4: "runtime_cluster_extra",
+				4: "gross_runtime_outlier",
 			},
 		},
 		{
@@ -900,18 +935,22 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 				{ID: 10, Duration: 5459, SegmentCount: 3, SegmentMap: "3,4,64", Playlist: "00000.mpls(2)"},
 				{ID: 11, Duration: 300, SegmentCount: 1, SegmentMap: "68", Playlist: "00068.m2ts"},
 			},
-			wantIDs:        []int{4, 5, 6, 7, 8},
-			wantAmbiguous:  false,
-			wantDoubleLong: 2,
-			wantExtras:     7,
+			wantIDs:       []int{4, 5, 6, 7, 8},
+			wantAmbiguous: false,
+			wantExtras:    7,
 			wantReasonByID: map[int]string{
-				4:  "primary_runtime_cluster",
-				5:  "primary_runtime_cluster",
-				6:  "primary_runtime_cluster",
-				7:  "primary_runtime_cluster",
-				8:  "primary_runtime_cluster",
+				4:  "episode_candidate",
+				5:  "episode_candidate",
+				6:  "episode_candidate",
+				7:  "episode_candidate",
+				8:  "episode_candidate",
 				9:  "combined_play_all_extra",
 				10: "combined_play_all_extra",
+				0:  "gross_runtime_outlier",
+				1:  "gross_runtime_outlier",
+				2:  "gross_runtime_outlier",
+				3:  "gross_runtime_outlier",
+				11: "gross_runtime_outlier",
 			},
 		},
 		{
@@ -938,11 +977,28 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 				{ID: 17, Duration: 300, SegmentCount: 1, SegmentMap: "68", Playlist: "00068.m2ts"},
 				{ID: 18, Duration: 927, SegmentCount: 1, SegmentMap: "2", Playlist: "00002.m2ts"},
 			},
-			wantIDs:        []int{0, 1},
-			wantAmbiguous:  false,
-			wantDoubleLong: 1,
-			wantExtras:     17,
-			wantReasonByID: map[int]string{0: "primary_runtime_cluster", 1: "primary_runtime_cluster", 2: "combined_play_all_extra"},
+			expected: []tmdb.Episode{
+				{EpisodeNumber: 1, Runtime: 46},
+				{EpisodeNumber: 2, Runtime: 46},
+				{EpisodeNumber: 3, Runtime: 46},
+				{EpisodeNumber: 4, Runtime: 46},
+				{EpisodeNumber: 5, Runtime: 46},
+				{EpisodeNumber: 6, Runtime: 46},
+				{EpisodeNumber: 7, Runtime: 46},
+				{EpisodeNumber: 8, Runtime: 46},
+			},
+			wantIDs:       []int{0, 1},
+			wantAmbiguous: false,
+			wantExtras:    17,
+			wantReasonByID: map[int]string{
+				0:  "episode_candidate",
+				1:  "episode_candidate",
+				2:  "combined_play_all_extra",
+				3:  "gross_runtime_outlier",
+				12: "expected_runtime_mismatch",
+				15: "expected_runtime_mismatch",
+				10: "expected_runtime_mismatch",
+			},
 		},
 		{
 			name:           "duplicate playlists dedupe by segment map",
@@ -957,7 +1013,7 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 			wantReasonByID: map[int]string{1: "duplicate_title"},
 		},
 		{
-			name:           "mixed long form disc still prefers dominant runtime cluster",
+			name:           "short feature dropped when TMDB runtimes mismatch",
 			minTitleLength: 120,
 			titles: []ripspec.Title{
 				{ID: 0, Duration: 24 * 60},
@@ -965,8 +1021,28 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 				{ID: 2, Duration: 50 * 60},
 				{ID: 3, Duration: 52 * 60},
 			},
-			wantIDs:    []int{1, 2, 3},
-			wantExtras: 1,
+			expected: []tmdb.Episode{
+				{EpisodeNumber: 1, Runtime: 48},
+				{EpisodeNumber: 2, Runtime: 48},
+				{EpisodeNumber: 3, Runtime: 48},
+				{EpisodeNumber: 4, Runtime: 48},
+			},
+			wantIDs:        []int{1, 2, 3},
+			wantExtras:     1,
+			wantReasonByID: map[int]string{0: "expected_runtime_mismatch"},
+		},
+		{
+			name:           "short feature kept without expectations",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 24 * 60},
+				{ID: 1, Duration: 48 * 60},
+				{ID: 2, Duration: 50 * 60},
+				{ID: 3, Duration: 52 * 60},
+			},
+			wantIDs:       []int{0, 1, 2, 3},
+			wantExtras:    0,
+			wantAmbiguous: false,
 		},
 		{
 			name:           "single long feature on tv hinted disc stays ambiguous",
@@ -980,16 +1056,36 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 			wantAmbiguous: true,
 			wantExtras:    2,
 		},
+		{
+			name:           "candidates above expected count are capped by runtime fit",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 2700, SegmentMap: "0"},
+				{ID: 1, Duration: 2700, SegmentMap: "1"},
+				{ID: 2, Duration: 2700, SegmentMap: "2"},
+				{ID: 3, Duration: 2700, SegmentMap: "3"},
+				{ID: 4, Duration: 2700, SegmentMap: "4"},
+			},
+			expected: []tmdb.Episode{
+				{EpisodeNumber: 1, Runtime: 45},
+				{EpisodeNumber: 2, Runtime: 45},
+				{EpisodeNumber: 3, Runtime: 45},
+			},
+			wantIDs:       []int{0, 1, 2},
+			wantExtras:    2,
+			wantAmbiguous: true,
+			wantReasonByID: map[int]string{
+				3: "over_expected_episode_count",
+				4: "over_expected_episode_count",
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := selectTVEpisodeTitles(tt.titles, tt.minTitleLength)
+			got := selectTVEpisodeTitles(tt.titles, tt.minTitleLength, tt.expected)
 			if got.Ambiguous != tt.wantAmbiguous {
 				t.Fatalf("Ambiguous = %v, want %v (reasons=%v)", got.Ambiguous, tt.wantAmbiguous, got.AmbiguityReasons)
-			}
-			if got.AmbiguousLongCount != tt.wantDoubleLong {
-				t.Fatalf("AmbiguousLongCount = %d, want %d", got.AmbiguousLongCount, tt.wantDoubleLong)
 			}
 			if got.DuplicateCount != tt.wantDuplicates {
 				t.Fatalf("DuplicateCount = %d, want %d", got.DuplicateCount, tt.wantDuplicates)
@@ -1046,7 +1142,7 @@ func TestCreateEpisodePlaceholders_TNGLikeSelection(t *testing.T) {
 			{ID: 15, Duration: 300, SegmentCount: 1, SegmentMap: "68", Playlist: "00068.m2ts"},
 		},
 	}
-	h.createEpisodePlaceholders(discardLogger(), env)
+	h.createEpisodePlaceholders(context.Background(), discardLogger(), env)
 
 	if len(env.Episodes) != 3 {
 		t.Fatalf("len(Episodes) = %d, want 3", len(env.Episodes))

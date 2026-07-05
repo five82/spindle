@@ -31,6 +31,10 @@ type matchResolution struct {
 	Accepted                   []matchResult
 	PendingByRip               map[string][]matchResult
 	UnresolvedKeys             []string
+	// RipsWithoutClaims lists rips whose similarity fell below the minimum
+	// against every candidate reference: probable extras rather than
+	// unresolved episodes.
+	RipsWithoutClaims          []string
 	ClearMatchCount            int
 	AmbiguousCount             int
 	DecisiveLowSimilarityCount int
@@ -50,7 +54,20 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 	scores := buildScoreMatrices(weightedRips, weightedRefs)
 	claims := buildClaims(rips, weightedRefs, scores, policy)
 	if len(claims) == 0 {
-		return matchResolution{UnresolvedKeys: unresolvedKeysFromRips(rips)}
+		return matchResolution{
+			UnresolvedKeys:    unresolvedKeysFromRips(rips),
+			RipsWithoutClaims: unresolvedKeysFromRips(rips),
+		}
+	}
+	claimedRips := make(map[string]struct{}, len(rips))
+	for _, claim := range claims {
+		claimedRips[strings.ToLower(claim.Match.EpisodeKey)] = struct{}{}
+	}
+	ripsWithoutClaims := make([]string, 0)
+	for _, rip := range rips {
+		if _, ok := claimedRips[strings.ToLower(rip.EpisodeKey)]; !ok {
+			ripsWithoutClaims = append(ripsWithoutClaims, rip.EpisodeKey)
+		}
 	}
 
 	sort.Slice(claims, func(i, j int) bool {
@@ -131,6 +148,7 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 		Accepted:                   accepted,
 		PendingByRip:               pendingByRip,
 		UnresolvedKeys:             unresolved,
+		RipsWithoutClaims:          ripsWithoutClaims,
 		ClearMatchCount:            clearAccepted,
 		AmbiguousCount:             ambiguous,
 		DecisiveLowSimilarityCount: decisiveLowSimilarityAccepted + decisiveLowSimilarity,
