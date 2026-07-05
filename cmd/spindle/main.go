@@ -76,6 +76,7 @@ func main() {
 		newDebugCmd(),
 		newAuditGatherCmd(),
 		newDaemonCmd(),
+		newEncodeWorkerCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

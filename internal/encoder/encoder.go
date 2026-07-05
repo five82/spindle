@@ -49,10 +49,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return fmt.Errorf("create encoded dir: %w", err)
 	}
 
-	encoder, err := h.newEncoder(logger)
-	if err != nil {
-		return err
-	}
+	logger.Info("Reel target-quality mode selected",
+		"decision_type", logs.DecisionEncodingConfig,
+		"decision_result", "target",
+		"decision_reason", "spindle always uses Reel target-quality mode; encodes run in per-file worker subprocesses",
+	)
 
 	logger.Info("encoding plan",
 		"decision_type", logs.DecisionEncodingPlan,
@@ -108,7 +109,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			attemptedKeys[job.Key] = true
 		}
 		attempted += len(jobs)
-		batch, err := h.encodeJobs(ctx, sess, encoder, encodedDir, jobs)
+		batch, err := h.encodeJobs(ctx, sess, encodedDir, jobs)
 		summary.errors += batch.errors
 		summary.originalSize += batch.originalSize
 		summary.encodedSize += batch.encodedSize
@@ -158,20 +159,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	return nil
 }
 
-func (h *Handler) newEncoder(logger *slog.Logger) (*reel.Encoder, error) {
-	logger.Info("Reel target-quality mode selected",
-		"decision_type", logs.DecisionEncodingConfig,
-		"decision_result", "target",
-		"decision_reason", "spindle always uses Reel target-quality mode",
-	)
-
-	encoder, err := reel.New(reel.WithQualityMode("target"))
-	if err != nil {
-		return nil, fmt.Errorf("create reel encoder: %w", err)
-	}
-	return encoder, nil
-}
-
 const encodeStreamPollInterval = 10 * time.Second
 
 // rippingActive reports whether the item's ripping task is still pending or
@@ -202,7 +189,7 @@ type encodeJobResult struct {
 	encodedSize  int64
 }
 
-func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encoder *reel.Encoder, encodedDir string, jobs []stage.AssetJob) (encodeSummary, error) {
+func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encodedDir string, jobs []stage.AssetJob) (encodeSummary, error) {
 	logger := sess.Logger
 	env := sess.Env
 	var summary encodeSummary
@@ -222,7 +209,7 @@ func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encoder *
 			continue
 		}
 
-		result, err := h.encodeJob(ctx, sess, encoder, encodedDir, job)
+		result, err := h.encodeJob(ctx, sess, encodedDir, job)
 		if err != nil {
 			return summary, err
 		}
@@ -236,7 +223,7 @@ func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encoder *
 	return summary, nil
 }
 
-func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encoder *reel.Encoder, encodedDir string, job stage.AssetJob) (encodeJobResult, error) {
+func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encodedDir string, job stage.AssetJob) (encodeJobResult, error) {
 	item := sess.Item
 	logger := sess.Logger
 
@@ -272,7 +259,7 @@ func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encoder *r
 	}
 
 	reporter := newSpindleReporter(sess, logger, job.Key, job.ProgressIndex, job.ProgressTotal)
-	result, encErr := encoder.EncodeWithReporter(ctx, job.Input.Path, encodedDir, reporter)
+	result, encErr := runWorkerProcess(ctx, logger, job.Input.Path, encodedDir, reporter)
 	if encErr != nil {
 		return encodeJobResult{failed: true}, h.handleEncodeFailure(logger, sess, job, encErr)
 	}
