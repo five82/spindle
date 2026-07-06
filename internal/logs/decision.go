@@ -26,6 +26,7 @@ const (
 	DecisionDuplicateDetection       = "duplicate_detection"
 	DecisionEncodeCleanup            = "encode_cleanup"
 	DecisionEncodeResume             = "encode_resume"
+	DecisionEncodeTierSignal         = "encode_tier_signal"
 	DecisionEncodingConfig           = "encoding_config"
 	DecisionEncodingPlan             = "encoding_plan"
 	DecisionEncodingValidation       = "encoding_validation"

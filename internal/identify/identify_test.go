@@ -255,7 +255,7 @@ func TestBuildEnvelope_Valid(t *testing.T) {
 		VoteCount:   1000,
 	}
 
-	env := h.buildEnvelope(context.Background(), discardLogger(), item, discInfo, best, "movie", "bluray", false)
+	env := h.buildEnvelope(context.Background(), discardLogger(), item, discInfo, best, "movie", "bluray")
 
 	if env.Version != ripspec.CurrentVersion {
 		t.Errorf("Version = %d, want %d", env.Version, ripspec.CurrentVersion)
@@ -314,7 +314,7 @@ func TestBuildEnvelope_TV(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(context.Background(), discardLogger(), item, discInfo, best, "tv", "bluray", false)
+	env := h.buildEnvelope(context.Background(), discardLogger(), item, discInfo, best, "tv", "bluray")
 
 	if env.Metadata.MediaType != "tv" {
 		t.Errorf("MediaType = %q, want %q", env.Metadata.MediaType, "tv")
@@ -347,7 +347,7 @@ func TestBuildEnvelopeFromCache(t *testing.T) {
 			},
 		}
 
-		env := h.buildEnvelopeFromCache(context.Background(), discardLogger(), item, entry, discInfo, "bluray", false)
+		env := h.buildEnvelopeFromCache(context.Background(), discardLogger(), item, entry, discInfo, "bluray")
 
 		if env.Version != ripspec.CurrentVersion {
 			t.Errorf("Version = %d, want %d", env.Version, ripspec.CurrentVersion)
@@ -389,7 +389,7 @@ func TestBuildEnvelopeFromCache(t *testing.T) {
 			},
 		}
 
-		env := h.buildEnvelopeFromCache(context.Background(), discardLogger(), item, entry, discInfo, "bluray", false)
+		env := h.buildEnvelopeFromCache(context.Background(), discardLogger(), item, entry, discInfo, "bluray")
 
 		if env.Metadata.MediaType != "tv" {
 			t.Errorf("MediaType = %q, want %q", env.Metadata.MediaType, "tv")
@@ -418,7 +418,7 @@ func TestBuildEnvelopeFromCache(t *testing.T) {
 			Year:      "2022",
 		}
 
-		env := h.buildEnvelopeFromCache(context.Background(), discardLogger(), item, entry, nil, "bluray", false)
+		env := h.buildEnvelopeFromCache(context.Background(), discardLogger(), item, entry, nil, "bluray")
 
 		if len(env.Titles) != 0 {
 			t.Errorf("len(Titles) = %d, want 0 for nil discInfo", len(env.Titles))
@@ -643,7 +643,7 @@ func TestBuildEnvelope_TVCreatesEpisodes(t *testing.T) {
 		VoteCount:    500,
 	}
 
-	env := h.buildEnvelope(context.Background(), discardLogger(), item, discInfo, best, "tv", "bluray", false)
+	env := h.buildEnvelope(context.Background(), discardLogger(), item, discInfo, best, "tv", "bluray")
 
 	if env.Metadata.SeasonNumber != 2 {
 		t.Errorf("SeasonNumber = %d, want 2", env.Metadata.SeasonNumber)
@@ -1155,26 +1155,75 @@ func TestCreateEpisodePlaceholders_TNGLikeSelection(t *testing.T) {
 	}
 }
 
-func TestDetectUHD(t *testing.T) {
+func TestStampUHDFromScan(t *testing.T) {
+	videoTitle := func(size string) makemkv.TitleInfo {
+		track := makemkv.Track{Type: makemkv.TrackTypeVideo}
+		if size != "" {
+			track.Attributes = map[int]string{makemkvVideoSizeAttr: size}
+		}
+		return makemkv.TitleInfo{Tracks: []makemkv.Track{
+			{Type: makemkv.TrackTypeAudio, Attributes: map[int]string{makemkvVideoSizeAttr: "9999x9999"}},
+			track,
+		}}
+	}
+
 	tests := []struct {
-		name  string
-		title string
-		bd    *BDInfoResult
-		want  bool
+		name     string
+		discInfo *makemkv.DiscInfo
+		want     bool
 	}{
-		{"uhd marker", "MOVIE_UHD", nil, true},
-		{"4k marker", "Movie 4K Ultra HD", nil, true},
-		{"2160p marker", "MOVIE_2160P", nil, true},
-		{"plain bluray", "MOVIE_S1_D1", nil, false},
-		{"bdinfo volume", "MOVIE", &BDInfoResult{VolumeIdentifier: "MOVIE_4K_UHD"}, true},
-		{"bdinfo disc name", "MOVIE", &BDInfoResult{DiscName: "Movie Ultra HD"}, true},
-		{"no markers anywhere", "MOVIE", &BDInfoResult{VolumeIdentifier: "MOVIE_D1", DiscName: "Movie"}, false},
+		{"uhd size", &makemkv.DiscInfo{Titles: []makemkv.TitleInfo{videoTitle("3840x2160")}}, true},
+		{"hd size", &makemkv.DiscInfo{Titles: []makemkv.TitleInfo{videoTitle("1920x1080")}}, false},
+		{"missing attr", &makemkv.DiscInfo{Titles: []makemkv.TitleInfo{videoTitle("")}}, false},
+		{"unparseable attr", &makemkv.DiscInfo{Titles: []makemkv.TitleInfo{videoTitle("mysterysize")}}, false},
+		{"largest title wins", &makemkv.DiscInfo{Titles: []makemkv.TitleInfo{
+			videoTitle("720x480"), videoTitle("3840x2160"),
+		}}, true},
+		{"nil disc info", nil, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := detectUHD(tt.title, tt.bd); got != tt.want {
-				t.Fatalf("detectUHD(%q) = %v, want %v", tt.title, got, tt.want)
+			env := &ripspec.Envelope{Metadata: ripspec.Metadata{UHD: !tt.want}} // prove assignment, not default
+			stampUHDFromScan(discardLogger(), env, tt.discInfo)
+			if env.Metadata.UHD != tt.want {
+				t.Fatalf("Metadata.UHD = %v, want %v", env.Metadata.UHD, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildEnvelope_StampsUHDFromScan(t *testing.T) {
+	h := &Handler{}
+	item := &queue.Item{DiscFingerprint: "abc123"}
+	discInfo := &makemkv.DiscInfo{
+		Name: "Test Disc",
+		Titles: []makemkv.TitleInfo{{
+			ID: 0, Duration: 7200,
+			Tracks: []makemkv.Track{{Type: makemkv.TrackTypeVideo, Attributes: map[int]string{makemkvVideoSizeAttr: "3840x2160"}}},
+		}},
+	}
+	best := &tmdb.SearchResult{ID: 12345, Title: "Test Movie"}
+
+	env := h.buildEnvelope(context.Background(), discardLogger(), item, discInfo, best, "movie", "bluray")
+	if !env.Metadata.UHD {
+		t.Fatal("expected Metadata.UHD = true from 3840x2160 scan attribute")
+	}
+}
+
+func TestBuildEnvelopeFromCache_StampsUHDFromScan(t *testing.T) {
+	h := &Handler{}
+	item := &queue.Item{DiscFingerprint: "abc123"}
+	discInfo := &makemkv.DiscInfo{
+		Name: "Test Disc",
+		Titles: []makemkv.TitleInfo{{
+			ID: 0, Duration: 7200,
+			Tracks: []makemkv.Track{{Type: makemkv.TrackTypeVideo, Attributes: map[int]string{makemkvVideoSizeAttr: "3840x2160"}}},
+		}},
+	}
+	entry := &discidcache.Entry{TMDBID: 12345, MediaType: "movie", Title: "Test Movie", Year: "2024"}
+
+	env := h.buildEnvelopeFromCache(context.Background(), discardLogger(), item, entry, discInfo, "bluray")
+	if !env.Metadata.UHD {
+		t.Fatal("expected Metadata.UHD = true from 3840x2160 scan attribute")
 	}
 }

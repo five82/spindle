@@ -580,15 +580,25 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 		}
 	}
 
-	// Validate all ripped artifacts with ffprobe.
+	// Validate all ripped artifacts with ffprobe. The first artifact's probe
+	// also re-stamps the encode-tier resolution signal (env.Metadata.UHD),
+	// correcting the identification-time MakeMKV scan stamp with the actual
+	// file's resolution. Both the fresh-rip and rip-cache-restore paths
+	// funnel through this function.
 	visited := make(map[string]struct{})
 	var validationErrors int
+	var tierSignalRecorded bool
 	for i, asset := range env.Assets.Ripped {
 		if _, seen := visited[asset.Path]; seen {
 			continue
 		}
 		visited[asset.Path] = struct{}{}
-		if err := h.validateRippedArtifact(ctx, asset.Path); err != nil {
+		probe, err := h.validateRippedArtifact(ctx, asset.Path)
+		if !tierSignalRecorded {
+			tierSignalRecorded = true
+			recordEncodeTierSignal(logger, env, asset.Path, probe, err)
+		}
+		if err != nil {
 			if env.Metadata.MediaType == "tv" && len(env.Episodes) > 0 {
 				// Per-episode failure isolation: mark failed, continue.
 				logger.Warn("ripped episode failed validation",

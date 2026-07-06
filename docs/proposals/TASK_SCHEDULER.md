@@ -718,7 +718,20 @@ dependent failure, per-asset outcomes and review state).
   signal claims 4K; unknowns default 1080p so pairing stays available for
   the common library; a missed marker degrades to a disguised same-tier
   pair -- slower, never incorrect). Cross-tier pairing and same-tier
-  serialization covered by a workflow test. PRODUCTION VALIDATION
+  serialization covered by a workflow test. 2026-07-06 REVISION: the
+  label-marker approach failed in production (Kill Bill Vol. 1, real 4K
+  rip, no UHD marker in the label -> claimed encode_1080p), and the
+  "never incorrect" claim does not hold: a disguised 4K in the 1080p
+  slot can pair with a correctly-flagged 4K item, producing the 4K+4K
+  memory/bandwidth contention the tier slots exist to prevent. The flag
+  is now stamped twice from evidence (>=2560 wide or >=1440 tall): at
+  identification from the MakeMKV scan's per-stream video-size attribute
+  (SINFO attr 19), which is what makes the claim correct at encode
+  dispatch -- encoding depends only on identification (streaming rips),
+  so the tier is claimed before any ripped file exists -- and again at
+  rip completion from an ffprobe of the actual file, correcting scan
+  gaps whenever the claim is re-evaluated (contention, retry). The label
+  regex was deleted. PRODUCTION VALIDATION
   PENDING: queue one UHD and one BD item together and observe paired
   encodes; also the first daemon-driven worker encode on a real disc.
   2026-07-05 update: the worker-encode half PASSED during the Phase A

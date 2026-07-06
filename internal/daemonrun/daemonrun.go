@@ -45,9 +45,12 @@ import (
 )
 
 // encodeTierClaims picks the encode slot matching the item's resolution
-// tier: encode_4k on a positive UHD signal from identification, encode_1080p
+// tier: encode_4k on a positive UHD signal in the envelope, encode_1080p
 // otherwise (unknown tiers default to 1080p so pairing stays available for
 // the common non-UHD library; see the Phase 5 notes in the task-graph plan).
+// The signal is stamped at identification from the MakeMKV scan's video-size
+// attribute -- before this claim can first resolve -- and corrected at rip
+// completion from an ffprobe of the actual ripped file.
 func encodeTierClaims(item *queue.Item) map[string]int {
 	env, err := ripspec.Parse(item.RipSpecData)
 	if err == nil && env.Metadata.UHD {
@@ -224,9 +227,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			// (validated 2026-07-04: probe scores bit-identical cross-process,
 			// +23.9% pooled wall on the air+sully pair) while same-tier
 			// concurrency stays 1. The tier claim resolves per item from the
-			// UHD flag identification stamps into the envelope; a missed UHD
-			// marker degrades to a disguised same-tier pair (slower, never
-			// incorrect).
+			// envelope UHD flag: identification stamps it from the MakeMKV
+			// scan's video-size attribute (pre-dispatch, so the claim is
+			// correct for fresh discs whose encode task starts before
+			// ripping finishes), and rip completion re-stamps it from an
+			// ffprobe of the actual file, covering scan gaps when the claim
+			// is re-evaluated (contention/retry).
 			Claims:     map[string]int{"encode_1080p": 1, "encode_4k": 1},
 			ClaimsFunc: encodeTierClaims,
 			DependsOn:  []queue.Stage{queue.StageIdentification}},
