@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeTempLog(t *testing.T, dir, name, content string) {
@@ -189,5 +190,25 @@ func TestHydrateFromDir_EmptyDir(t *testing.T) {
 	entries, _ := buf.Query(LogQueryOpts{Limit: 100})
 	if len(entries) != 0 {
 		t.Fatalf("got %d entries, want 0", len(entries))
+	}
+}
+
+func TestQueryMinTimeClampsEntries(t *testing.T) {
+	buf := NewLogBuffer(10)
+	cutoff := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+
+	buf.Append(LogEntry{Time: "2026-05-24T14:12:20Z", ItemID: 1, Level: "WARN", Msg: "stale"})
+	buf.Append(LogEntry{Time: "not-a-timestamp", ItemID: 1, Level: "WARN", Msg: "unparseable"})
+	buf.Append(LogEntry{Time: "2026-07-01T12:00:00.5Z", ItemID: 1, Level: "ERROR", Msg: "current"})
+
+	entries, _ := buf.Query(LogQueryOpts{ItemID: 1, MinTime: cutoff, Limit: 10})
+	if len(entries) != 1 || entries[0].Msg != "current" {
+		t.Fatalf("clamped query returned %+v, want only the current entry", entries)
+	}
+
+	// Without the clamp all three remain visible.
+	entries, _ = buf.Query(LogQueryOpts{ItemID: 1, Limit: 10})
+	if len(entries) != 3 {
+		t.Fatalf("unclamped query returned %d entries, want 3", len(entries))
 	}
 }

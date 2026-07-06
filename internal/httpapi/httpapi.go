@@ -349,6 +349,13 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("item"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			opts.ItemID = n
+			// Clamp to the item's lifetime so hydrated history from a
+			// previous queue generation's item with the same ID stays out.
+			if item, err := s.store.GetByID(n); err == nil && item != nil {
+				if created, perr := time.Parse(time.RFC3339Nano, item.CreatedAt); perr == nil {
+					opts.MinTime = created
+				}
+			}
 		}
 	}
 	if v := q.Get("daemon_only"); v == "1" {

@@ -83,6 +83,12 @@ type LogQueryOpts struct {
 	Request    string // filter by request ID (case-insensitive)
 	Level      string // minimum log level (debug, info, warn, error)
 	DaemonOnly bool   // only entries with ItemID == 0
+
+	// MinTime drops entries timestamped before this instant (zero = no
+	// clamp). Item-scoped queries set it to the item's created_at: queue
+	// clears recreate the DB and reuse item IDs, so hydrated history from
+	// a previous item with the same ID must not leak into the results.
+	MinTime time.Time
 }
 
 // levelRank maps log levels to numeric ranks for >= filtering.
@@ -196,6 +202,14 @@ func (b *LogBuffer) matchesFilter(e LogEntry, opts LogQueryOpts, minLevel int) b
 	}
 	if minLevel >= 0 && levelRank(e.Level) < minLevel {
 		return false
+	}
+	if !opts.MinTime.IsZero() {
+		// Entries that cannot prove they fall inside the window are
+		// dropped: the clamp exists to keep stale history out.
+		t, err := time.Parse(time.RFC3339Nano, e.Time)
+		if err != nil || t.Before(opts.MinTime) {
+			return false
+		}
 	}
 	return true
 }

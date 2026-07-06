@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/queue"
@@ -371,5 +372,60 @@ func TestStatusIncludesPipelineAndScheduler(t *testing.T) {
 	drive := body.Scheduler.Resources["drive"]
 	if drive.Used != 1 || len(drive.Holders) != 1 || drive.Holders[0].Task != "ripping" {
 		t.Fatalf("drive occupancy not exposed: %+v", drive)
+	}
+}
+
+func TestLogsItemQueryScopedToItemLifetime(t *testing.T) {
+	store := testStore(t)
+
+	// Simulate a queue clear followed by ID reuse: the log buffer holds
+	// hydrated history from a previous item #1, then a fresh item #1 is
+	// created and logs new lines.
+	buffer := httpapi.NewLogBuffer(16)
+	buffer.Append(httpapi.LogEntry{
+		Time: "2026-05-24T14:12:20Z", ItemID: 1, Level: "ERROR", Msg: "old generation failure",
+	})
+
+	item, err := store.NewDisc("Breaking Bad", "fp-1")
+	if err != nil {
+		t.Fatalf("new disc: %v", err)
+	}
+	if item.ID != 1 {
+		t.Fatalf("expected reused item ID 1, got %d", item.ID)
+	}
+
+	current := time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano)
+	buffer.Append(httpapi.LogEntry{
+		Time: current, ItemID: 1, Level: "WARN", Msg: "current generation warning",
+	})
+
+	srv := httpapi.New(store, "", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)), httpapi.StatusInfo{}, buffer, nil, nil, nil)
+
+	fetch := func(target string) []httpapi.LogEntry {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+		var body struct {
+			Events []httpapi.LogEntry `json:"events"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		return body.Events
+	}
+
+	// Item-scoped query returns only lines from this item's lifetime.
+	events := fetch("/api/logs?item=1")
+	if len(events) != 1 || events[0].Msg != "current generation warning" {
+		t.Fatalf("item query returned %+v, want only the current-generation line", events)
+	}
+
+	// The unscoped daemon log keeps the full history.
+	if events = fetch("/api/logs"); len(events) != 2 {
+		t.Fatalf("unscoped query returned %d events, want 2", len(events))
 	}
 }
