@@ -56,6 +56,17 @@ func encodeTierClaims(item *queue.Item) map[string]int {
 	return map[string]int{"encode_1080p": 1}
 }
 
+// contentIDClaims claims the GPU only for TV items: episode identification
+// is a pure skip for movies and unknown media types, so those items must
+// not queue behind other items' GPU work just to no-op through the stage.
+func contentIDClaims(item *queue.Item) map[string]int {
+	env, err := ripspec.Parse(item.RipSpecData)
+	if err == nil && strings.EqualFold(strings.TrimSpace(env.Metadata.MediaType), "tv") {
+		return map[string]int{"gpu": 1}
+	}
+	return map[string]int{}
+}
+
 // Run starts the daemon and blocks until shutdown signal.
 func Run(ctx context.Context, cfg *config.Config) error {
 	// Ensure state/log directory exists.
@@ -206,7 +217,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	manager.ConfigureStages([]workflow.PipelineStage{
 		{Stage: queue.StageIdentification, Handler: identifyHandler, Claims: map[string]int{"drive": 1}},
 		{Stage: queue.StageRipping, Handler: ripperHandler, Claims: map[string]int{"drive": 1}, DependsOn: []queue.Stage{queue.StageIdentification}},
-		{Stage: queue.StageEpisodeIdentification, Handler: contentidHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageRipping}},
+		{Stage: queue.StageEpisodeIdentification, Handler: contentidHandler, Claims: map[string]int{"gpu": 1}, ClaimsFunc: contentIDClaims, DependsOn: []queue.Stage{queue.StageRipping}},
 		{Stage: queue.StageEncoding, Handler: encoderHandler,
 			// Cross-title pairing (task-graph plan, Phase 5): one encode slot
 			// per resolution tier, so a 1080p encode and a 4K encode pair
