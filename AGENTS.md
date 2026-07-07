@@ -21,6 +21,16 @@ exception is `queue clear --all` (deletes the transient queue DB files).
 Related repos: `../reel` (AV1 encoder used as a library),
 `../flyer` (read-only TUI, the HTTP API's one consumer).
 
+## Related Repos
+
+| Repo | Path | Role |
+|------|------|------|
+| reel | `~/projects/reel/` | AV1 encoding tool/library |
+| spindle | `~/projects/spindle/` | Orchestrator that uses Reel as a library (this repo) |
+| flyer | `~/projects/flyer/` | Read-only TUI for Spindle |
+
+GitHub/Codeberg: [reel](https://codeberg.org/five82/reel) | [spindle](https://github.com/five82/spindle) | [flyer](https://github.com/five82/flyer)
+
 ## Complexity budget
 
 YAGNI and KISS: build only what the current task requires; when two
