@@ -663,7 +663,11 @@ func (r *spindleReporter) Warning(message string) {
 	r.logger.Warn("reel warning",
 		"event_type", "reel_warning",
 		"error_hint", message,
-		"impact", "encoding may produce suboptimal results",
+		// Spindle cannot know what an arbitrary reel warning means for the
+		// encode; target-quality mode enforces per-chunk quality regardless,
+		// so most warnings (e.g. worker reductions) cost wall time, not
+		// quality. The specifics live in error_hint.
+		"impact", "reel reported degraded behavior; see error_hint",
 	)
 }
 
