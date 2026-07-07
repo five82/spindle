@@ -109,10 +109,8 @@ type IdentifyResult struct {
 // without persisting to the queue or sending notifications.
 // Used by both the daemon (via Run) and the CLI identify command.
 //
-// It is the composition of the two task functions from
-// docs/proposals/TASK_SCHEDULER.md: scanDisc (task disc_scan, needs the
-// optical drive) followed by resolveMetadata (task resolve_metadata,
-// network/local only).
+// It is the composition of two idempotent task functions: scanDisc (needs
+// the optical drive) followed by resolveMetadata (network/local only).
 func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.Logger) (*IdentifyResult, error) {
 	result, err := h.scanDisc(ctx, item, logger)
 	if err != nil {

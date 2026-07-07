@@ -8,21 +8,23 @@ The daemon owns disc detection, queue access, and the automated pipeline. Queue 
 
 ## Lifecycle at a Glance
 
-Every item moves through the queue in order. Each item has a **stage** and an
-**in_progress** flag. The stages you will see are:
+Each item runs a small task graph, not a strict sequence. The stages you will
+see are:
 
 - `identification` - disc queued; MakeMKV scan plus TMDB/disc metadata resolution
 - `ripping` - video copied to staging or restored from rip cache; you'll get a notification when the drive is available
 - `episode_identification` *(TV only)* - WhisperX plus OpenSubtitles correlate ripped files to definitive episode numbers
-- `encoding` - Reel target-quality mode transcodes the rip in the background
-- `audio_analysis` - refines encoded audio; optionally detects commentary when `commentary.enabled = true`
-- `subtitling` *(optional)* - WhisperX transcription generates one English display SRT per output
+- `encoding` - Reel target-quality mode transcodes rips; starts alongside ripping and consumes each title as it finishes
+- `analysis` - optionally detects commentary per episode from the ripped audio when `commentary.enabled = true`
+- `subtitling` *(optional)* - WhisperX transcription generates one English display SRT per output (generation only)
+- `apply` - applies audio refinement, commentary labeling, and subtitle muxing to the encoded files
 - `organizing` - files are copied/moved into your library or review area; Jellyfin refresh is triggered when configured
 - `completed` - all done
 - `failed` - an error or user stop halted progress; fix the root cause and retry or clear
 
-The `in_progress` flag indicates whether a stage is actively running. When a
-stage finishes, the item advances to the next stage with `in_progress` cleared.
+The item's displayed **stage** is the scheduler's coarse position; during
+overlap windows (rip+encode, encode+analysis) two tasks run at once and each
+reports its own progress. `spindle queue show <id>` lists per-task state.
 
 Items may also have a `needs_review` flag set. Review routes some or all output
 to `review_dir` without necessarily stopping the workflow.
@@ -31,10 +33,13 @@ Use `spindle queue list` to inspect items and `spindle status` for lifecycle tot
 
 ## How the Workflow Runs
 
-Spindle can process multiple items at different stages at the same time. Shared
-resources are protected by one-at-a-time semaphores: the optical drive for
-identification/ripping, the encoder for Reel, and WhisperX for transcription
-work.
+Spindle schedules stage tasks against resource budgets: the optical drive
+(identification/ripping), the GPU (WhisperX work), and one encode slot. A
+task runs as soon as its dependencies are done and its resources are free,
+so one item's encoding overlaps its ripping and analysis work, and multiple
+items can be in flight at different stages. Encodes run in a separate
+`spindle encode-worker` process so an encoder crash fails one job, not the
+daemon.
 
 ## Stage 1: Disc Detection and Queueing
 
@@ -54,7 +59,7 @@ Use `spindle disc pause` to temporarily stop queueing new discs without stopping
 1. Spindle probes the disc source, optionally runs `bd_info` for Blu-ray metadata, and scans the disc with MakeMKV.
 2. Title resolution uses KeyDB when available, then BDInfo, MakeMKV, the disc label, and finally a fallback title.
 3. Identification uses the Blu-ray disc ID cache when enabled and valid. Otherwise it searches TMDB using the cleaned title, year hints, and TV/movie hints.
-4. For TV discs, Spindle selects likely episode titles and excludes obvious extras, duplicates, and play-all style duplicates.
+4. For TV discs, Spindle selects every episode-plausible title and excludes only titles with structural evidence against them (below minimum length, gross runtime outliers, duplicates, play-all composites), bounded by the expected TMDB episode count. Episode identification later arbitrates which rips are real episodes.
 5. When a confident match is found, Spindle stores metadata, writes the RipSpec, updates `disc_title` to a canonical name, and sends an identification-complete notification.
 6. If no confident TMDB match is found, the item is marked for review. TV-hinted discs fail at identification and do not advance to ripping; non-TV/unknown discs continue as degraded items and the organizer routes output to review.
 
@@ -80,46 +85,58 @@ For discs with multiple feature-length titles, use `spindle cache rip --choose` 
 2. For TV, Spindle transcribes ripped assets with WhisperX, fetches reference subtitles from OpenSubtitles, and matches content to TMDB season episodes.
 3. Results are written back into the RipSpec so encoding and organizing use correct episode labels. The current implementation can also conservatively infer an opening double-length episode on disc 1 when runtime and sequence evidence support it.
 4. TV items without required matcher clients, with no valid transcriptions, or with no reference subtitles are marked for review and continue as degraded items.
-5. TMDB season acquisition errors, transcription errors, and reference-acquisition errors that remain after OpenSubtitles retry fail the stage so the external dependency can be fixed and the item retried.
+5. A rip that matches no candidate episode is classified a probable extra and routed to the review directory without blocking the item's matched episodes. A matched set that is provably incomplete (disc 1 not starting at episode 1, or multiple gaps) routes all episodes to review rather than delivering a partial season.
+6. TMDB season acquisition errors, transcription errors, and reference-acquisition errors that remain after OpenSubtitles retry fail the stage so the external dependency can be fixed and the item retried.
 
 ## Stage 5: Encoding (`encoding`)
 
-1. The encoder builds jobs from completed ripped assets: one job for a movie or one job per TV asset.
-2. Reel runs in target-quality mode with Reel defaults.
+Encoding is dispatched as soon as identification completes and runs in
+parallel with ripping and the analysis branch.
+
+1. The encoder consumes completed ripped assets as each title finishes ripping: one job for a movie or one job per TV asset.
+2. Reel runs in target-quality mode with Reel defaults, in a `spindle encode-worker` subprocess.
 3. For multi-file encodes, displayed percent is cumulative across the whole encoding stage.
 4. Encoded output is written to `<staging_dir>/<fingerprint-or-queue-id>/encoded/`.
 5. The RipSpec and encoding telemetry snapshot are updated as jobs progress so progress is recoverable and encoded counts can advance live.
-6. If Reel validation fails, the affected asset is flagged for review. If any encode job fails, the stage fails after recording per-asset failure state.
+6. If Reel validation fails, the affected asset is flagged for review. If any encode job fails, the stage fails after recording per-asset failure state. If a rip fails mid-disc, the encoder finishes the assets that exist so the work is preserved for retry.
 
-## Stage 6: Audio Analysis (`audio_analysis`)
+## Stage 6: Analysis (`analysis`)
 
-Audio analysis runs after encoding and before subtitle generation.
+Analysis reads the RIPPED audio, so it runs while encoding is still in
+progress.
 
-1. The stage collects completed encoded assets and fails if none exist.
-2. When `commentary.enabled = true` and an LLM client is configured, it examines non-primary tracks on the first encoded asset, using transcription similarity to exclude stereo downmixes and LLM classification to detect commentary.
-3. Audio refinement strips non-English/redundant tracks while preserving primary audio and detected commentary tracks. Refinement failure is logged as a warning and the workflow continues with existing tracks.
-4. The stage performs post-refinement primary-audio selection and commentary disposition/labeling.
-5. Audio analysis results are stored in the RipSpec for dashboards and downstream stages.
+1. When `commentary.enabled = true` and an LLM client is configured, it examines non-primary tracks per episode, using transcription similarity to exclude stereo downmixes and LLM classification to detect commentary.
+2. Results (per-episode commentary and excluded tracks) are stored in the RipSpec; the actual track changes happen later in `apply`.
+3. When commentary detection is disabled, the stage logs a skip and advances.
 
 ## Stage 7: Subtitle Generation (`subtitling`)
 
 When `subtitles.enabled = false`, this stage logs a skip and advances.
 
-When enabled, Spindle generates subtitles per encoded asset:
+When enabled, Spindle generates subtitles per asset from ripped audio and the
+shared WhisperX transcript artifacts (transcription usually already happened
+for episode ID or commentary, so this stage is often seconds per episode):
 
-1. Selects the primary audio track.
-2. Generates canonical WhisperX transcript artifacts through the shared transcription wrapper.
-3. Formats display subtitles with hallucination filtering, Stable-TS formatting, line wrapping, retiming, and SRT validation.
-4. Uses the encoded media duration for validation when available; transcript duration is only a fallback.
-5. Writes one primary English display subtitle as `<basename>.<lang>.srt` beside the encoded media.
-6. If `subtitles.mux_into_mkv = true` (the default), the generated subtitle is muxed into the MKV and existing subtitle tracks are replaced. If muxing fails or muxing is disabled, the SRT sidecar remains available.
-7. Subtitle failures are recorded per asset and processing continues with other assets when possible. If every attempted subtitle job fails, the stage fails.
+1. Selects the primary audio track and reuses or generates the canonical WhisperX transcript artifact.
+2. Formats display subtitles with hallucination filtering, Stable-TS formatting, line wrapping, retiming, and SRT validation.
+3. Writes one primary English display subtitle per output into staging.
+4. Subtitle failures are recorded per asset and processing continues with other assets when possible. If every attempted subtitle job fails, the stage fails.
 
 Spindle intentionally does not use PGS subtitles as final library output. Final primary display subtitles are SRT because SRT works better with Jellyfin and downstream tooling.
 
 `spindle debug subtitle /path/to/video.mkv` generates a WhisperX English SRT for an existing encode. By default, the generated subtitle is muxed into MKV output when subtitle muxing is enabled; `--external` writes a sidecar SRT instead.
 
-## Stage 8: Organizing and Jellyfin Refresh (`organizing` -> `completed`)
+## Stage 8: Apply (`apply`)
+
+Apply waits for both encoding and the analysis branch, then performs every
+write to the encoded files:
+
+1. Audio refinement strips non-English/redundant tracks while preserving primary audio and detected commentary tracks (using each episode's own commentary indices). Refinement failure is logged as a warning and the workflow continues with existing tracks.
+2. Post-refinement primary-audio selection and commentary disposition/labeling.
+3. Duration validation against the encoded media.
+4. If `subtitles.mux_into_mkv = true` (the default), the generated subtitle is muxed into the MKV and existing subtitle tracks are replaced. If muxing fails or muxing is disabled, the SRT sidecar is placed beside the encoded media instead.
+
+## Stage 9: Organizing and Jellyfin Refresh (`organizing` -> `completed`)
 
 1. The organizer chooses subtitled assets when present, otherwise encoded assets.
 2. Clean movie outputs are copied to `library_dir/movies/Title (Year)/Title (Year).mkv` by default.

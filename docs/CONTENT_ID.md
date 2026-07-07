@@ -23,6 +23,25 @@ This document captures the intended behavior and review policy.
 - **Observable decisions matter.** Candidate selection, reference acquisition,
   match outcomes, LLM verification, and review routing should be logged.
 
+## Title selection upstream (identification stage)
+
+TV title selection (`internal/identify`) feeds this stage and follows one
+invariant, adopted 2026-07-05 after runtime-cluster heuristics silently
+dropped a real pilot before ripping:
+
+> Statistics may rank titles. Only structural evidence may drop them.
+
+Titles are excluded only for structural reasons: below minimum length, gross
+runtime outlier (under half the candidate median), exact duplicate, or a
+segment map provable as the union of other selected titles (play-all
+composites). Everything episode-plausible is ripped, bounded by the expected
+TMDB episode count (per-episode runtimes rank candidates when
+over-subscribed; missing TMDB data admits rather than excludes). Content
+evidence in this stage — not runtime statistics at selection time — decides
+what is actually an episode. The asymmetry is deliberate: content ID can
+reject a bad inclusion cheaply (see probable extra below), but nothing can
+resurrect a title that was never ripped.
+
 ## Preconditions
 
 The stage runs for TV items after ripping. It expects:

@@ -26,19 +26,26 @@ through `api.bind`, but the default deployment is local-only.
 
 ## Pipeline
 
-Queue items move through these stages in order:
+The pipeline is a per-item DAG, not a linear sequence. Each stage below is one
+scheduler task; `Depends on` lists the template edges registered in
+`internal/daemonrun`:
 
-| Stage | Purpose | Notes |
-|-------|---------|-------|
-| `identification` | Scan the disc, infer movie/TV, resolve metadata, build RipSpec | Uses MakeMKV, TMDB, optional BDInfo, KeyDB, and disc ID cache |
-| `ripping` | Copy selected disc titles into staging | Uses MakeMKV or restores from rip cache; pauses disc detection while the drive is in use |
-| `episode_identification` | Map TV ripped titles to canonical episodes | Skipped for movies and non-TV items |
-| `encoding` | Encode ripped media to AV1 through Reel target-quality mode | Persists telemetry snapshots |
-| `audio_analysis` | Refine audio and optionally detect commentary | Commentary detection is controlled by config and uses WhisperX/LLM when available |
-| `subtitling` | Optionally generate display SRTs | Final Jellyfin-facing subtitles are SRT; muxing into MKV is configurable |
-| `organizing` | Copy/move outputs to library or review and refresh Jellyfin | Cleans staging after successful routing |
-| `completed` | Terminal success state | Queue item can be cleared |
-| `failed` | Terminal failure state until retry/clear | Retains failed stage and error message when the failure came from a stage |
+| Stage | Depends on | Claims | Purpose |
+|-------|------------|--------|---------|
+| `identification` | - | drive | Scan the disc, infer movie/TV, resolve metadata, build RipSpec (MakeMKV, TMDB, optional BDInfo, KeyDB, disc ID cache) |
+| `ripping` | identification | drive | Copy selected disc titles into staging with MakeMKV, or restore from rip cache |
+| `episode_identification` | ripping | gpu (TV only) | Map TV ripped titles to canonical episodes; a claim-free no-op for movies |
+| `encoding` | identification | encode | Encode to AV1 through Reel target-quality mode in a `spindle encode-worker` subprocess. Runs in parallel with ripping, streaming completed ripped assets as they land |
+| `analysis` | episode_identification | gpu | Per-episode commentary detection from RIPPED audio (config-gated, WhisperX/LLM) |
+| `subtitling` | analysis | gpu | Generate display SRTs from ripped audio/transcript artifacts into staging; generation only, no muxing |
+| `apply` | subtitling, encoding | - | Joins both branches; owns every write to encoded files: audio refinement, commentary disposition, duration validation, subtitle muxing |
+| `organizing` | apply | - | Copy/move outputs to library or review, refresh Jellyfin, clean staging |
+| `completed` | | | Terminal success state |
+| `failed` | | | Terminal failure state until retry/clear; retains failed stage and error message |
+
+The analysis branch (episode ID, commentary, subtitle generation) reads ripped
+sources, so it runs concurrently with encoding. Interleaved log timelines for
+one item are normal, not disorder.
 
 Review is distinct from failure. Review means Spindle produced output but the
 operator should inspect it before treating it as normal library output. Failure
@@ -54,12 +61,17 @@ clear the database.
 
 The queue stores:
 
-- Current stage and `in_progress` flag.
+- Current stage and `in_progress` flag (the scheduler's coarse position; it
+  lags running tasks during overlap windows).
 - Failure, user-stop, and review state.
-- Progress fields, active episode key, byte-copy counters, and encoding snapshot
-  JSON.
+- Encoding snapshot JSON.
 - Disc fingerprint and metadata JSON.
 - The RipSpec envelope as opaque JSON text.
+- A `tasks` table: one row per pipeline stage per item with state
+  (pending/running/done/failed/skipped), attempts, dependency edges, and
+  per-task progress (percent, message, byte counters, active asset key).
+  Task rows are a projection of `(template, item stage)`: retry and
+  stage moves delete them and the scheduler recompiles lazily.
 
 Implementation source: `internal/queue`.
 
@@ -75,24 +87,36 @@ The Go type is the source of truth for exact fields and helper methods:
 
 ## Concurrency and recovery
 
-The workflow manager polls the queue and starts stage workers. Semaphore capacity
-is one per scarce resource:
+The workflow manager runs a task scheduler: it dispatches any task whose
+dependency edges are done and whose resource claims fit the configured
+budgets, waking on task completion with a timer fallback. Resource budgets
+are capacity 1 each:
 
-- disc: identification and ripping
-- encoder: Reel target-quality encoding
-- WhisperX: episode ID, audio analysis, and subtitle generation
+- `drive`: identification and ripping (rip-cache restores skip the drive work
+  but the stage still holds the claim only briefly for validation)
+- `gpu`: WhisperX work — episode ID (TV only), analysis, subtitling
+- `encode`: Reel target-quality encoding. Exactly one encode runs at a time;
+  cross-tier (1080p+4K) pairing was removed after concurrent CVVDP metric
+  pools exhausted VRAM (see ADR 0002)
 
-This means multiple items can be in flight at different stages, but only one
-stage using a given scarce resource runs at a time.
+Multiple items can be in flight, and one item's encoding runs concurrently
+with its ripping and analysis branches. Encodes execute in a
+`spindle encode-worker` subprocess (same binary re-executed) streaming
+reporter events as JSON lines, so a cgo crash fails one job instead of the
+daemon.
 
-Workflow delegates lifecycle finalization to `internal/stage`. Each handler gets
-a `stage.Session` and uses it for queue-visible state: RipSpec persistence,
-progress, active episode bookkeeping, asset status, and review state. Handlers
-receive a context and must stop cleanly when it is canceled.
+Workflow delegates lifecycle finalization to `internal/stage`. Each handler
+gets a `stage.Session` bound to its task row and uses it for queue-visible
+state: RipSpec persistence, per-task progress, asset status, and review
+state. Because branch handlers overlap on one item, envelope writes go
+through merge operations (`MergeSave` and helpers) under a per-item lock —
+whole-envelope saves from overlapping handlers would be last-writer-wins.
+Only the handler running a task writes that task's progress columns.
+Handlers receive a context and must stop cleanly when it is canceled.
 
-On daemon startup and shutdown, any item left `in_progress` is reset so it can be
-picked up again. Stages are expected to be resumable or to clean stale partial
-outputs before rerunning.
+On daemon startup and shutdown, running tasks and `in_progress` flags are
+reset so items can be picked up again. Tasks are idempotent: they detect
+existing output or clean stale partial output before rerunning.
 
 ## Filesystem layout
 
@@ -152,7 +176,7 @@ subtitle formatting, Jellyfin refresh, or queue control.
 The proposal in `docs/proposals/LLM_EPISODE_CANDIDATE_PICKER.md` is not active
 behavior.
 
-## Package map
+## Package map and dependency rules
 
 The current package layout is intentionally simple:
 
@@ -161,14 +185,31 @@ The current package layout is intentionally simple:
   configuration, data, naming, and stage abstractions.
 - `internal/daemonrun`, `daemonctl`, `workflow`: daemon runtime, process
   control, and workflow orchestration.
-- `internal/identify`, `ripper`, `contentid`, `encoder`, `audioanalysis`,
-  `subtitle`, `organizer`: stage handlers.
+- `internal/identify`, `ripper`, `contentid`, `encoder`, `audioanalysis`
+  (analysis and apply stages), `subtitle`, `organizer`: stage handlers.
 - `internal/makemkv`, `tmdb`, `opensubtitles`, `llm`, `jellyfin`, `notify`,
   `keydb`: external clients and integrations.
-- `internal/media/*`, `transcription`, `ripcache`, `discidcache`, `staging`,
-  `fingerprint`, `discmonitor`: domain services.
+- `internal/media/*`, `transcription`, `ripcache`, `discidcache`,
+  `stagingdir`, `fingerprint`, `discmonitor`: domain services.
 - `internal/httpapi`, `sockhttp`, `queueaccess`, `queueops`, `logs`,
   `auditgather`: HTTP control, daemon access, structured logging, and
   diagnostics.
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for dependency rules and change policy.
+Dependencies flow from lower layers toward orchestration and CLI:
+
+1. Foundation utilities (`logs`, `textutil`, `srtutil`, `fileutil`,
+   `language`, `encodingstate`, `deps`, `mediameta`).
+2. Data and boundaries: `config`, `queue`, `ripspec`, `stage`.
+3. Domain services and clients: external clients, media helpers, caches,
+   transcription, staging, fingerprinting, disc monitoring.
+4. Stage handlers.
+5. Orchestration and access: `workflow`, `httpapi`, `sockhttp`,
+   `queueaccess`, `queueops`, `auditgather`.
+6. Daemon control/runtime.
+7. CLI entry point.
+
+Prohibited: stage handlers importing each other; `queue` importing `ripspec`
+(the store treats RipSpec as opaque text); `config` importing client
+packages; anything importing `cmd/spindle`.
+
+See [AGENTS.md](../AGENTS.md) for change policy and the complexity budget.

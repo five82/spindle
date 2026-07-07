@@ -1,6 +1,11 @@
 # Spec Proposal: Evidence-Based TV Title Selection
 
-Status: Accepted and implemented (2026-07-05). Implementation notes: no
+Status: Accepted and implemented (2026-07-05). The durable policy is
+distilled into docs/CONTENT_ID.md ("Title selection upstream"); DELETE THIS
+FILE once the real-disc validation below has passed (git history keeps the
+detail).
+
+Implementation notes: no
 envelope schema change was needed (expectations are consumed inside the
 identify stage), and no organizer change was needed (contentid flags episodes
 for review, which the existing partition routing already honors). The

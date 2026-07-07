@@ -245,17 +245,21 @@ Core `queueItem` fields:
 | Field | Meaning |
 |-------|---------|
 | `id` | Queue item ID |
-| `discTitle` | Display title |
-| `stage` | Current queue stage |
-| `inProgress` | Whether a stage is actively executing |
+| `discTitle`, `displayTitle` | Raw disc title and the metadata-resolved display title |
+| `stage` | The scheduler's coarse position; it lags running tasks during overlap windows — read `tasks[]` for what is actually happening |
+| `inProgress` | Whether any task is actively executing |
 | `failedAtStage` | Stage that failed, when a stage failure recorded it |
 | `errorMessage` | Human-readable failure message, when present |
 | `discFingerprint` | Stable disc fingerprint when known |
-| `needsReview`, `reviewReasons` | Operator review state; `reviewReasons` is a string array |
+| `needsReview`, `reviewReasons`, `userStopped` | Operator review state; `reviewReasons` is a string array |
 | `tasks` | Per-task state, dependencies, timestamps, and progress (the live truth during overlap windows) |
+| `ripSpec` | Raw RipSpec envelope; included only on `GET /api/queue/{id}`, never in list responses |
 
-The response also includes additional fields for dashboards and diagnostics such
-as timestamps, metadata, RipSpec envelope, episode status, and encoding telemetry.
+The response also includes curated projections for dashboards so no client
+needs to parse the raw envelope: `episodes[]` (per-episode paths, match
+confidence, subtitle QC, commentary counts), `episodeTotals`, `contentId`
+(episode-identification summary), `source` (primary title), and `encoding`
+telemetry. Field source of truth: `internal/httpapi/response.go`.
 
 Queue stages are:
 
@@ -264,31 +268,47 @@ identification
 ripping
 episode_identification
 encoding
-audio_analysis
+analysis
 subtitling
+apply
 organizing
 completed
 failed
 ```
 
-### Progress object
+The pipeline is a DAG: `encoding` depends only on `identification` and runs
+in parallel with ripping and the analysis branch. Clients must not assume the
+stage list is a strict linear order; the template (with dependency edges and
+resource claims) is exposed at `/api/status` as `pipeline`.
+
+### Task object
+
+Each entry of `tasks[]`:
 
 ```json
 {
-  "stage":"encoding",
-  "percent":42.5,
-  "message":"Phase 1/1 - Encoding",
-  "bytesCopied":0,
-  "totalBytes":0
+  "type": "encoding",
+  "state": "running",
+  "attempts": 1,
+  "dependsOn": ["identification"],
+  "startedAt": "...",
+  "finishedAt": "",
+  "progress": {"percent": 42.5, "message": "Phase 1/1 - Encoding", "bytesCopied": 0, "totalBytes": 0},
+  "activeAssetKey": "s01_004"
 }
 ```
 
-`bytesCopied` and `totalBytes` are omitted when they are zero.
+States are `pending`, `running`, `done`, `failed`, `skipped`. `dependsOn`
+names task types, not row IDs. Progress is per task; there is no item-level
+progress object. `bytesCopied` and `totalBytes` are omitted when zero.
+Retry/stage moves delete and recompile task rows, so an item may briefly
+have an empty `tasks[]`; clients must tolerate that transient.
 
 ### Status response
 
 `GET /api/status` returns daemon state, queue DB/lock paths, workflow queue
-counts, last item/error when known, and dependency checks.
+counts, dependency checks, the pipeline template, and live scheduler
+occupancy.
 
 Important fields:
 
@@ -299,10 +319,15 @@ Important fields:
 | `queueDbPath` | Queue DB path |
 | `lockFilePath` | Daemon lock path |
 | `workflow.running` | Workflow loop is running |
-| `workflow.queueStats` | Map of stage to count |
+| `workflow.queueStats` | Map of stage to count; counts each item under its earliest running task's type |
 | `workflow.lastError` | Last workflow error |
-| `workflow.lastItem` | Last processed queue item |
 | `dependencies[]` | Dependency check results |
+| `pipeline[]` | Registered stage template: `{stage, dependsOn, claims}` per stage, so clients render the DAG data-driven |
+| `scheduler.resources` | Live occupancy per resource: `{capacity, used, holders:[{itemId, task}]}` for `drive`, `gpu`, `encode` |
+| `disc.paused` | Disc monitor pause state |
+
+Drive-free signal for clients: `scheduler.resources.drive.used == 0 &&
+!disc.paused` means another disc can be inserted.
 
 ### Queue access model
 

@@ -17,7 +17,7 @@ Review and correct obvious WhisperX transcription errors in the primary embedded
 
 This skill extracts the primary (non-forced) display subtitle from an MKV file, reviews it for obvious WhisperX transcription/content errors, presents the planned corrections, applies them automatically, and muxes the corrected subtitle back into the MKV.
 
-This skill is for title-specific cleanup after the generic subtitle pipeline has already handled wrapping, splitting, retiming, and validation. It edits only the derived display subtitle track that viewers see. Do not edit or replace cached WhisperX canonical artifacts under `~/.cache/spindle/whisperx`.
+This skill is for title-specific cleanup after the generic subtitle pipeline has already handled wrapping, splitting, retiming, and validation. It edits only the derived display subtitle track that viewers see. Do not edit or replace canonical WhisperX transcript artifacts (item-scoped under the queue item's staging `transcripts/` directory while staging exists).
 
 Spindle intentionally does not use PGS subtitles as final library output. If a source disc or MKV contains PGS subtitle streams, do not choose them for cleanup or mux them as the primary display subtitle. Audit and preserve SRT display subtitles only.
 

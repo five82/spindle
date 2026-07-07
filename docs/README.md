@@ -22,11 +22,11 @@ Use this hierarchy when code and docs appear to disagree:
 
 | Document | Purpose |
 |----------|---------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | System shape, pipeline stages, storage, dependencies, and package map |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System shape, pipeline DAG, scheduler, storage, dependencies, and package map |
 | [API.md](API.md) | Stable CLI workflows and HTTP API contracts |
 | [CONFIG.md](CONFIG.md) | Config loading, validation, derived paths, and feature gates |
-| [CONTENT_ID.md](CONTENT_ID.md) | TV episode identification intent and review policy |
-| [DEVELOPMENT.md](DEVELOPMENT.md) | Development workflow, tests, logging, package boundaries, doc policy |
+| [CONTENT_ID.md](CONTENT_ID.md) | TV title selection and episode identification intent and review policy |
+| [../AGENTS.md](../AGENTS.md) | Ground rules, complexity budget, logging contract, hard invariants |
 | [user/workflow.md](user/workflow.md) | Operator-facing lifecycle and recovery guide |
 | [adr/](adr/) | Architecture decision records |
 | [proposals/](proposals/) | Non-normative future ideas |
