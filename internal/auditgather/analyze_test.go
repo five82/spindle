@@ -187,7 +187,7 @@ func TestComputeSubtitleSummarySeparatesValidationResults(t *testing.T) {
 		}}},
 	}
 
-	summary := computeSubtitleSummary(r)
+	summary := computeSubtitleSummary(r, computeOutputMedia(r.Media))
 	if summary == nil {
 		t.Fatal("expected subtitle summary")
 	}
@@ -403,33 +403,6 @@ func TestDetectAnomalies_ContentIDSummaryPresent(t *testing.T) {
 	}
 }
 
-func TestDetectFallbackTitleSelectionAnomalies_FlagsBroadTVFallback(t *testing.T) {
-	r := &Report{
-		Logs: &LogAnalysis{
-			Decisions: []LogDecision{
-				{DecisionType: "tmdb_search", DecisionResult: "tv"},
-				{DecisionType: "title_selection", DecisionReason: "unknown media type, using duration filter"},
-			},
-			Warnings: []LogEntry{{EventType: "tmdb_no_match"}},
-		},
-		Envelope: &ripspec.Envelope{
-			Titles:   []ripspec.Title{{ID: 0}, {ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}, {ID: 5}, {ID: 6}, {ID: 7}},
-			Episodes: []ripspec.Episode{{RuntimeSeconds: 140}, {RuntimeSeconds: 150}, {RuntimeSeconds: 2700}},
-		},
-	}
-
-	anomalies := detectFallbackTitleSelectionAnomalies(r)
-	if len(anomalies) != 1 {
-		t.Fatalf("expected 1 anomaly, got %d", len(anomalies))
-	}
-	if anomalies[0].Category != "title_selection" {
-		t.Fatalf("category = %s, want title_selection", anomalies[0].Category)
-	}
-	if anomalies[0].Severity != "critical" {
-		t.Fatalf("severity = %s, want critical", anomalies[0].Severity)
-	}
-}
-
 func TestDetectTVRoutingAnomalies_FlagsCleanEpisodesInReview(t *testing.T) {
 	r := &Report{
 		Paths: AuditPaths{ReviewDir: "/review"},
@@ -604,24 +577,3 @@ func TestCountDecisiveLowSimilarityInConfidenceBand(t *testing.T) {
 	}
 }
 
-func TestEpisodeMatchConfidenceQualityInfersLegacyDecisiveLowSimilarity(t *testing.T) {
-	decision := LogDecision{DecisionType: "episode_match", Extras: map[string]any{
-		"confidence_quality":    "ambiguous",
-		"match_confidence":      0.821,
-		"rip_score_margin":      0.751,
-		"episode_score_margin":  0.769,
-		"neighbor_score_margin": 0.775,
-		"reference_suspect":     false,
-	}}
-
-	got := episodeMatchConfidenceQuality(decision)
-	if got != "decisive_low_similarity" {
-		t.Fatalf("quality = %q, want decisive_low_similarity", got)
-	}
-
-	decision.Extras["match_confidence"] = 0.790
-	got = episodeMatchConfidenceQuality(decision)
-	if got != "ambiguous" {
-		t.Fatalf("quality below auto-accept threshold = %q, want ambiguous", got)
-	}
-}

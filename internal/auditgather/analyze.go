@@ -19,7 +19,6 @@ import (
 	"github.com/five82/spindle/internal/ripspec"
 )
 
-// computeAnalysis derives pre-computed summaries from the collected report data.
 func normalizeAuditPath(path string) string {
 	if path == "" {
 		return ""
@@ -147,6 +146,8 @@ func detectDefaultAudioLanguageAnomalies(r *Report) []Anomaly {
 	return anomalies
 }
 
+// computeAnalysis derives pre-computed summaries from the collected report
+// data. The result is always non-nil; sub-fields are omitted when empty.
 func computeAnalysis(r *Report) *Analysis {
 	a := &Analysis{}
 
@@ -161,8 +162,8 @@ func computeAnalysis(r *Report) *Analysis {
 	a.SourceSummary = computeSourceSummary(r)
 	a.TitleSelection = computeTitleSelection(r)
 	a.OutputMedia = computeOutputMedia(r.Media)
-	a.AudioSummary = computeAudioSummary(r)
-	a.SubtitleSummary = computeSubtitleSummary(r)
+	a.AudioSummary = computeAudioSummary(r, a.OutputMedia)
+	a.SubtitleSummary = computeSubtitleSummary(r, a.OutputMedia)
 	a.RoutingSummary = computeRoutingSummary(r)
 
 	if len(r.Media) > 0 {
@@ -186,28 +187,8 @@ func computeAnalysis(r *Report) *Analysis {
 	}
 
 	a.Anomalies = detectAnomalies(r, a)
-	a.Anomalies = append(a.Anomalies, detectFallbackTitleSelectionAnomalies(r)...)
 	a.Anomalies = append(a.Anomalies, detectTVRoutingAnomalies(r)...)
 	a.Anomalies = append(a.Anomalies, detectDefaultAudioLanguageAnomalies(r)...)
-
-	// Return nil if everything is empty.
-	if len(a.DecisionGroups) == 0 &&
-		len(a.NotableDecisions) == 0 &&
-		len(a.StageTimings) == 0 &&
-		a.SourceSummary == nil &&
-		a.TitleSelection == nil &&
-		len(a.OutputMedia) == 0 &&
-		a.AudioSummary == nil &&
-		a.SubtitleSummary == nil &&
-		a.RoutingSummary == nil &&
-		a.EpisodeConsistency == nil &&
-		a.CropAnalysis == nil &&
-		a.EpisodeStats == nil &&
-		a.MediaStats == nil &&
-		a.AssetHealth == nil &&
-		len(a.Anomalies) == 0 {
-		return nil
-	}
 
 	return a
 }
@@ -366,7 +347,7 @@ func computeSourceSummary(r *Report) *SourceSummary {
 	}
 	if r.Logs != nil {
 		for _, d := range r.Logs.Decisions {
-			if d.DecisionType != "file_probe" {
+			if d.DecisionType != logs.DecisionFileProbe {
 				continue
 			}
 			if ss.InputResolution == "" {
@@ -407,7 +388,7 @@ func computeTitleSelection(r *Report) *TitleSelectionSummary {
 	ts := &TitleSelectionSummary{SelectedID: -1}
 	if r.Logs != nil {
 		for _, d := range r.Logs.Decisions {
-			if d.DecisionType == "title_selection" {
+			if d.DecisionType == logs.DecisionTitleSelection {
 				ts.DecisionResult = d.DecisionResult
 				ts.DecisionReason = d.DecisionReason
 				if id, ok := parseSelectedTitleID(d.DecisionResult); ok {
@@ -545,7 +526,7 @@ func subtitleLabelCorrect(lang, title string, forced bool) bool {
 	return display == "" || strings.Contains(strings.ToLower(title), display) || strings.Contains(strings.ToLower(title), strings.ToLower(lang))
 }
 
-func computeAudioSummary(r *Report) *AudioSummary {
+func computeAudioSummary(r *Report, outputMedia []MediaSummary) *AudioSummary {
 	if r == nil || r.Envelope == nil {
 		return nil
 	}
@@ -557,7 +538,7 @@ func computeAudioSummary(r *Report) *AudioSummary {
 			summary.ExcludedTracks = append(summary.ExcludedTracks, ExcludedTrack{Index: tr.Index, Reason: tr.Reason, Similarity: tr.Similarity})
 		}
 	}
-	for _, media := range computeOutputMedia(r.Media) {
+	for _, media := range outputMedia {
 		for _, audio := range media.Audio {
 			summary.OutputAudioTracks++
 			if audio.Commentary {
@@ -571,7 +552,7 @@ func computeAudioSummary(r *Report) *AudioSummary {
 	if r.Logs != nil {
 		for _, d := range r.Logs.Decisions {
 			switch d.DecisionType {
-			case "commentary_classification", "commentary_stereo_filter", "commentary_remapping", "commentary_disposition":
+			case logs.DecisionCommentaryClassification, logs.DecisionCommentaryStereoFilter, logs.DecisionCommentaryRemapping, logs.DecisionCommentaryDisposition:
 				summary.CommentaryDecisions = append(summary.CommentaryDecisions, d)
 			}
 		}
@@ -582,7 +563,7 @@ func computeAudioSummary(r *Report) *AudioSummary {
 	return summary
 }
 
-func computeSubtitleSummary(r *Report) *SubtitleSummary {
+func computeSubtitleSummary(r *Report, outputMedia []MediaSummary) *SubtitleSummary {
 	if r == nil || r.Envelope == nil {
 		return nil
 	}
@@ -607,7 +588,7 @@ func computeSubtitleSummary(r *Report) *SubtitleSummary {
 			summary.ValidationFailed++
 		}
 	}
-	for _, media := range computeOutputMedia(r.Media) {
+	for _, media := range outputMedia {
 		for _, sub := range media.Subtitles {
 			summary.OutputSubtitleTracks++
 			if !sub.LabelCorrect {
@@ -659,61 +640,13 @@ func computeRoutingSummary(r *Report) *RoutingSummary {
 	return summary
 }
 
-func detectFallbackTitleSelectionAnomalies(r *Report) []Anomaly {
-	if r == nil || r.Logs == nil || r.Envelope == nil {
-		return nil
-	}
-
-	tvHinted := false
-	noTMDBMatch := false
-	broadFallbackSelection := false
-	for _, d := range r.Logs.Decisions {
-		switch {
-		case d.DecisionType == "tmdb_search" && d.DecisionResult == "tv":
-			tvHinted = true
-		case d.DecisionType == "title_selection" && d.DecisionReason == "unknown media type, using duration filter":
-			broadFallbackSelection = true
-		}
-	}
-	for _, w := range r.Logs.Warnings {
-		if w.EventType == "tmdb_no_match" {
-			noTMDBMatch = true
-			break
-		}
-	}
-	if !tvHinted || !noTMDBMatch || !broadFallbackSelection {
-		return nil
-	}
-
-	totalTitles := len(r.Envelope.Titles)
-	shortLike := 0
-	for _, ep := range r.Envelope.Episodes {
-		if ep.RuntimeSeconds > 0 && ep.RuntimeSeconds < 600 {
-			shortLike++
-		}
-	}
-	severity := "warning"
-	if totalTitles >= 8 || shortLike >= 3 {
-		severity = "critical"
-	}
-	message := fmt.Sprintf("TV-hinted disc with no TMDB match fell back to broad title selection (%d titles", totalTitles)
-	if shortLike > 0 {
-		message += fmt.Sprintf(", %d short/extras-like", shortLike)
-	}
-	message += ")"
-	return []Anomaly{{
-		Severity: severity,
-		Category: "title_selection",
-		Message:  message,
-	}}
-}
-
 func countDecisionConfidenceQualities(decisions []LogDecision) (contested, ambiguous, decisiveLowSimilarity int) {
 	for _, d := range decisions {
-		if d.DecisionType != "episode_match" || d.Extras == nil {
+		if d.DecisionType != logs.DecisionEpisodeMatch || d.Extras == nil {
 			continue
 		}
-		switch episodeMatchConfidenceQuality(d) {
+		quality, _ := d.Extras["confidence_quality"].(string)
+		switch quality {
 		case contentid.ConfidenceQualityContested:
 			contested++
 		case contentid.ConfidenceQualityAmbiguous:
@@ -725,39 +658,13 @@ func countDecisionConfidenceQualities(decisions []LogDecision) (contested, ambig
 	return contested, ambiguous, decisiveLowSimilarity
 }
 
-func episodeMatchConfidenceQuality(d LogDecision) string {
-	quality, _ := d.Extras["confidence_quality"].(string)
-	if quality != contentid.ConfidenceQualityAmbiguous && quality != "" {
-		return quality
-	}
-	confidence, ok := d.Extras["match_confidence"].(float64)
-	if !ok {
-		return quality
-	}
-	ripMargin, ok := d.Extras["rip_score_margin"].(float64)
-	if !ok {
-		return quality
-	}
-	episodeMargin, ok := d.Extras["episode_score_margin"].(float64)
-	if !ok {
-		return quality
-	}
-	neighborMargin, ok := d.Extras["neighbor_score_margin"].(float64)
-	if !ok {
-		return quality
-	}
-	referenceSuspect, _ := d.Extras["reference_suspect"].(bool)
-	derived := contentid.ClassifyConfidenceQuality(confidence, ripMargin, episodeMargin, neighborMargin, referenceSuspect, contentid.DefaultPolicy())
-	if derived != contentid.ConfidenceQualityDecisiveLowSimilarity {
-		return quality
-	}
-	return derived
-}
-
 func countDecisiveLowSimilarityInConfidenceBand(decisions []LogDecision, minConfidence, maxConfidence float64) int {
 	count := 0
 	for _, d := range decisions {
-		if d.DecisionType != "episode_match" || d.Extras == nil || episodeMatchConfidenceQuality(d) != contentid.ConfidenceQualityDecisiveLowSimilarity {
+		if d.DecisionType != logs.DecisionEpisodeMatch || d.Extras == nil {
+			continue
+		}
+		if quality, _ := d.Extras["confidence_quality"].(string); quality != contentid.ConfidenceQualityDecisiveLowSimilarity {
 			continue
 		}
 		confidence, ok := d.Extras["match_confidence"].(float64)

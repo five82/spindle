@@ -79,17 +79,21 @@ type StageGate struct {
 	PhaseExtVal     bool   `json:"phase_external_validation"`
 }
 
-// LogAnalysis holds log entries filtered by item ID.
+// LogAnalysis holds log entries filtered by item ID across every daemon log
+// file overlapping the item's lifetime. LinesScanned counts all lines read,
+// not just the item's. EventsOmitted counts progress events dropped by
+// downsampling.
 type LogAnalysis struct {
-	Path               string        `json:"path"`
+	Paths              []string      `json:"paths"`
 	IsDebug            bool          `json:"is_debug"`
-	TotalLines         int           `json:"total_lines"`
+	LinesScanned       int           `json:"lines_scanned"`
 	InferredDiscSource string        `json:"inferred_disc_source,omitempty"`
 	InferredMediaHint  string        `json:"inferred_media_hint,omitempty"`
 	Decisions          []LogDecision `json:"decisions,omitempty"`
 	Warnings           []LogEntry    `json:"warnings,omitempty"`
 	Errors             []LogEntry    `json:"errors,omitempty"`
 	Events             []LogEntry    `json:"events,omitempty"`
+	EventsOmitted      int           `json:"events_omitted,omitempty"`
 	Stages             []StageEvent  `json:"stages,omitempty"`
 }
 
@@ -122,10 +126,12 @@ type StageEvent struct {
 	DurationSeconds float64 `json:"duration_seconds,omitempty"`
 }
 
-// RipCacheReport holds rip cache lookup results.
+// RipCacheReport holds rip cache lookup results. Disabled distinguishes a
+// cache that is turned off in config from one whose entry was pruned.
 type RipCacheReport struct {
-	Path     string            `json:"path"`
+	Path     string            `json:"path,omitempty"`
 	Found    bool              `json:"found"`
+	Disabled bool              `json:"disabled,omitempty"`
 	Metadata *ripCacheMetadata `json:"metadata,omitempty"`
 }
 

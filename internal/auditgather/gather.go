@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/encodingstate"
@@ -59,27 +60,19 @@ func Gather(ctx context.Context, cfg *config.Config, item *httpapi.ItemResponse)
 
 	r.Item = buildItemSummary(item, &env)
 
-	// Fall back to metadata JSON for media type if envelope unavailable.
-	mediaType := env.Metadata.MediaType
-	if mediaType == "" {
-		meta := mediameta.FromJSON(rawJSONString(item.Metadata), item.DiscTitle)
-		if meta.Movie {
-			mediaType = "movie"
-		} else {
-			mediaType = "tv"
-		}
-	}
-
+	mediaType := resolveMediaType(&env, item)
 	mediaHint := inferMediaHintFromMetadata(mediaType)
 
 	// Compute stage gate.
 	r.StageGate = computeStageGate(item, mediaType, mediaHint, env.Metadata.DiscSource)
 
-	// Log analysis.
+	// Log analysis. A scan error mid-file still leaves usable parsed entries,
+	// so keep the partial report alongside the recorded error.
 	logReport, logErr := gatherLogs(cfg, item)
 	if logErr != nil {
 		r.addError("gather logs: %v", logErr)
-	} else {
+	}
+	if logReport != nil {
 		r.Logs = logReport
 	}
 
@@ -122,9 +115,7 @@ func Gather(ctx context.Context, cfg *config.Config, item *httpapi.ItemResponse)
 	r.Analysis = computeAnalysis(r)
 
 	// Compress TV probes.
-	if r.Analysis != nil {
-		r.Media, r.MediaOmitted = compressMediaProbes(r.Media, r.Analysis.EpisodeConsistency)
-	}
+	r.Media, r.MediaOmitted = compressMediaProbes(r.Media, r.Analysis.EpisodeConsistency)
 
 	return r, nil
 }
@@ -192,6 +183,23 @@ func lastCompletedAssetPath(assets []ripspec.Asset) string {
 	return ""
 }
 
+// resolveMediaType resolves the item's media type from the envelope, falling
+// back to the metadata JSON. Items with neither (pre-identification failures)
+// are "unknown"; the log-inferred media hint covers those.
+func resolveMediaType(env *ripspec.Envelope, item *httpapi.ItemResponse) string {
+	if env.Metadata.MediaType != "" {
+		return env.Metadata.MediaType
+	}
+	metaJSON := rawJSONString(item.Metadata)
+	if metaJSON == "" {
+		return "unknown"
+	}
+	if mediameta.FromJSON(metaJSON, item.DiscTitle).Movie {
+		return "movie"
+	}
+	return "tv"
+}
+
 func computeStageGate(item *httpapi.ItemResponse, mediaType, mediaHint, discSource string) StageGate {
 	furthest := queue.Stage(item.Stage)
 	if furthest == queue.StageFailed && item.FailedAtStage != "" {
@@ -199,6 +207,19 @@ func computeStageGate(item *httpapi.ItemResponse, mediaType, mediaHint, discSour
 	}
 
 	order := stageOrder[furthest]
+
+	// The item's coarse stage lags running tasks during DAG overlap (and says
+	// nothing when a parallel branch outran the failing one), so any task that
+	// has started lifts the furthest stage to its own.
+	for _, t := range item.Tasks {
+		if t.State == queue.TaskPending {
+			continue
+		}
+		if o, ok := stageOrder[queue.Stage(t.Type)]; ok && o > order {
+			order = o
+			furthest = queue.Stage(t.Type)
+		}
+	}
 
 	return StageGate{
 		FurthestStage: string(furthest),
@@ -217,42 +238,68 @@ func computeStageGate(item *httpapi.ItemResponse, mediaType, mediaHint, discSour
 	}
 }
 
-// gatherLogs finds the daemon log file and parses structured entries for this item.
+// itemLogGrace admits log lines slightly older than the item row: disc
+// detection and enqueue events precede item creation by a few seconds.
+const itemLogGrace = 2 * time.Minute
+
+// gatherLogs parses structured log entries for this item from every daemon
+// log file that overlaps the item's lifetime: the file active at creation
+// plus all later files (daemon restarts mid-item start a new file). A scan
+// error is returned alongside the partially-filled report.
 func gatherLogs(cfg *config.Config, item *httpapi.ItemResponse) (*LogAnalysis, error) {
-	logPath := findLogFile(cfg.DaemonLogDir(), item.CreatedAt)
-	if logPath == "" {
+	logPaths := findLogFiles(cfg.DaemonLogDir(), item.CreatedAt)
+	if len(logPaths) == 0 {
 		return nil, fmt.Errorf("no log file found for item %d", item.ID)
 	}
 
-	f, err := os.Open(logPath)
+	// Item IDs and disc titles recur across queue clears and re-rips; the
+	// creation-time cutoff keeps earlier items' lines out of this report.
+	var cutoff time.Time
+	if created, err := time.Parse(time.RFC3339, item.CreatedAt); err == nil {
+		cutoff = created.Add(-itemLogGrace)
+	}
+
+	report := &LogAnalysis{Paths: logPaths}
+	var firstErr error
+	for _, path := range logPaths {
+		if err := scanLogFile(path, item, report, cutoff); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	report.Events, report.EventsOmitted = compactProgressEvents(report.Events)
+
+	return report, firstErr
+}
+
+func scanLogFile(path string, item *httpapi.ItemResponse, report *LogAnalysis, cutoff time.Time) error {
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("open log: %w", err)
+		return fmt.Errorf("open log: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-
-	report := &LogAnalysis{Path: logPath}
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		report.TotalLines++
-		parseLogLine(line, item, report)
+		report.LinesScanned++
+		parseLogLine(line, item, report, cutoff)
 	}
 	if err := scanner.Err(); err != nil {
-		return report, fmt.Errorf("scan log: %w", err)
+		return fmt.Errorf("scan log %s: %w", filepath.Base(path), err)
 	}
-
-	return report, nil
+	return nil
 }
 
-// findLogFile locates the daemon log file that was active when the item was created.
-// Log files are named spindle-{timestamp}.log in the state directory.
-func findLogFile(stateDir, createdAt string) string {
+// findLogFiles locates the daemon log files covering the item's lifetime: the
+// file active when the item was created and every later file. Log files are
+// named spindle-{timestamp}.log in the state directory.
+func findLogFiles(stateDir, createdAt string) []string {
 	entries, err := os.ReadDir(stateDir)
 	if err != nil {
-		return ""
+		return nil
 	}
 
 	// Collect log file names sorted by name (which sorts by timestamp).
@@ -268,7 +315,7 @@ func findLogFile(stateDir, createdAt string) string {
 	}
 
 	if len(logFiles) == 0 {
-		return ""
+		return nil
 	}
 
 	sort.Strings(logFiles)
@@ -281,16 +328,17 @@ func findLogFile(stateDir, createdAt string) string {
 		normalized = normalized[:idx]
 	}
 
-	// Find the last log file whose timestamp is <= createdAt.
-	best := logFiles[0] // Default to earliest if none match.
-	for _, path := range logFiles {
+	// Start at the last log file whose timestamp is <= createdAt (the file
+	// that was active at creation), defaulting to the earliest.
+	start := 0
+	for i, path := range logFiles {
 		ts := extractLogTimestamp(filepath.Base(path))
 		if ts <= normalized {
-			best = path
+			start = i
 		}
 	}
 
-	return best
+	return logFiles[start:]
 }
 
 // extractLogTimestamp converts "spindle-20260322T011625.285Z.log" to
@@ -327,7 +375,10 @@ var knownLogKeys = map[string]bool{
 // parseLogLine extracts structured data from a single JSON log line.
 // Lines are associated with the item by item_id when present, otherwise by
 // stable identifiers such as disc fingerprint or disc title/label fields.
-func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis) {
+// Lines timestamped before cutoff belong to earlier items that shared this
+// item's ID, fingerprint, or title (IDs reset on queue clear) and are dropped;
+// a zero cutoff disables the clamp.
+func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis, cutoff time.Time) {
 	line = strings.TrimSpace(line)
 	if line == "" || line[0] != '{' {
 		return
@@ -336,6 +387,12 @@ func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis) 
 	var entry map[string]any
 	if err := json.Unmarshal([]byte(line), &entry); err != nil {
 		return
+	}
+
+	if !cutoff.IsZero() {
+		if ts, err := time.Parse(time.RFC3339Nano, getString(entry, "time")); err == nil && ts.Before(cutoff) {
+			return
+		}
 	}
 
 	if !logLineMatchesItem(entry, item) {
@@ -427,6 +484,54 @@ func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis) 
 	}
 }
 
+// maxProgressEventsPerType caps how many entries of each *_progress event
+// type survive into the report. Long encodes emit hundreds of near-identical
+// ticks that inflate the JSON without adding audit signal.
+const maxProgressEventsPerType = 20
+
+// compactProgressEvents downsamples *_progress event types that exceed the
+// cap, keeping the first, last, and an evenly-strided subset in between.
+// Non-progress events always pass through. Returns the kept events and the
+// omitted count.
+func compactProgressEvents(events []LogEntry) ([]LogEntry, int) {
+	counts := make(map[string]int)
+	for _, e := range events {
+		if strings.HasSuffix(e.EventType, "_progress") {
+			counts[e.EventType]++
+		}
+	}
+	needsCompaction := false
+	for _, c := range counts {
+		if c > maxProgressEventsPerType {
+			needsCompaction = true
+			break
+		}
+	}
+	if !needsCompaction {
+		return events, 0
+	}
+
+	seen := make(map[string]int)
+	kept := make([]LogEntry, 0, len(events))
+	omitted := 0
+	for _, e := range events {
+		total := counts[e.EventType]
+		if total <= maxProgressEventsPerType {
+			kept = append(kept, e)
+			continue
+		}
+		i := seen[e.EventType]
+		seen[e.EventType]++
+		stride := (total + maxProgressEventsPerType - 1) / maxProgressEventsPerType
+		if i%stride == 0 || i == total-1 {
+			kept = append(kept, e)
+		} else {
+			omitted++
+		}
+	}
+	return kept, omitted
+}
+
 // buildExtras returns a map of all log line fields not in knownLogKeys.
 func buildExtras(entry map[string]any) map[string]any {
 	var extras map[string]any
@@ -474,8 +579,10 @@ func logLineMatchesItem(entry map[string]any, item *httpapi.ItemResponse) bool {
 	if item == nil {
 		return false
 	}
-	if id, ok := getFloat(entry, "item_id"); ok && int64(id) == item.ID {
-		return true
+	// An explicit item_id is authoritative: a mismatch excludes the line even
+	// when the fingerprint or disc title also matches (same disc, other item).
+	if id, ok := getFloat(entry, "item_id"); ok {
+		return int64(id) == item.ID
 	}
 	if fp := getString(entry, "fingerprint"); fp != "" && item.DiscFingerprint != "" && strings.EqualFold(strings.TrimSpace(fp), strings.TrimSpace(item.DiscFingerprint)) {
 		return true
@@ -507,7 +614,7 @@ func sameAuditString(a, b string) bool {
 }
 
 func inferMediaHint(entry map[string]any) string {
-	if getString(entry, "decision_type") == "tmdb_search" {
+	if getString(entry, "decision_type") == logs.DecisionTMDBSearch {
 		switch strings.ToLower(strings.TrimSpace(getString(entry, "decision_result"))) {
 		case "tv", "movie":
 			return strings.ToLower(strings.TrimSpace(getString(entry, "decision_result")))
@@ -525,7 +632,7 @@ func inferDiscSource(entry map[string]any) string {
 			return "dvd"
 		}
 	}
-	if getString(entry, "decision_type") == "bdinfo_availability" {
+	if getString(entry, "decision_type") == logs.DecisionBDInfoAvailability {
 		switch strings.ToLower(strings.TrimSpace(getString(entry, "decision_result"))) {
 		case "bluray":
 			return "bluray"
@@ -545,7 +652,7 @@ func inferDiscSource(entry map[string]any) string {
 // gatherRipCache reads the rip cache metadata for the item.
 func gatherRipCache(cfg *config.Config, item *httpapi.ItemResponse) *RipCacheReport {
 	if !cfg.RipCache.Enabled {
-		return &RipCacheReport{Found: false}
+		return &RipCacheReport{Disabled: true}
 	}
 
 	store := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)

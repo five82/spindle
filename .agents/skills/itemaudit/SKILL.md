@@ -31,21 +31,21 @@ spindle audit-gather <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
 This produces an agent-facing JSON report. The schema may evolve with this skill; treat it as diagnostic input rather than a stable public API. It contains:
 - **`item`**: Queue item summary (`stage`, `tasks[]` per-task state/progress, review flags, paths, timestamps). `item.stage` is the scheduler's coarse position and lags running tasks during rip/encode overlap -- read `item.tasks[]` for what is actually happening (`type`, `state`, `attempts`, `error`, `progress_percent`, `progress_message`, `active_asset_key`)
 - **`stage_gate`**: Pre-computed phase applicability (which analyses apply, resolved media type, media hint, disc source)
-- **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), item-specific INFO events/progress (`logs.events` with `event_type` and extras), and stage timing events (`ts`, `event_type`, `stage`, `duration_seconds`)
-- **`rip_cache`**: Cache metadata (disc title, cached_at, title_count, total_bytes). Serialized `rip_spec_data` and `metadata_json` blobs are omitted (already in parsed `envelope`).
+- **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), item-specific INFO events/progress (`logs.events` with `event_type` and extras), and stage timing events (`ts`, `event_type`, `stage`, `duration_seconds`). Gathered from every daemon log file overlapping the item's lifetime (`logs.paths` — daemon restarts mid-item span multiple files), clamped to the item's creation time so reused item IDs / re-ripped discs don't leak earlier runs' lines. Flooding `*_progress` event types are downsampled (first/last/evenly-strided, ~20 per type); `logs.events_omitted` counts dropped ticks — it is normal on long encodes, not data loss
+- **`rip_cache`**: Cache metadata (disc title, cached_at, title_count, total_bytes). Serialized `rip_spec_data` and `metadata_json` blobs are omitted (already in parsed `envelope`). `disabled: true` means the cache is turned off in config — do not report that as a pruned entry.
 - **`envelope`**: Parsed ripspec Envelope (titles, episodes, assets at each stage, attributes)
 - **`encoding`**: Encoding details snapshot (crop, validation, config, result). Spindle always uses Reel target-quality mode, so the snapshot carries the full Reel-reported config summary (`encoder`, `quality`, `preset`, `tune`, `audio_codec`) plus crop and validation (pass/fail) — nothing is omitted
 - **`media`**: ffprobe output for encoded files. For TV, only the representative probe (matching majority profile, marked `representative: true`), deviation probes, and error probes are included. `media_omitted` indicates how many clean probes were dropped.
 - **`errors`**: Any gathering errors (missing logs, parse failures, etc.)
 - **`analysis`**: Pre-computed summaries — decision groups, episode consistency, crop analysis, episode stats, media stats, asset health, anomaly flags (see Analysis Reference below)
 
-**The `stage_gate` object tells you exactly which phases to run.** Each `phase_*` boolean is pre-computed from the item's status, media type, and disc source. Do not re-derive these — trust the gate.
+**The `stage_gate` object tells you exactly which phases to run.** Each `phase_*` boolean is pre-computed from the item's task states (which lead the coarse item stage during rip/encode overlap), media type, and disc source. Do not re-derive these — trust the gate.
 
 If `/itemaudit` is invoked without an item ID, run `spindle status` and `spindle queue list` to diagnose daemon-level issues instead.
 
 ### Analysis Reference
 
-The `analysis` object (nil if no data) contains pre-computed summaries:
+The `analysis` object (always present; sub-fields omitted when empty) contains pre-computed summaries:
 
 | Field | Present When | Contents |
 |-------|-------------|----------|
@@ -104,7 +104,7 @@ The `stage_gate` object in the audit-gather output contains:
 | Field | Meaning |
 |-------|---------|
 | `furthest_stage` | Status the item reached (or failed at) |
-| `media_type` | Resolved media type: `movie`, `tv`, or `unknown` |
+| `media_type` | Resolved media type: `movie`, `tv`, or `unknown` (pre-identification items with no metadata) |
 | `media_hint` | Hint inferred before/without full identification (for example `tv` on a failed TMDB lookup) |
 | `disc_source` | `bluray`, `dvd`, or `unknown` |
 | `phase_logs` | Always true |
@@ -134,7 +134,7 @@ Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `lo
    - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=duplicate_detection` (duplicate guard), `decision_type=episode_id_skip` (episode-ID skips), `decision_type=rip_cache` (hit/miss/incomplete — misses log explicitly)
    - Movie title selection: `decision_type=title_selection_funnel` records each elimination stage (rule, `candidates_before/after`, `eliminated_title_ids`, `evidence` with the threshold values); the winner is the `decision_type=title_selection` "primary title decision" line. When the wrong cut/title was picked, the funnel shows which rule eliminated the right one.
    - Scheduler resource waits: `decision_type=stage_execution` with `decision_result=blocked` / `unblocked` shows a task waiting on GPU/drive/encode-tier claims (`claims` attr) and the `waited` duration on grant. "stage started" lines also carry the resolved `claims` (so GPU-for-TV and encode-tier choices are visible per dispatch).
-   - Warnings/errors include `extras` maps with non-standard log fields for diagnostic context; decisions use structured fields only (full log lines available at `logs.path`)
+   - Warnings/errors include `extras` maps with non-standard log fields for diagnostic context; decisions use structured fields only (full log lines available at the files in `logs.paths`)
 
 2. **Timing/progress anomalies** (from `logs.stages` and `logs.events`):
    - Stages taking unusually long or short (use `duration_seconds` when available)
@@ -175,7 +175,7 @@ Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `lo
 
 Analyze the `rip_cache` section from audit-gather output:
 
-1. **Verify** `rip_cache.found` is true — if false, cache may have been pruned
+1. **Verify** `rip_cache.found` is true — if false, check `rip_cache.disabled` first (cache turned off in config); otherwise the entry may have been pruned
 2. **Check metadata**:
    - `disc_title` matches expected content
    - `cached_at`, `title_count`, and `total_bytes` look plausible
@@ -349,7 +349,7 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
 2. **Subtitle generation outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `logs.decisions`):
    - Spindle now generates one English display SRT from WhisperX. It does not generate forced/foreign subtitle tracks and does not fetch OpenSubtitles output subtitles.
    - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config.
-   - `decision_type=transcription_asset` and `decision_type=transcription_profile` show which asset/profile WhisperX processed. Use `logs.events` entries (`transcription_extract_complete`, `transcription_whisperx_complete`, `transcription_complete`) for transcription timing before falling back to raw `logs.path`.
+   - `decision_type=transcription_asset` and `decision_type=transcription_profile` show which asset/profile WhisperX processed. Use `logs.events` entries (`transcription_extract_complete`, `transcription_whisperx_complete`, `transcription_complete`) for transcription timing before falling back to the raw files in `logs.paths`.
    - `decision_type=subtitle_transcript_source` with `decision_result=artifact_reused` means subtitle generation reused the shared per-episode transcript artifact (`envelope.assets.transcript`) and ran no WhisperX of its own — absent transcription events in the subtitling stage are then expected, not a defect. For TV, verify transcript asset count matches episode count in `analysis.asset_health`.
    - Treat additional generated subtitle tracks, forced dispositions, or "Forced" subtitle labels as defects or stale outputs unless there is clear evidence they came from outside the current Spindle subtitle stage.
 
@@ -425,7 +425,7 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 
 ### DEBUG/Raw Log Context
 
-These details are optional context. Some are parsed into `logs.decisions` when debug logs are available; others require opening the raw file at `logs.path`.
+These details are optional context. Some are parsed into `logs.decisions` when debug logs are available; others require opening the raw files in `logs.paths`.
 
 | Pattern | Stage | Evidence |
 |---------|-------|----------|
@@ -511,9 +511,9 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 ### Artifact Analysis
 
 #### Log Analysis
-- Log path: <logs.path>
-- Total log entries: <logs.total_lines>
-- INFO events/progress: <summarize notable logs.events; expand long-running progress/timing anomalies only>
+- Log files: <logs.paths>
+- Lines scanned: <logs.lines_scanned>
+- INFO events/progress: <summarize notable logs.events; note logs.events_omitted if progress ticks were downsampled; expand long-running progress/timing anomalies only>
 - WARN events: <count> (list if > 0)
 - ERROR events: <count> (list if > 0)
 - Key decisions: <from analysis.decision_groups — expand only anomalous decisions>
