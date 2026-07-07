@@ -589,67 +589,6 @@ func discInfoName(discInfo *makemkv.DiscInfo) string {
 	return ""
 }
 
-// makemkvVideoSizeAttr is MakeMKV's ap_iaVideoSize stream attribute ID; its
-// value is a "WxH" string such as "3840x2160".
-const makemkvVideoSizeAttr = 19
-
-// videoSizePattern parses MakeMKV's ap_iaVideoSize "WxH" values.
-var videoSizePattern = regexp.MustCompile(`^(\d+)x(\d+)$`)
-
-// scanVideoSize returns the largest video dimensions (by area) found across
-// the scanned titles' video tracks, or found=false when no title carries a
-// parseable video-size attribute.
-func scanVideoSize(discInfo *makemkv.DiscInfo) (width, height int, found bool) {
-	if discInfo == nil {
-		return 0, 0, false
-	}
-	for _, title := range discInfo.Titles {
-		for _, track := range title.Tracks {
-			if track.Type != makemkv.TrackTypeVideo {
-				continue
-			}
-			m := videoSizePattern.FindStringSubmatch(strings.TrimSpace(track.Attributes[makemkvVideoSizeAttr]))
-			if m == nil {
-				continue
-			}
-			w, werr := strconv.Atoi(m[1])
-			h, herr := strconv.Atoi(m[2])
-			if werr != nil || herr != nil {
-				continue
-			}
-			if w*h > width*height {
-				width, height, found = w, h, true
-			}
-		}
-	}
-	return width, height, found
-}
-
-// stampUHDFromScan sets env.Metadata.UHD from the MakeMKV scan's video-size
-// stream attribute so the encode-tier claim (encodeTierClaims in
-// internal/daemonrun) resolves correctly when the encoding task dispatches,
-// which can happen before ripping produces a file. The ripping stage
-// re-stamps the flag from an ffprobe of the actual ripped file, correcting
-// scan gaps. Absent or unparseable sizes leave UHD false (1080p tier).
-func stampUHDFromScan(logger *slog.Logger, env *ripspec.Envelope, discInfo *makemkv.DiscInfo) {
-	width, height, found := scanVideoSize(discInfo)
-	uhd := found && ripspec.IsUHDResolution(width, height)
-	env.Metadata.UHD = uhd
-	result := "hd"
-	if uhd {
-		result = "uhd"
-	}
-	reason := "no video size in scan"
-	if found {
-		reason = fmt.Sprintf("source=disc_scan resolution=%dx%d", width, height)
-	}
-	logger.Info("encode tier resolution signal determined",
-		"decision_type", logs.DecisionEncodeTierSignal,
-		"decision_result", result,
-		"decision_reason", reason,
-	)
-}
-
 // convertTitles converts MakeMKV title info to ripspec titles.
 func convertTitles(discInfo *makemkv.DiscInfo) []ripspec.Title {
 	if discInfo == nil {
@@ -687,8 +626,6 @@ func (h *Handler) newEnvelope(logger *slog.Logger, item *queue.Item, discInfo *m
 		Fingerprint: item.DiscFingerprint,
 		Metadata:    metadata,
 	}
-
-	stampUHDFromScan(logger, &env, discInfo)
 
 	// Add titles from MakeMKV scan.
 	env.Titles = convertTitles(discInfo)

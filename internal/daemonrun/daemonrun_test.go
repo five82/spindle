@@ -67,36 +67,3 @@ func TestContentIDClaims(t *testing.T) {
 	}
 }
 
-func TestEncodeTierClaims(t *testing.T) {
-	cases := []struct {
-		name        string
-		ripSpecData string
-		want        map[string]int
-	}{
-		{
-			name:        "uhd",
-			ripSpecData: encodeEnvelope(t, ripspec.Envelope{Version: ripspec.CurrentVersion, Metadata: ripspec.Metadata{UHD: true}}),
-			want:        map[string]int{"encode_4k": 1},
-		},
-		{
-			name:        "non-uhd",
-			ripSpecData: encodeEnvelope(t, ripspec.Envelope{Version: ripspec.CurrentVersion, Metadata: ripspec.Metadata{UHD: false}}),
-			want:        map[string]int{"encode_1080p": 1},
-		},
-		{
-			name:        "parse failure defaults to 1080p",
-			ripSpecData: "not json",
-			want:        map[string]int{"encode_1080p": 1},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			item := &queue.Item{RipSpecData: tc.ripSpecData}
-			got := encodeTierClaims(item)
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("encodeTierClaims() = %#v, want %#v", got, tc.want)
-			}
-		})
-	}
-}

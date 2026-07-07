@@ -23,8 +23,8 @@ runs a DAG the API never shows:
 
 - The `tasks` table (per-item task state, attempts, deps, timestamps) is never
   serialized to any endpoint. The scheduler's resource budgets (`drive`, `gpu`,
-  `encode_1080p`, `encode_4k`) and live-worker registry are private in-memory
-  counters with no accessor (`internal/workflow/workflow.go:62-73`).
+  `encode`) and live-worker registry are private in-memory counters with no
+  accessor (`internal/workflow/workflow.go:62-73`).
 - The item's `stage` string plus one single-slot progress object is the entire
   display surface. During rip-and-encode overlap the label is wrong for one of
   the two running branches by construction; `SetProgressSilent`,
@@ -169,23 +169,22 @@ a separate progress-reset path.
 
 ```json
 "pipeline": [
-  {"stage": "encoding", "dependsOn": ["identification"], "claims": ["encode_1080p|encode_4k"]},
+  {"stage": "encoding", "dependsOn": ["identification"], "claims": ["encode"]},
   ...
 ],
 "scheduler": {
   "resources": {
-    "drive":        {"capacity": 1, "used": 1, "holders": [{"itemId": 3, "task": "ripping"}]},
-    "gpu":          {"capacity": 1, "used": 0, "holders": []},
-    "encode_1080p": {"capacity": 1, "used": 1, "holders": [{"itemId": 2, "task": "encoding"}]},
-    "encode_4k":    {"capacity": 1, "used": 1, "holders": [{"itemId": 5, "task": "encoding"}]}
+    "drive":  {"capacity": 1, "used": 1, "holders": [{"itemId": 3, "task": "ripping"}]},
+    "gpu":    {"capacity": 1, "used": 0, "holders": []},
+    "encode": {"capacity": 1, "used": 1, "holders": [{"itemId": 2, "task": "encoding"}]}
   }
 },
 "disc": {"paused": false}
 ```
 
 - `pipeline` comes from the registered `[]PipelineStage` template
-  (`internal/daemonrun/daemonrun.go:206`). For the encoding stage, render the
-  claim as the tier alternatives string; flyer treats claims as opaque labels.
+  (`internal/daemonrun/daemonrun.go:206`); flyer treats claims as opaque
+  labels.
 - `scheduler` needs a new `Manager.BudgetSnapshot()` accessor. To report
   holders, record claims per (itemID, taskID) at `reserve()` time in the
   existing tracking maps — do not add a new registry, extend `running`'s

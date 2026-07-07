@@ -738,6 +738,16 @@ dependent failure, per-asset outcomes and review state).
   validation of docs/proposals/FLYER_REDESIGN.md (Breaking Bad S1 D1:
   three subprocess encodes, validation 7/7, clean audit). Remaining:
   the UHD+BD paired-encode observation.
+  2026-07-07 REVERSAL: the UHD+BD paired-encode observation FAILED in
+  production and cross-tier pairing was removed. A real 1080p + UHD pair
+  (Back to School + Inside Out) ran concurrently; each reel process sized
+  its CVVDP metric pool (4 GPU workers) as if it owned the GPU and both
+  encodes died with vship OutOfVRAM on the 16GB RTX 5060 Ti about 75s
+  after the second metric phase started. The 2026-07-04 gate measured
+  score identity and throughput but not peak VRAM of two concurrent
+  metric pools at real disc resolutions. Encoding now claims a single
+  `encode` slot (capacity 1); the tier ClaimsFunc, the UHD envelope flag,
+  and both resolution-signal stamps (scan + rip probe) were deleted.
 - 2026-07-04: 4c executed and PASSED (details in the 4c sub-phase entry):
   probe scores bit-identical under WhisperX load at all 56 shared points,
   WhisperX VRAM peak 3.3 GiB recorded in the resource model, gpu capacity

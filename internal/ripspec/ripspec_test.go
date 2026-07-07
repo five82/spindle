@@ -369,26 +369,3 @@ func TestCountUnresolvedEpisodes(t *testing.T) {
 		t.Errorf("CountUnresolvedEpisodes = %d, want 2", got)
 	}
 }
-
-func TestIsUHDResolution(t *testing.T) {
-	tests := []struct {
-		name   string
-		width  int
-		height int
-		want   bool
-	}{
-		{"3840x2160 UHD", 3840, 2160, true},
-		{"1920x1080 HD", 1920, 1080, false},
-		{"2560x1080 ultrawide width threshold", 2560, 1080, true},
-		{"1920x1440 height threshold", 1920, 1440, true},
-		{"720x480 DVD", 720, 480, false},
-		{"zero dimensions (probe failure default)", 0, 0, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := IsUHDResolution(tt.width, tt.height); got != tt.want {
-				t.Errorf("IsUHDResolution(%d, %d) = %v, want %v", tt.width, tt.height, got, tt.want)
-			}
-		})
-	}
-}

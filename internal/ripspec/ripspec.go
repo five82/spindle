@@ -41,7 +41,6 @@ type Metadata struct {
 	VoteAverage  float64 `json:"vote_average,omitempty"`
 	VoteCount    int     `json:"vote_count,omitempty"`
 	Movie        bool    `json:"movie,omitempty"`
-	UHD          bool    `json:"uhd,omitempty"`
 	Cached       bool    `json:"cached,omitempty"`
 	Filename     string  `json:"filename,omitempty"`
 	DiscSource   string  `json:"disc_source,omitempty"`
@@ -439,14 +438,6 @@ func (as *Assets) Clone() Assets {
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
-
-// IsUHDResolution reports whether video dimensions qualify for the 4K encode
-// tier (Metadata.UHD, consumed by encodeTierClaims in internal/daemonrun).
-// QHD/UHD and above on either axis counts, so odd aspect ratios (e.g. cropped
-// 2.35:1) still classify correctly.
-func IsUHDResolution(width, height int) bool {
-	return height >= 1440 || width >= 2560
-}
 
 // PlaceholderKey formats a placeholder episode key as "s01_001". Season and
 // discIndex default to 1 if <= 0.

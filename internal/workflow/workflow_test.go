@@ -734,30 +734,31 @@ func TestFinalizeItemLagsStageLabelDuringOverlap(t *testing.T) {
 	}
 }
 
-func TestClaimsFuncEnablesCrossTierPairing(t *testing.T) {
+func TestClaimsFuncRoutesItemsToPerItemSlots(t *testing.T) {
 	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
 	if err != nil {
 		t.Fatalf("open queue: %v", err)
 	}
 	defer func() { _ = store.Close() }()
 
-	// Item A is 1080p, item B is 4K, item C is 1080p. A and B must encode
-	// concurrently (different tier slots); C must wait for A (same tier).
-	itemA, _ := store.NewDisc("A-1080p", "fpA")
-	itemB, _ := store.NewDisc("B-4k", "fpB")
-	itemC, _ := store.NewDisc("C-1080p", "fpC")
-	tiers := map[int64]string{itemA.ID: "encode_1080p", itemB.ID: "encode_4k", itemC.ID: "encode_1080p"}
+	// ClaimsFunc resolves a per-item claim (as contentIDClaims does for the
+	// gpu slot). Items A and B claim different slots and must run
+	// concurrently; C claims A's slot and must wait for A.
+	itemA, _ := store.NewDisc("A-slot1", "fpA")
+	itemB, _ := store.NewDisc("B-slot2", "fpB")
+	itemC, _ := store.NewDisc("C-slot1", "fpC")
+	slots := map[int64]string{itemA.ID: "slot_1", itemB.ID: "slot_2", itemC.ID: "slot_1"}
 
 	var mu sync.Mutex
 	running := map[int64]bool{}
 	maxPair := 0
-	sameTierOverlap := false
+	sameSlotOverlap := false
 	release := make(chan struct{})
 	handler := stubHandler{run: func(ctx context.Context, sess *stage.Session) error {
 		mu.Lock()
 		running[sess.Item.ID] = true
 		if running[itemA.ID] && running[itemC.ID] {
-			sameTierOverlap = true
+			sameSlotOverlap = true
 		}
 		count := 0
 		for _, on := range running {
@@ -786,9 +787,9 @@ func TestClaimsFuncEnablesCrossTierPairing(t *testing.T) {
 		{
 			Stage:   queue.StageIdentification,
 			Handler: handler,
-			Claims:  map[string]int{"encode_1080p": 1, "encode_4k": 1},
+			Claims:  map[string]int{"slot_1": 1, "slot_2": 1},
 			ClaimsFunc: func(item *queue.Item) map[string]int {
-				return map[string]int{tiers[item.ID]: 1}
+				return map[string]int{slots[item.ID]: 1}
 			},
 		},
 	})
@@ -804,7 +805,7 @@ func TestClaimsFuncEnablesCrossTierPairing(t *testing.T) {
 		<-done
 	}()
 
-	// Wait until A and B run concurrently (cross-tier pair).
+	// Wait until A and B run concurrently (distinct slots).
 	deadline := time.Now().Add(testWait)
 	for time.Now().Before(deadline) {
 		mu.Lock()
@@ -820,10 +821,10 @@ func TestClaimsFuncEnablesCrossTierPairing(t *testing.T) {
 	cWaiting := !running[itemC.ID]
 	mu.Unlock()
 	if !paired {
-		t.Fatal("1080p + 4K items did not pair")
+		t.Fatal("items claiming distinct slots did not run concurrently")
 	}
 	if !cWaiting {
-		t.Fatal("second 1080p item ran while the 1080p slot was held")
+		t.Fatal("second slot_1 item ran while slot_1 was held")
 	}
 
 	close(release)
@@ -833,11 +834,11 @@ func TestClaimsFuncEnablesCrossTierPairing(t *testing.T) {
 		if len(items) == 3 {
 			mu.Lock()
 			defer mu.Unlock()
-			if sameTierOverlap {
-				t.Fatal("same-tier items overlapped")
+			if sameSlotOverlap {
+				t.Fatal("same-slot items overlapped")
 			}
 			if maxPair != 2 {
-				t.Fatalf("max concurrent = %d, want 2 (one per tier)", maxPair)
+				t.Fatalf("max concurrent = %d, want 2 (one per slot)", maxPair)
 			}
 			return
 		}
