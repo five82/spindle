@@ -49,7 +49,7 @@ func TestPrintTaskLines(t *testing.T) {
 	tasks := []httpapi.TaskResponse{
 		{
 			Type:  "ripping",
-			State: queue.TaskRunning,
+			State: string(queue.TaskRunning),
 			Progress: httpapi.ProgressResponse{
 				Percent:     42,
 				Message:     "Ripping title 3",
@@ -60,12 +60,12 @@ func TestPrintTaskLines(t *testing.T) {
 		},
 		{
 			Type:  "encoding",
-			State: queue.TaskFailed,
+			State: string(queue.TaskFailed),
 			Error: "encoder crashed",
 		},
 		{
 			Type:  "subtitling",
-			State: queue.TaskPending,
+			State: string(queue.TaskPending),
 		},
 	}
 
@@ -94,7 +94,7 @@ func TestPrintTaskLinesNonVerboseOmitsAssetKey(t *testing.T) {
 	tasks := []httpapi.TaskResponse{
 		{
 			Type:  "encoding",
-			State: queue.TaskRunning,
+			State: string(queue.TaskRunning),
 			Progress: httpapi.ProgressResponse{
 				Percent: 10,
 				Message: "Encoding",

@@ -574,7 +574,7 @@ func TestSchedulerCancelsWorkerOnUserStop(t *testing.T) {
 		}
 		if got.Stage == queue.StageFailed && got.UserStopped() &&
 			len(tasks) == 2 && tasks[0].State == queue.TaskPending && got.InProgress == 0 {
-			if got.FailedAtStage != string(queue.StageIdentification) {
+			if got.FailedAtStage != queue.StageIdentification {
 				t.Fatalf("failed_at_stage = %q, want identification", got.FailedAtStage)
 			}
 			return

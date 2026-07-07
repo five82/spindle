@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -33,12 +32,7 @@ func newDiscIDListCmd() *cobra.Command {
 			entries := store.List()
 
 			if asJSON {
-				data, err := json.MarshalIndent(entries, "", "  ")
-				if err != nil {
-					return err
-				}
-				fmt.Println(string(data))
-				return nil
+				return printJSON(entries)
 			}
 
 			if len(entries) == 0 {
@@ -47,10 +41,7 @@ func newDiscIDListCmd() *cobra.Command {
 			}
 
 			for i, le := range entries {
-				discID := le.DiscID
-				if len(discID) > 12 {
-					discID = discID[:12]
-				}
+				discID := shortFP(le.DiscID)
 				e := le.Entry
 				fmt.Printf("  %d. %s (TMDB %d, %s", i+1, e.Title, e.TMDBID, e.MediaType)
 				if e.Season > 0 {

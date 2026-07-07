@@ -247,22 +247,18 @@ func newDebugCommentaryCmd() *cobra.Command {
 			}
 
 			// Set up transcription and LLM for commentary detection.
-			llmClient := llm.New(
-				cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model,
-				cfg.LLM.Referer, cfg.LLM.Title, cfg.LLM.TimeoutSeconds, nil,
-			)
+			llmClient := llm.New(cfg.LLM, nil)
 			if llmClient == nil {
 				fmt.Println("\nLLM not configured; commentary classification requires LLM")
 				return nil
 			}
 
-			transcriber := transcription.New(
-				cfg.Subtitles.WhisperXModel,
-				cfg.Subtitles.WhisperXCUDAEnabled,
-				cfg.Subtitles.WhisperXVADMethod,
-				cfg.Subtitles.WhisperXHFToken,
-				nil,
-			)
+			transcriber := transcription.New(transcription.Params{
+				Model:       cfg.Subtitles.WhisperXModel,
+				CUDAEnabled: cfg.Subtitles.WhisperXCUDAEnabled,
+				VADMethod:   cfg.Subtitles.WhisperXVADMethod,
+				HFToken:     cfg.Subtitles.WhisperXHFToken,
+			}, nil)
 
 			workDir, err := os.MkdirTemp("", "spindle-debug-commentary-*")
 			if err != nil {

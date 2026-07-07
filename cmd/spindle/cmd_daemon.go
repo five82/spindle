@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -124,12 +123,7 @@ func newStatusCmd() *cobra.Command {
 			}
 
 			if asJSON {
-				data, err := json.MarshalIndent(status, "", "  ")
-				if err != nil {
-					return err
-				}
-				fmt.Println(string(data))
-				return nil
+				return printJSON(status)
 			}
 
 			fmt.Println()

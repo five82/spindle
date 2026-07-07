@@ -265,7 +265,7 @@ func toItemResponse(item *queue.Item, tasks []*queue.Task, includeRipSpec bool) 
 		DisplayTitle:    item.DisplayTitle(),
 		Stage:           string(item.Stage),
 		InProgress:      item.InProgress != 0,
-		FailedAtStage:   item.FailedAtStage,
+		FailedAtStage:   string(item.FailedAtStage),
 		ErrorMessage:    item.ErrorMessage,
 		CreatedAt:       item.CreatedAt,
 		UpdatedAt:       item.UpdatedAt,
@@ -314,7 +314,7 @@ func toTaskResponses(tasks []*queue.Task) []TaskResponse {
 	for _, t := range tasks {
 		tr := TaskResponse{
 			Type:       string(t.Type),
-			State:      t.State,
+			State:      string(t.State),
 			Attempts:   t.Attempts,
 			Error:      t.ErrorMsg,
 			StartedAt:  t.StartedAt,

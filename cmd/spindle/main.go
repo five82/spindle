@@ -189,6 +189,26 @@ func prettyJSON(s string) string {
 	return string(data)
 }
 
+// printJSON marshal-indents v with a two-space indent and prints it followed
+// by a trailing newline, matching the shape every --json flag renders.
+func printJSON(v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
+// shortFP truncates a fingerprint/ID string to 12 characters for compact
+// table display.
+func shortFP(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
+}
+
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s

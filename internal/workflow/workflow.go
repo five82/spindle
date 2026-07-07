@@ -97,8 +97,28 @@ func New(store *queue.Store, notifier *notify.Notifier, statusTracker *httpapi.S
 	}
 }
 
-// ConfigureStages registers an ordered slice of stage handlers.
+// ConfigureStages registers an ordered slice of stage handlers. Registered
+// stages must appear in queue.StageOrder, in the same relative order: the
+// stage enumeration is single-sourced there, and drifting from it would
+// silently break retry validation and audit phase gates. Violations are
+// programmer errors in a hardcoded template, so they panic at startup.
 func (m *Manager) ConfigureStages(stages []PipelineStage) {
+	position := make(map[queue.Stage]int, len(queue.StageOrder))
+	for i, s := range queue.StageOrder {
+		position[s] = i
+	}
+	prev := -1
+	for _, s := range stages {
+		pos, ok := position[s.Stage]
+		if !ok {
+			panic(fmt.Sprintf("workflow: stage %q is not declared in queue.StageOrder", s.Stage))
+		}
+		if pos <= prev {
+			panic(fmt.Sprintf("workflow: stage %q registered out of queue.StageOrder order", s.Stage))
+		}
+		prev = pos
+	}
+
 	p := m.pipeline
 	p.stages = stages
 	p.stageMap = make(map[queue.Stage]int, len(stages))
@@ -558,7 +578,8 @@ func (m *Manager) noteTaskGranted(task *queue.Task, claims map[string]int) {
 func (m *Manager) runTask(ctx context.Context, task *queue.Task, item *queue.Item, ps PipelineStage, claims map[string]int) {
 	outcome := m.processItem(ctx, task, item, ps, claims)
 
-	var state, errMsg string
+	var state queue.TaskState
+	var errMsg string
 	switch outcome {
 	case outcomeDone:
 		state = queue.TaskDone

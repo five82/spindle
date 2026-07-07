@@ -35,22 +35,34 @@ type Client struct {
 	retryDelay time.Duration
 }
 
-// New creates an OpenSubtitles client. Returns nil if apiKey is empty.
-func New(apiKey, userAgent, userToken, baseURL string, logger *slog.Logger) *Client {
-	if apiKey == "" {
+// Params holds the fields New needs from config.SubtitlesConfig's
+// OpenSubtitles-prefixed settings, plus BaseURL, which is a test-only
+// override (production always leaves it empty so New applies the default).
+type Params struct {
+	APIKey    string
+	UserAgent string
+	UserToken string
+	BaseURL   string
+}
+
+// New creates an OpenSubtitles client. Returns nil if APIKey is empty.
+func New(p Params, logger *slog.Logger) *Client {
+	if p.APIKey == "" {
 		return nil
 	}
+	baseURL := p.BaseURL
 	if baseURL == "" {
 		baseURL = "https://api.opensubtitles.com/api/v1"
 	}
+	userAgent := p.UserAgent
 	if userAgent == "" {
 		userAgent = "Spindle/dev v0.1.0"
 	}
 	logger = logs.Default(logger)
 	return &Client{
-		apiKey:     apiKey,
+		apiKey:     p.APIKey,
 		userAgent:  userAgent,
-		userToken:  userToken,
+		userToken:  p.UserToken,
 		baseURL:    baseURL,
 		logger:     logger,
 		client:     &http.Client{Timeout: 45 * time.Second},

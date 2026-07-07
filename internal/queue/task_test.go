@@ -12,13 +12,13 @@ var testSpecs = []TaskSpec{
 	{Type: StageOrganizing, DependsOn: []Stage{StageEncoding}},
 }
 
-func taskStatesByType(t *testing.T, store *Store, itemID int64) map[Stage]string {
+func taskStatesByType(t *testing.T, store *Store, itemID int64) map[Stage]TaskState {
 	t.Helper()
 	tasks, err := store.TasksForItem(itemID)
 	if err != nil {
 		t.Fatalf("tasks for item: %v", err)
 	}
-	states := make(map[Stage]string, len(tasks))
+	states := make(map[Stage]TaskState, len(tasks))
 	for _, task := range tasks {
 		states[task.Type] = task.State
 	}
@@ -218,7 +218,7 @@ func TestStopItemsRecordsStoppedStageForRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.FailedAtStage != string(StageEncoding) {
+	if got.FailedAtStage != StageEncoding {
 		t.Fatalf("failed_at_stage = %q, want encoding", got.FailedAtStage)
 	}
 

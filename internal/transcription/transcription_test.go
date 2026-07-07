@@ -105,7 +105,7 @@ func TestSelectPrimaryAudioTrack(t *testing.T) {
 		}}, nil
 	}
 
-	svc := New("large-v3", false, "silero", "", nil)
+	svc := New(Params{Model: "large-v3", VADMethod: "silero"}, nil)
 	selected, err := svc.SelectPrimaryAudioTrack(context.Background(), "/tmp/input.mkv", "en")
 	if err != nil {
 		t.Fatalf("SelectPrimaryAudioTrack() error = %v", err)
@@ -131,7 +131,7 @@ func TestSelectPrimaryAudioTrackFallsBackLanguage(t *testing.T) {
 		}}, nil
 	}
 
-	svc := New("large-v3", false, "silero", "", nil)
+	svc := New(Params{Model: "large-v3", VADMethod: "silero"}, nil)
 	selected, err := svc.SelectPrimaryAudioTrack(context.Background(), "/tmp/input.mkv", "english")
 	if err != nil {
 		t.Fatalf("SelectPrimaryAudioTrack() error = %v", err)
@@ -145,7 +145,7 @@ func TestSelectPrimaryAudioTrackFallsBackLanguage(t *testing.T) {
 }
 
 func TestBuildWhisperXInvocation(t *testing.T) {
-	svc := New("large-v3", true, "pyannote", "hf-token", nil)
+	svc := New(Params{Model: "large-v3", CUDAEnabled: true, VADMethod: "pyannote", HFToken: "hf-token"}, nil)
 	invocation := svc.buildWhisperXInvocation(
 		[]string{"/tmp/audio.wav"},
 		[]TranscribeRequest{{OutputDir: "/tmp/out", Language: "en"}},
@@ -172,7 +172,7 @@ func TestBuildWhisperXInvocation(t *testing.T) {
 }
 
 func TestBuildWhisperXInvocationBatch(t *testing.T) {
-	svc := New("large-v3", false, "silero", "", nil)
+	svc := New(Params{Model: "large-v3", VADMethod: "silero"}, nil)
 	invocation := svc.buildWhisperXInvocation(
 		[]string{"/tmp/e1/audio.wav", "/tmp/e2/audio.wav"},
 		[]TranscribeRequest{
@@ -197,7 +197,7 @@ func TestBuildWhisperXInvocationBatch(t *testing.T) {
 }
 
 func TestTranscribeBatchRejectsMixedModels(t *testing.T) {
-	svc := New("large-v3", false, "silero", "", nil)
+	svc := New(Params{Model: "large-v3", VADMethod: "silero"}, nil)
 	_, err := svc.TranscribeBatch(context.Background(), []TranscribeRequest{
 		{OutputDir: "/tmp/a", Language: "en"},
 		{OutputDir: "/tmp/b", Language: "en", Model: "large-v3-turbo"},
@@ -208,7 +208,7 @@ func TestTranscribeBatchRejectsMixedModels(t *testing.T) {
 }
 
 func TestTranscribeBatchRejectsEmpty(t *testing.T) {
-	svc := New("large-v3", false, "silero", "", nil)
+	svc := New(Params{Model: "large-v3", VADMethod: "silero"}, nil)
 	if _, err := svc.TranscribeBatch(context.Background(), nil); err == nil {
 		t.Fatal("expected error for empty batch")
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -22,7 +21,7 @@ import (
 // line is one line per running task.
 func printTaskLines(indent string, tasks []httpapi.TaskResponse, verbose bool) {
 	for _, t := range tasks {
-		switch t.State {
+		switch queue.TaskState(t.State) {
 		case queue.TaskRunning:
 			fmt.Printf("%s%s %s (%.0f%%)\n", indent, labelStyle(fmt.Sprintf("Progress (%s):", t.Type)), t.Progress.Message, t.Progress.Percent)
 			if verbose && t.Progress.TotalBytes > 0 {
@@ -96,12 +95,7 @@ func newQueueListCmd() *cobra.Command {
 			}
 
 			if asJSON {
-				data, err := json.MarshalIndent(items, "", "  ")
-				if err != nil {
-					return err
-				}
-				fmt.Println(string(data))
-				return nil
+				return printJSON(items)
 			}
 
 			if len(items) == 0 {
@@ -130,16 +124,12 @@ func newQueueListCmd() *cobra.Command {
 				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-30s %-24s %-16s %-14s", "ID", "Title", "Stage", "Created", "Fingerprint")))
 				fmt.Println(dimStyle(strings.Repeat("-", 92)))
 				for _, item := range items {
-					fp := item.DiscFingerprint
-					if len(fp) > 12 {
-						fp = fp[:12]
-					}
 					fmt.Printf("%-6d %-30s %-24s %-16s %-14s\n",
 						item.ID,
 						truncate(item.DiscTitle, 28),
 						item.Stage,
 						relativeAge(item.CreatedAt),
-						fp,
+						shortFP(item.DiscFingerprint),
 					)
 				}
 			}
@@ -176,12 +166,7 @@ func newQueueShowCmd() *cobra.Command {
 			}
 
 			if asJSON {
-				data, err := json.MarshalIndent(item, "", "  ")
-				if err != nil {
-					return err
-				}
-				fmt.Println(string(data))
-				return nil
+				return printJSON(item)
 			}
 
 			fmt.Printf("%s %d\n", labelStyle("ID:         "), item.ID)

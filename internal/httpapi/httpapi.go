@@ -33,21 +33,35 @@ type Server struct {
 	scheduler     SchedulerSource
 }
 
-// New creates an HTTP API server. discMon, shutdownCh, logBuffer,
-// statusTracker, pipeline, and scheduler may be nil.
-func New(store *queue.Store, token string, discMon *discmonitor.Monitor, shutdownCh chan struct{}, logger *slog.Logger, statusInfo StatusInfo, logBuffer *LogBuffer, statusTracker *StatusTracker, pipeline []PipelineStageInfo, scheduler SchedulerSource) *Server {
+// Params holds the dependencies and options for New. DiscMonitor, ShutdownCh,
+// LogBuffer, StatusTracker, Pipeline, and Scheduler may be left zero.
+type Params struct {
+	Store         *queue.Store
+	Token         string
+	DiscMonitor   *discmonitor.Monitor
+	ShutdownCh    chan struct{}
+	Logger        *slog.Logger
+	StatusInfo    StatusInfo
+	LogBuffer     *LogBuffer
+	StatusTracker *StatusTracker
+	Pipeline      []PipelineStageInfo
+	Scheduler     SchedulerSource
+}
+
+// New creates an HTTP API server.
+func New(p Params) *Server {
 	s := &Server{
-		store:         store,
-		token:         token,
-		logger:        logger,
+		store:         p.Store,
+		token:         p.Token,
+		logger:        p.Logger,
 		mux:           http.NewServeMux(),
-		discMonitor:   discMon,
-		shutdownCh:    shutdownCh,
-		statusInfo:    statusInfo,
-		logBuffer:     logBuffer,
-		statusTracker: statusTracker,
-		pipeline:      pipeline,
-		scheduler:     scheduler,
+		discMonitor:   p.DiscMonitor,
+		shutdownCh:    p.ShutdownCh,
+		statusInfo:    p.StatusInfo,
+		logBuffer:     p.LogBuffer,
+		statusTracker: p.StatusTracker,
+		pipeline:      p.Pipeline,
+		scheduler:     p.Scheduler,
 	}
 	s.registerRoutes()
 	s.httpServer = &http.Server{

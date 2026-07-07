@@ -145,7 +145,7 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 
 	it.Stage = Stage(stage)
 	it.DiscTitle = discTitle.String
-	it.FailedAtStage = failedAtStage.String
+	it.FailedAtStage = Stage(failedAtStage.String)
 	it.ErrorMessage = errorMessage.String
 	it.CreatedAt = createdAt.String
 	it.UpdatedAt = updatedAt.String
@@ -291,6 +291,30 @@ func (s *Store) MoveToStage(item *Item, stage Stage) error {
 	})
 }
 
+// execUnlessStopped runs update (which must filter on user_stopped = 0) and
+// then applies mutate to the in-memory item. Zero rows affected means a user
+// stop raced the write: the item is refreshed from the database instead so
+// the caller observes the stopped state. label prefixes error messages.
+func (s *Store) execUnlessStopped(item *Item, label string, mutate func(), query string, args ...any) error {
+	return retryOnBusy(func() error {
+		res, err := s.db.Exec(query, args...)
+		if err != nil {
+			return fmt.Errorf("%s: %w", label, err)
+		}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("%s rows affected: %w", label, err)
+		}
+		if rows == 0 {
+			return s.refreshItem(item)
+		}
+		if mutate != nil {
+			mutate()
+		}
+		return nil
+	})
+}
+
 // CompleteStage finalizes a successful stage execution. If advance is true,
 // the item moves to nextStage; otherwise only in_progress is cleared. A
 // user-stopped item keeps its failed/stopped state even if a handler finishes
@@ -300,61 +324,36 @@ func (s *Store) CompleteStage(item *Item, nextStage Stage, advance bool) error {
 		return s.ClearInProgress(item)
 	}
 
-	targetStage := nextStage
-	return retryOnBusy(func() error {
-		res, err := s.db.Exec(`
-			UPDATE queue_items SET
-				stage = ?, in_progress = 0,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ? AND user_stopped = 0`,
-			string(targetStage), item.ID,
-		)
-		if err != nil {
-			return fmt.Errorf("complete stage item %d: %w", item.ID, err)
-		}
-		rows, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("complete stage item %d rows affected: %w", item.ID, err)
-		}
-		if rows == 0 {
-			return s.refreshItem(item)
-		}
-		item.Stage = targetStage
+	return s.execUnlessStopped(item, fmt.Sprintf("complete stage item %d", item.ID), func() {
+		item.Stage = nextStage
 		item.InProgress = 0
 		item.userStopped = 0
-		return nil
-	})
+	}, `
+		UPDATE queue_items SET
+			stage = ?, in_progress = 0,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND user_stopped = 0`,
+		string(nextStage), item.ID,
+	)
 }
 
 // FailStage marks an item failed at a specific stage unless the item has
 // already been explicitly stopped by the user.
 func (s *Store) FailStage(item *Item, failedAt Stage, errMsg string) error {
-	return retryOnBusy(func() error {
-		res, err := s.db.Exec(`
-			UPDATE queue_items SET
-				stage = ?, in_progress = 0,
-				failed_at_stage = ?, error_message = ?,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ? AND user_stopped = 0`,
-			string(StageFailed), string(failedAt), errMsg, item.ID,
-		)
-		if err != nil {
-			return fmt.Errorf("fail item %d at %s: %w", item.ID, failedAt, err)
-		}
-		rows, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("fail item %d at %s rows affected: %w", item.ID, failedAt, err)
-		}
-		if rows == 0 {
-			return s.refreshItem(item)
-		}
+	return s.execUnlessStopped(item, fmt.Sprintf("fail item %d at %s", item.ID, failedAt), func() {
 		item.Stage = StageFailed
 		item.InProgress = 0
-		item.FailedAtStage = string(failedAt)
+		item.FailedAtStage = failedAt
 		item.ErrorMessage = errMsg
 		item.userStopped = 0
-		return nil
-	})
+	}, `
+		UPDATE queue_items SET
+			stage = ?, in_progress = 0,
+			failed_at_stage = ?, error_message = ?,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND user_stopped = 0`,
+		string(StageFailed), string(failedAt), errMsg, item.ID,
+	)
 }
 
 // UpdateDiscTitle changes only the queue item's display title.
@@ -375,58 +374,32 @@ func (s *Store) UpdateDiscTitle(item *Item, title string) error {
 // RipSpec or review update cannot accidentally advance, retry, or un-fail an
 // item.
 func (s *Store) UpdateWorkState(item *Item) error {
-	return retryOnBusy(func() error {
-		res, err := s.db.Exec(`
-			UPDATE queue_items SET
-				disc_title = ?,
-				updated_at = CURRENT_TIMESTAMP,
-				rip_spec_data = ?, disc_fingerprint = ?, metadata_json = ?,
-				needs_review = ?, review_reason = ?,
-				encoding_details_json = ?
-			WHERE id = ? AND user_stopped = 0`,
-			item.DiscTitle,
-			item.RipSpecData, item.DiscFingerprint, item.MetadataJSON,
-			item.NeedsReview, item.ReviewReason,
-			item.EncodingDetailsJSON,
-			item.ID,
-		)
-		if err != nil {
-			return fmt.Errorf("update work state item %d: %w", item.ID, err)
-		}
-		rows, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("update work state item %d rows affected: %w", item.ID, err)
-		}
-		if rows == 0 {
-			return s.refreshItem(item)
-		}
-		return nil
-	})
+	return s.execUnlessStopped(item, fmt.Sprintf("update work state item %d", item.ID), nil, `
+		UPDATE queue_items SET
+			disc_title = ?,
+			updated_at = CURRENT_TIMESTAMP,
+			rip_spec_data = ?, disc_fingerprint = ?, metadata_json = ?,
+			needs_review = ?, review_reason = ?,
+			encoding_details_json = ?
+		WHERE id = ? AND user_stopped = 0`,
+		item.DiscTitle,
+		item.RipSpecData, item.DiscFingerprint, item.MetadataJSON,
+		item.NeedsReview, item.ReviewReason,
+		item.EncodingDetailsJSON,
+		item.ID,
+	)
 }
 
 // UpdateEncodingDetails persists ONLY the encoding telemetry column. The
 // encoding task is the column's single writer.
 func (s *Store) UpdateEncodingDetails(item *Item) error {
-	return retryOnBusy(func() error {
-		res, err := s.db.Exec(`
-			UPDATE queue_items SET
-				encoding_details_json = ?,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE id = ? AND user_stopped = 0`,
-			item.EncodingDetailsJSON, item.ID,
-		)
-		if err != nil {
-			return fmt.Errorf("update encoding details item %d: %w", item.ID, err)
-		}
-		rows, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("update encoding details item %d rows affected: %w", item.ID, err)
-		}
-		if rows == 0 {
-			return s.refreshItem(item)
-		}
-		return nil
-	})
+	return s.execUnlessStopped(item, fmt.Sprintf("update encoding details item %d", item.ID), nil, `
+		UPDATE queue_items SET
+			encoding_details_json = ?,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND user_stopped = 0`,
+		item.EncodingDetailsJSON, item.ID,
+	)
 }
 
 // Remove deletes a single item by ID.
@@ -503,54 +476,6 @@ func (s *Store) List(statuses ...Stage) ([]*Item, error) {
 	return collectItems(rows)
 }
 
-// NextForStatuses returns the oldest item with in_progress=0 matching any status.
-func (s *Store) NextForStatuses(statuses ...Stage) (*Item, error) {
-	if len(statuses) == 0 {
-		return nil, nil
-	}
-
-	placeholders := make([]string, len(statuses))
-	args := make([]any, len(statuses))
-	for i, st := range statuses {
-		placeholders[i] = "?"
-		args[i] = string(st)
-	}
-
-	query := "SELECT " + allColumns + " FROM queue_items WHERE in_progress = 0 AND stage IN (" +
-		strings.Join(placeholders, ",") + ") ORDER BY created_at LIMIT 1"
-
-	row := s.db.QueryRow(query, args...)
-	it, err := scanItem(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("next for statuses: %w", err)
-	}
-	return it, nil
-}
-
-// ActiveFingerprints returns the set of all non-empty disc fingerprints in the queue.
-func (s *Store) ActiveFingerprints() (map[string]struct{}, error) {
-	rows, err := s.db.Query(
-		"SELECT DISTINCT disc_fingerprint FROM queue_items WHERE disc_fingerprint IS NOT NULL AND disc_fingerprint != ''",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("active fingerprints: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	result := make(map[string]struct{})
-	for rows.Next() {
-		var fp string
-		if err := rows.Scan(&fp); err != nil {
-			return nil, fmt.Errorf("scan fingerprint: %w", err)
-		}
-		result[fp] = struct{}{}
-	}
-	return result, rows.Err()
-}
-
 // HasDiscDependentItem returns true if a drive-claiming task (identification
 // or ripping) is currently running. Task state is exact here where the item
 // stage label is not: during rip-to-encode overlap the item may still be
@@ -559,7 +484,7 @@ func (s *Store) HasDiscDependentItem() (bool, error) {
 	var count int
 	err := s.db.QueryRow(
 		"SELECT COUNT(*) FROM tasks WHERE state = ? AND type IN (?, ?)",
-		TaskRunning, string(StageIdentification), string(StageRipping),
+		string(TaskRunning), string(StageIdentification), string(StageRipping),
 	).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("has disc dependent item: %w", err)
@@ -579,7 +504,7 @@ func (s *Store) Stats() (map[Stage]int, error) {
 			(SELECT t.type FROM tasks t WHERE t.item_id = i.id AND t.state = ? ORDER BY t.id LIMIT 1),
 			i.stage) AS display_stage, COUNT(*)
 		FROM queue_items i GROUP BY display_stage`,
-		string(StageFailed), string(StageCompleted), TaskRunning)
+		string(StageFailed), string(StageCompleted), string(TaskRunning))
 	if err != nil {
 		return nil, fmt.Errorf("stats: %w", err)
 	}
@@ -662,10 +587,7 @@ func (s *Store) RetryFailed(ids ...int64) (int, error) {
 				continue
 			}
 
-			targetStage := StageIdentification
-			if item.FailedAtStage != "" {
-				targetStage = Stage(item.FailedAtStage)
-			}
+			targetStage := item.ResumeStage()
 
 			_, err = s.db.Exec(`
 				UPDATE queue_items SET
@@ -744,7 +666,7 @@ func (s *Store) StopItems(ids ...int64) (int, error) {
 			item.AppendReviewReason(ReviewReasonUserStopped)
 
 			if stoppedAt != StageFailed && stoppedAt != StageCompleted {
-				item.FailedAtStage = string(stoppedAt)
+				item.FailedAtStage = stoppedAt
 			}
 
 			_, err = s.db.Exec(`
@@ -753,7 +675,7 @@ func (s *Store) StopItems(ids ...int64) (int, error) {
 					needs_review = ?, review_reason = ?, user_stopped = 1,
 					updated_at = CURRENT_TIMESTAMP
 				WHERE id = ?`,
-				string(StageFailed), item.FailedAtStage, item.NeedsReview, item.ReviewReason, id,
+				string(StageFailed), string(item.FailedAtStage), item.NeedsReview, item.ReviewReason, id,
 			)
 			if err != nil {
 				return fmt.Errorf("stop item %d: %w", id, err)

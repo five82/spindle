@@ -25,20 +25,31 @@ type Service struct {
 	logger      *slog.Logger
 }
 
+// Params holds the fields New needs from config.SubtitlesConfig's WhisperX-
+// prefixed settings.
+type Params struct {
+	Model       string
+	CUDAEnabled bool
+	VADMethod   string
+	HFToken     string
+}
+
 // New creates a transcription service.
-func New(model string, cudaEnabled bool, vadMethod, hfToken string, logger *slog.Logger) *Service {
+func New(p Params, logger *slog.Logger) *Service {
 	logger = logs.Default(logger)
+	model := p.Model
 	if model == "" {
 		model = "large-v3"
 	}
+	vadMethod := p.VADMethod
 	if vadMethod == "" {
 		vadMethod = "silero"
 	}
 	return &Service{
 		model:       model,
-		cudaEnabled: cudaEnabled,
+		cudaEnabled: p.CUDAEnabled,
 		vadMethod:   vadMethod,
-		hfToken:     hfToken,
+		hfToken:     p.HFToken,
 		logger:      logger,
 	}
 }

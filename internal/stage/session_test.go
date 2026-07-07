@@ -170,7 +170,7 @@ func TestSessionSaveDoesNotChangeLifecycleFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get item: %v", err)
 	}
-	if got.Stage != queue.StageFailed || got.InProgress != 0 || got.FailedAtStage != string(queue.StageRipping) || got.ErrorMessage != "existing error" {
+	if got.Stage != queue.StageFailed || got.InProgress != 0 || got.FailedAtStage != queue.StageRipping || got.ErrorMessage != "existing error" {
 		t.Fatalf("lifecycle fields changed: stage=%q in_progress=%d failed_at=%q error=%q", got.Stage, got.InProgress, got.FailedAtStage, got.ErrorMessage)
 	}
 	parsed, err := ripspec.Parse(got.RipSpecData)

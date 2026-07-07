@@ -7,16 +7,18 @@ import (
 	"time"
 )
 
-// Task states. Readiness (all deps done) is derived at query time, never
-// stored. A failed item's remaining pending tasks are gated by the item
-// filter in ReadyTasks rather than being marked failed themselves; when
-// sibling subtrees can continue independently (Phase 4 of the task-graph
-// plan), transitive dependent failure moves here.
+// TaskState is a task's lifecycle state. Readiness (all deps done) is derived
+// at query time, never stored. A failed item's remaining pending tasks are
+// gated by the item filter in ReadyTasks rather than being marked failed
+// themselves; when sibling subtrees can continue independently (Phase 4 of
+// the task-graph plan), transitive dependent failure moves here.
+type TaskState string
+
 const (
-	TaskPending = "pending"
-	TaskRunning = "running"
-	TaskDone    = "done"
-	TaskFailed  = "failed"
+	TaskPending TaskState = "pending"
+	TaskRunning TaskState = "running"
+	TaskDone    TaskState = "done"
+	TaskFailed  TaskState = "failed"
 )
 
 const createTasksTableSQL = `
@@ -58,7 +60,7 @@ type Task struct {
 	ItemID              int64
 	Type                Stage
 	AssetKey            string
-	State               string
+	State               TaskState
 	Attempts            int
 	ErrorMsg            string
 	Deps                []int64
@@ -146,7 +148,7 @@ func (s *Store) EnsureTasks(item *Item, specs []TaskSpec) error {
 			depsJSON, _ := json.Marshal(depIDs)
 			res, err := tx.Exec(
 				`INSERT INTO tasks (item_id, type, state, deps) VALUES (?, ?, ?, ?)`,
-				item.ID, string(spec.Type), state, string(depsJSON),
+				item.ID, string(spec.Type), string(state), string(depsJSON),
 			)
 			if err != nil {
 				return fmt.Errorf("insert task %s: %w", spec.Type, err)
@@ -175,7 +177,7 @@ func (s *Store) ReadyTasks() ([]*Task, error) {
 		  AND i.user_stopped = 0
 		  AND i.stage NOT IN (?, ?)
 		ORDER BY i.created_at, t.id`,
-		TaskPending, string(StageFailed), string(StageCompleted))
+		string(TaskPending), string(StageFailed), string(StageCompleted))
 	if err != nil {
 		return nil, fmt.Errorf("query ready tasks: %w", err)
 	}
@@ -216,20 +218,20 @@ func (s *Store) ReadyTasks() ([]*Task, error) {
 	return ready, nil
 }
 
-func (s *Store) taskStates() (map[int64]string, error) {
+func (s *Store) taskStates() (map[int64]TaskState, error) {
 	rows, err := s.db.Query(`SELECT id, state FROM tasks`)
 	if err != nil {
 		return nil, fmt.Errorf("query task states: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	states := make(map[int64]string)
+	states := make(map[int64]TaskState)
 	for rows.Next() {
 		var id int64
 		var state string
 		if err := rows.Scan(&id, &state); err != nil {
 			return nil, err
 		}
-		states[id] = state
+		states[id] = TaskState(state)
 	}
 	return states, rows.Err()
 }
@@ -245,14 +247,15 @@ const taskColumnsPrefixed = `t.id, t.item_id, t.type, t.asset_key, t.state, t.at
 
 func scanTask(rows *sql.Rows) (*Task, error) {
 	t := &Task{}
-	var typ, deps string
+	var typ, state, deps string
 	var startedAt, finishedAt sql.NullString
-	if err := rows.Scan(&t.ID, &t.ItemID, &typ, &t.AssetKey, &t.State, &t.Attempts, &t.ErrorMsg, &deps,
+	if err := rows.Scan(&t.ID, &t.ItemID, &typ, &t.AssetKey, &state, &t.Attempts, &t.ErrorMsg, &deps,
 		&t.ProgressPercent, &t.ProgressMessage, &t.ProgressBytesCopied, &t.ProgressTotalBytes,
 		&t.ActiveAssetKey, &startedAt, &finishedAt); err != nil {
 		return nil, fmt.Errorf("scan task: %w", err)
 	}
 	t.Type = Stage(typ)
+	t.State = TaskState(state)
 	t.StartedAt = startedAt.String
 	t.FinishedAt = finishedAt.String
 	if err := json.Unmarshal([]byte(deps), &t.Deps); err != nil {
@@ -266,7 +269,7 @@ func (s *Store) StartTask(t *Task) error {
 	err := retryOnBusy(func() error {
 		_, err := s.db.Exec(
 			`UPDATE tasks SET state = ?, attempts = attempts + 1, started_at = CURRENT_TIMESTAMP WHERE id = ?`,
-			TaskRunning, t.ID)
+			string(TaskRunning), t.ID)
 		return err
 	})
 	if err != nil {
@@ -278,11 +281,11 @@ func (s *Store) StartTask(t *Task) error {
 }
 
 // FinishTask records a terminal (or reverted) state for a task.
-func (s *Store) FinishTask(t *Task, state, errMsg string) error {
+func (s *Store) FinishTask(t *Task, state TaskState, errMsg string) error {
 	err := retryOnBusy(func() error {
 		_, err := s.db.Exec(
 			`UPDATE tasks SET state = ?, error_message = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?`,
-			state, errMsg, t.ID)
+			string(state), errMsg, t.ID)
 		return err
 	})
 	if err != nil {
@@ -297,7 +300,7 @@ func (s *Store) FinishTask(t *Task, state, errMsg string) error {
 // startup and shutdown, mirroring ResetInProgress for items.
 func (s *Store) ResetRunningTasks() error {
 	return retryOnBusy(func() error {
-		_, err := s.db.Exec(`UPDATE tasks SET state = ? WHERE state = ?`, TaskPending, TaskRunning)
+		_, err := s.db.Exec(`UPDATE tasks SET state = ? WHERE state = ?`, string(TaskPending), string(TaskRunning))
 		return err
 	})
 }

@@ -22,18 +22,17 @@ import (
 	"github.com/five82/spindle/internal/ripspec"
 )
 
-// stageOrder maps stages to numeric order for furthest-stage computation.
-var stageOrder = map[queue.Stage]int{
-	queue.StageIdentification:        0,
-	queue.StageRipping:               1,
-	queue.StageEpisodeIdentification: 2,
-	queue.StageEncoding:              3,
-	queue.StageAnalysis:              4,
-	queue.StageSubtitling:            5,
-	queue.StageApply:                 6,
-	queue.StageOrganizing:            7,
-	queue.StageCompleted:             8,
-}
+// stageOrder maps stages to numeric order for furthest-stage computation,
+// derived from queue.StageOrder so the enumeration cannot drift from the
+// pipeline template. StageCompleted ranks past every execution stage.
+var stageOrder = func() map[queue.Stage]int {
+	m := make(map[queue.Stage]int, len(queue.StageOrder)+1)
+	for i, s := range queue.StageOrder {
+		m[s] = i
+	}
+	m[queue.StageCompleted] = len(queue.StageOrder)
+	return m
+}()
 
 // Gather collects all audit artifacts for a queue item.
 func Gather(ctx context.Context, cfg *config.Config, item *httpapi.ItemResponse) (*Report, error) {
@@ -208,17 +207,53 @@ func computeStageGate(item *httpapi.ItemResponse, mediaType, mediaHint, discSour
 
 	order := stageOrder[furthest]
 
-	// The item's coarse stage lags running tasks during DAG overlap (and says
-	// nothing when a parallel branch outran the failing one), so any task that
-	// has started lifts the furthest stage to its own.
+	// Task rows are the exact record of what ran. The pipeline is a DAG, so
+	// the linear ordinal both lags running tasks during overlap and cannot
+	// say whether a parallel branch (encoding vs analysis) has started. When
+	// the rows carry dependency edges, a stage is reached iff its own task
+	// left pending or a started task transitively depends on it; the ordinal
+	// comparison stays as the fallback for items whose task rows are gone
+	// (the gap between a retry and the scheduler recompiling them) or
+	// edge-less.
+	started := make(map[queue.Stage]bool, len(item.Tasks))
+	deps := make(map[queue.Stage][]queue.Stage, len(item.Tasks))
+	hasEdges := false
 	for _, t := range item.Tasks {
-		if t.State == queue.TaskPending {
+		typ := queue.Stage(t.Type)
+		for _, d := range t.DependsOn {
+			deps[typ] = append(deps[typ], queue.Stage(d))
+			hasEdges = true
+		}
+		if queue.TaskState(t.State) == queue.TaskPending {
 			continue
 		}
-		if o, ok := stageOrder[queue.Stage(t.Type)]; ok && o > order {
+		started[typ] = true
+		if o, ok := stageOrder[typ]; ok && o > order {
 			order = o
-			furthest = queue.Stage(t.Type)
+			furthest = typ
 		}
+	}
+	reached := make(map[queue.Stage]bool, len(item.Tasks))
+	if hasEdges {
+		var mark func(s queue.Stage)
+		mark = func(s queue.Stage) {
+			if reached[s] {
+				return
+			}
+			reached[s] = true
+			for _, d := range deps[s] {
+				mark(d)
+			}
+		}
+		for s := range started {
+			mark(s)
+		}
+	}
+	phaseReached := func(s queue.Stage) bool {
+		if hasEdges {
+			return reached[s]
+		}
+		return order >= stageOrder[s]
 	}
 
 	return StageGate{
@@ -228,13 +263,13 @@ func computeStageGate(item *httpapi.ItemResponse, mediaType, mediaHint, discSour
 		DiscSource:    discSource,
 
 		PhaseLogs:       true,
-		PhaseRipCache:   order >= stageOrder[queue.StageRipping],
-		PhaseEpisodeID:  mediaType == "tv" && order >= stageOrder[queue.StageEpisodeIdentification],
-		PhaseEncoded:    order >= stageOrder[queue.StageEncoding],
-		PhaseCrop:       order >= stageOrder[queue.StageEncoding],
-		PhaseSubtitles:  order >= stageOrder[queue.StageSubtitling],
-		PhaseCommentary: order >= stageOrder[queue.StageAnalysis],
-		PhaseExtVal:     order >= stageOrder[queue.StageEncoding] && discSource != "dvd",
+		PhaseRipCache:   phaseReached(queue.StageRipping),
+		PhaseEpisodeID:  mediaType == "tv" && phaseReached(queue.StageEpisodeIdentification),
+		PhaseEncoded:    phaseReached(queue.StageEncoding),
+		PhaseCrop:       phaseReached(queue.StageEncoding),
+		PhaseSubtitles:  phaseReached(queue.StageSubtitling),
+		PhaseCommentary: phaseReached(queue.StageAnalysis),
+		PhaseExtVal:     phaseReached(queue.StageEncoding) && discSource != "dvd",
 	}
 }
 

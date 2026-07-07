@@ -1,5 +1,5 @@
-// Package staging manages staging directories used during disc processing.
-package staging
+// Package stagingdir manages staging directories used during disc processing.
+package stagingdir
 
 import (
 	"context"

@@ -22,7 +22,7 @@ import (
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
-	"github.com/five82/spindle/internal/staging"
+	"github.com/five82/spindle/internal/stagingdir"
 	"github.com/five82/spindle/internal/tmdb"
 )
 
@@ -377,7 +377,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	_ = sess.Progress(5, "Phase 1/3 - Cleaning stale staging")
 
 	// Clean stale staging directories (older than 48 hours).
-	cleanResult := staging.CleanStale(ctx, h.cfg.Paths.StagingDir, 48*time.Hour, nil, logger)
+	cleanResult := stagingdir.CleanStale(ctx, h.cfg.Paths.StagingDir, 48*time.Hour, nil, logger)
 	if cleanResult.Removed > 0 {
 		logger.Info("cleaned stale staging directories", "removed", cleanResult.Removed)
 	}
@@ -671,6 +671,31 @@ func convertTitles(discInfo *makemkv.DiscInfo) []ripspec.Title {
 	return titles
 }
 
+// newEnvelope builds the RipSpec envelope skeleton shared by all three
+// envelope builders: it derives season/disc numbers from the disc title and
+// MakeMKV disc name, stamps the version/fingerprint, stamps the UHD tier from
+// the scan, and converts the scanned titles. metadata should carry every
+// builder-specific field except SeasonNumber and DiscNumber, which this
+// helper computes and injects.
+func (h *Handler) newEnvelope(logger *slog.Logger, item *queue.Item, discInfo *makemkv.DiscInfo, metadata ripspec.Metadata) ripspec.Envelope {
+	discName := discInfoName(discInfo)
+	metadata.SeasonNumber = extractSeasonNumber(item.DiscTitle, discName)
+	metadata.DiscNumber = extractDiscNumber(item.DiscTitle, discName)
+
+	env := ripspec.Envelope{
+		Version:     ripspec.CurrentVersion,
+		Fingerprint: item.DiscFingerprint,
+		Metadata:    metadata,
+	}
+
+	stampUHDFromScan(logger, &env, discInfo)
+
+	// Add titles from MakeMKV scan.
+	env.Titles = convertTitles(discInfo)
+
+	return env
+}
+
 // buildEnvelope constructs a full RipSpec envelope from scan and TMDB data.
 func (h *Handler) buildEnvelope(
 	ctx context.Context,
@@ -681,41 +706,27 @@ func (h *Handler) buildEnvelope(
 	mediaType string,
 	discSource string,
 ) ripspec.Envelope {
-	// Extract season and disc numbers from disc title / MakeMKV disc name.
-	discName := discInfoName(discInfo)
-	seasonNum := extractSeasonNumber(item.DiscTitle, discName)
-	discNum := extractDiscNumber(item.DiscTitle, discName)
-
-	env := ripspec.Envelope{
-		Version:     ripspec.CurrentVersion,
-		Fingerprint: item.DiscFingerprint,
-		Metadata: ripspec.Metadata{
-			ID:           best.ID,
-			Title:        best.DisplayTitle(),
-			Overview:     best.Overview,
-			MediaType:    mediaType,
-			Year:         best.Year(),
-			ReleaseDate:  best.ReleaseDate,
-			VoteAverage:  best.VoteAverage,
-			VoteCount:    best.VoteCount,
-			Movie:        mediaType == "movie",
-			SeasonNumber: seasonNum,
-			DiscNumber:   discNum,
-			DiscSource:   discSource,
-		},
+	metadata := ripspec.Metadata{
+		ID:          best.ID,
+		Title:       best.DisplayTitle(),
+		Overview:    best.Overview,
+		MediaType:   mediaType,
+		Year:        best.Year(),
+		ReleaseDate: best.ReleaseDate,
+		VoteAverage: best.VoteAverage,
+		VoteCount:   best.VoteCount,
+		Movie:       mediaType == "movie",
+		DiscSource:  discSource,
 	}
 
 	if best.FirstAirDate != "" {
-		env.Metadata.FirstAirDate = best.FirstAirDate
+		metadata.FirstAirDate = best.FirstAirDate
 	}
 	if mediaType == "tv" {
-		env.Metadata.ShowTitle = best.DisplayTitle()
+		metadata.ShowTitle = best.DisplayTitle()
 	}
 
-	stampUHDFromScan(logger, &env, discInfo)
-
-	// Add titles from MakeMKV scan.
-	env.Titles = convertTitles(discInfo)
+	env := h.newEnvelope(logger, item, discInfo, metadata)
 
 	// For TV content, create episode placeholders from eligible titles.
 	if mediaType == "tv" {
@@ -858,34 +869,21 @@ func (h *Handler) fetchExpectedEpisodes(ctx context.Context, logger *slog.Logger
 // and MakeMKV scan results. The cache provides TMDB metadata (skipping the
 // TMDB search), while the scan provides title data for ripping.
 func (h *Handler) buildEnvelopeFromCache(ctx context.Context, logger *slog.Logger, item *queue.Item, entry *discidcache.Entry, discInfo *makemkv.DiscInfo, discSource string) ripspec.Envelope {
-	discName := discInfoName(discInfo)
-	seasonNum := extractSeasonNumber(item.DiscTitle, discName)
-	discNum := extractDiscNumber(item.DiscTitle, discName)
-
-	env := ripspec.Envelope{
-		Version:     ripspec.CurrentVersion,
-		Fingerprint: item.DiscFingerprint,
-		Metadata: ripspec.Metadata{
-			ID:           entry.TMDBID,
-			Title:        entry.Title,
-			MediaType:    entry.MediaType,
-			Year:         entry.Year,
-			Movie:        entry.MediaType == "movie",
-			Cached:       true,
-			DiscSource:   discSource,
-			SeasonNumber: seasonNum,
-			DiscNumber:   discNum,
-		},
+	metadata := ripspec.Metadata{
+		ID:         entry.TMDBID,
+		Title:      entry.Title,
+		MediaType:  entry.MediaType,
+		Year:       entry.Year,
+		Movie:      entry.MediaType == "movie",
+		Cached:     true,
+		DiscSource: discSource,
 	}
 
 	if entry.MediaType == "tv" {
-		env.Metadata.ShowTitle = entry.Title
+		metadata.ShowTitle = entry.Title
 	}
 
-	stampUHDFromScan(logger, &env, discInfo)
-
-	// Populate titles from MakeMKV scan results.
-	env.Titles = convertTitles(discInfo)
+	env := h.newEnvelope(logger, item, discInfo, metadata)
 
 	// For TV content, create episode placeholders from eligible titles.
 	if entry.MediaType == "tv" {
@@ -905,26 +903,16 @@ func (h *Handler) buildFallbackEnvelope(ctx context.Context, logger *slog.Logger
 		title = "Unknown Disc"
 	}
 
-	// Extract season/disc numbers even for fallback — they indicate TV content.
-	discName := discInfoName(discInfo)
-	seasonNum := extractSeasonNumber(item.DiscTitle, discName)
-	discNum := extractDiscNumber(item.DiscTitle, discName)
-
-	env := ripspec.Envelope{
-		Version:     ripspec.CurrentVersion,
-		Fingerprint: item.DiscFingerprint,
-		Metadata: ripspec.Metadata{
-			Title:        title,
-			MediaType:    "unknown",
-			SeasonNumber: seasonNum,
-			DiscNumber:   discNum,
-		},
+	// Season/disc numbers are extracted even for fallback — they indicate TV content.
+	metadata := ripspec.Metadata{
+		Title:     title,
+		MediaType: "unknown",
 	}
 
-	env.Titles = convertTitles(discInfo)
+	env := h.newEnvelope(logger, item, discInfo, metadata)
 
 	// If season number was extracted, this is likely TV — create episode placeholders.
-	if seasonNum > 0 {
+	if env.Metadata.SeasonNumber > 0 {
 		h.createEpisodePlaceholders(ctx, logger, &env)
 	}
 

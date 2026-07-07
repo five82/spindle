@@ -62,12 +62,7 @@ func RetryEpisode(store *queue.Store, id int64, episodeKey string) (RetryResult,
 		return "", fmt.Errorf("retry episode encode ripspec %d: %w", id, err)
 	}
 
-	targetStage := queue.StageIdentification
-	if item.FailedAtStage != "" {
-		targetStage = queue.Stage(item.FailedAtStage)
-	}
-
-	if err := store.RetryWithRipSpec(id, targetStage, encoded); err != nil {
+	if err := store.RetryWithRipSpec(id, item.ResumeStage(), encoded); err != nil {
 		return "", fmt.Errorf("retry episode update %d: %w", id, err)
 	}
 	return RetryResultRetried, nil

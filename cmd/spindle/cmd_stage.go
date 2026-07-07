@@ -235,13 +235,12 @@ func newGensubtitleCmd() *cobra.Command {
 				cmdLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 			}
 
-			svc := transcription.New(
-				cfg.Subtitles.WhisperXModel,
-				cfg.Subtitles.WhisperXCUDAEnabled,
-				cfg.Subtitles.WhisperXVADMethod,
-				cfg.Subtitles.WhisperXHFToken,
-				cmdLogger,
-			)
+			svc := transcription.New(transcription.Params{
+				Model:       cfg.Subtitles.WhisperXModel,
+				CUDAEnabled: cfg.Subtitles.WhisperXCUDAEnabled,
+				VADMethod:   cfg.Subtitles.WhisperXVADMethod,
+				HFToken:     cfg.Subtitles.WhisperXHFToken,
+			}, cmdLogger)
 
 			fmt.Printf("Preparing subtitles for %s...\n", filepath.Base(file))
 			if flagVerbose {

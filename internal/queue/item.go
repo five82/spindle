@@ -34,7 +34,7 @@ type Item struct {
 	DiscTitle           string
 	Stage               Stage
 	InProgress          int
-	FailedAtStage       string
+	FailedAtStage       Stage
 	ErrorMessage        string
 	CreatedAt           string
 	UpdatedAt           string
@@ -50,6 +50,20 @@ type Item struct {
 // UserStopped reports whether the item was explicitly stopped by the user.
 func (it *Item) UserStopped() bool {
 	return it != nil && it.userStopped != 0
+}
+
+// ResumeStage returns the stage a failed item retries into: the recorded
+// failure stage when it names a real pipeline stage, otherwise
+// StageIdentification. The failed_at_stage column is free text as far as
+// SQLite is concerned; validating here makes "retry into a stage the
+// scheduler doesn't know" unrepresentable.
+func (it *Item) ResumeStage() Stage {
+	for _, s := range StageOrder {
+		if it.FailedAtStage == s {
+			return s
+		}
+	}
+	return StageIdentification
 }
 
 // CreatedTime parses the item's creation timestamp; ok is false when the

@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -289,12 +288,7 @@ func newCacheListCmd() *cobra.Command {
 			}
 
 			if asJSON {
-				data, err := json.MarshalIndent(entries, "", "  ")
-				if err != nil {
-					return err
-				}
-				fmt.Println(string(data))
-				return nil
+				return printJSON(entries)
 			}
 
 			if flagVerbose {
@@ -401,12 +395,8 @@ func newCacheProcessCmd() *cobra.Command {
 				"item_id", item.ID,
 			)
 
-			fpDisplay := entry.Fingerprint
-			if len(fpDisplay) > 12 {
-				fpDisplay = fpDisplay[:12]
-			}
 			fmt.Printf("Queued: %s (item %d, fingerprint: %s)\n",
-				entry.DiscTitle, item.ID, fpDisplay)
+				entry.DiscTitle, item.ID, shortFP(entry.Fingerprint))
 			return nil
 		},
 	}

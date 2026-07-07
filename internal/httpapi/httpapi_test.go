@@ -30,7 +30,7 @@ func testStore(t *testing.T) *queue.Store {
 
 func TestHealthEndpoint(t *testing.T) {
 	store := testStore(t)
-	srv := httpapi.New(store, "", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)), httpapi.StatusInfo{}, nil, nil, nil, nil)
+	srv := httpapi.New(httpapi.Params{Store: store, Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	w := httptest.NewRecorder()
@@ -51,7 +51,7 @@ func TestHealthEndpoint(t *testing.T) {
 
 func TestAuthRejectsMissingToken(t *testing.T) {
 	store := testStore(t)
-	srv := httpapi.New(store, "secret-token", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)), httpapi.StatusInfo{}, nil, nil, nil, nil)
+	srv := httpapi.New(httpapi.Params{Store: store, Token: "secret-token", Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/queue", nil)
 	w := httptest.NewRecorder()
@@ -64,7 +64,7 @@ func TestAuthRejectsMissingToken(t *testing.T) {
 
 func TestAuthAcceptsValidToken(t *testing.T) {
 	store := testStore(t)
-	srv := httpapi.New(store, "secret-token", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)), httpapi.StatusInfo{}, nil, nil, nil, nil)
+	srv := httpapi.New(httpapi.Params{Store: store, Token: "secret-token", Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/queue", nil)
 	req.Header.Set("Authorization", "Bearer secret-token")
@@ -78,7 +78,7 @@ func TestAuthAcceptsValidToken(t *testing.T) {
 
 func TestQueueListReturnsWrappedEmptyArray(t *testing.T) {
 	store := testStore(t)
-	srv := httpapi.New(store, "", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)), httpapi.StatusInfo{}, nil, nil, nil, nil)
+	srv := httpapi.New(httpapi.Params{Store: store, Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/queue", nil)
 	w := httptest.NewRecorder()
@@ -101,7 +101,7 @@ func TestQueueListReturnsWrappedEmptyArray(t *testing.T) {
 
 func TestQueueEnqueueCachedCreatesRippingItem(t *testing.T) {
 	store := testStore(t)
-	srv := httpapi.New(store, "", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)), httpapi.StatusInfo{}, nil, nil, nil, nil)
+	srv := httpapi.New(httpapi.Params{Store: store, Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))})
 
 	body := `{"disc_title":"Cached Disc","fingerprint":"fp1","rip_spec_data":"{\"version\":1}","metadata_json":"{\"title\":\"Cached Disc\"}"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/queue/enqueue-cached", strings.NewReader(body))
@@ -140,7 +140,7 @@ func TestQueueEnqueueCachedRejectsDuplicate(t *testing.T) {
 	if _, err := store.NewDisc("Existing", "fp1"); err != nil {
 		t.Fatalf("new disc: %v", err)
 	}
-	srv := httpapi.New(store, "", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)), httpapi.StatusInfo{}, nil, nil, nil, nil)
+	srv := httpapi.New(httpapi.Params{Store: store, Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))})
 
 	body := `{"disc_title":"Cached Disc","fingerprint":"fp1","rip_spec_data":"{\"version\":1}"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/queue/enqueue-cached", strings.NewReader(body))
@@ -154,7 +154,7 @@ func TestQueueEnqueueCachedRejectsDuplicate(t *testing.T) {
 
 func TestStatusReturnsStructuredResponse(t *testing.T) {
 	store := testStore(t)
-	srv := httpapi.New(store, "", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)), httpapi.StatusInfo{}, nil, nil, nil, nil)
+	srv := httpapi.New(httpapi.Params{Store: store, Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	w := httptest.NewRecorder()
@@ -264,7 +264,7 @@ func TestQueueResponsesProjectTasksAndEnvelope(t *testing.T) {
 		t.Fatalf("update task progress: %v", err)
 	}
 
-	srv := httpapi.New(store, "", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)), httpapi.StatusInfo{}, nil, nil, nil, nil)
+	srv := httpapi.New(httpapi.Params{Store: store, Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/queue", nil)
 	w := httptest.NewRecorder()
@@ -292,7 +292,7 @@ func TestQueueResponsesProjectTasksAndEnvelope(t *testing.T) {
 		t.Fatalf("expected 2 tasks, got %d", len(got.Tasks))
 	}
 	enc := got.Tasks[1]
-	if enc.Type != string(queue.StageEncoding) || enc.State != queue.TaskRunning {
+	if enc.Type != string(queue.StageEncoding) || enc.State != string(queue.TaskRunning) {
 		t.Fatalf("unexpected encoding task: %+v", enc)
 	}
 	if enc.Progress.Percent != 42.5 || enc.ActiveAssetKey != "s01_001" {
@@ -351,7 +351,12 @@ func TestStatusIncludesPipelineAndScheduler(t *testing.T) {
 		{Stage: "identification", Claims: []string{"drive"}},
 		{Stage: "ripping", DependsOn: []string{"identification"}, Claims: []string{"drive"}},
 	}
-	srv := httpapi.New(store, "", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)), httpapi.StatusInfo{}, nil, nil, pipeline, fakeScheduler{})
+	srv := httpapi.New(httpapi.Params{
+		Store:     store,
+		Logger:    slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		Pipeline:  pipeline,
+		Scheduler: fakeScheduler{},
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	w := httptest.NewRecorder()
@@ -399,7 +404,11 @@ func TestLogsItemQueryScopedToItemLifetime(t *testing.T) {
 		Time: current, ItemID: 1, Level: "WARN", Msg: "current generation warning",
 	})
 
-	srv := httpapi.New(store, "", nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)), httpapi.StatusInfo{}, buffer, nil, nil, nil)
+	srv := httpapi.New(httpapi.Params{
+		Store:     store,
+		Logger:    slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		LogBuffer: buffer,
+	})
 
 	fetch := func(target string) []httpapi.LogEntry {
 		t.Helper()

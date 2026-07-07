@@ -1,4 +1,4 @@
-package staging
+package stagingdir
 
 import (
 	"context"

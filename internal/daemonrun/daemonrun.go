@@ -134,7 +134,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// Create clients.
 	tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, logger)
-	llmClient := llm.New(cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.Referer, cfg.LLM.Title, cfg.LLM.TimeoutSeconds, logger)
+	llmClient := llm.New(cfg.LLM, logger)
 	notifier := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout, logger)
 	if notifier == nil {
 		logger.Info("ntfy notifications disabled",
@@ -144,7 +144,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		)
 	}
 	jfClient := jellyfin.New(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, logger)
-	osClient := opensubtitles.New(cfg.Subtitles.OpenSubtitlesAPIKey, cfg.Subtitles.OpenSubtitlesUserAgent, cfg.Subtitles.OpenSubtitlesUserToken, "", logger)
+	osClient := opensubtitles.New(opensubtitles.Params{
+		APIKey:    cfg.Subtitles.OpenSubtitlesAPIKey,
+		UserAgent: cfg.Subtitles.OpenSubtitlesUserAgent,
+		UserToken: cfg.Subtitles.OpenSubtitlesUserToken,
+	}, logger)
 
 	// Optional services.
 	var discIDStore *discidcache.Store
@@ -172,7 +176,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		ripCacheStore = ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
 	}
 
-	transcriber := transcription.New(cfg.Subtitles.WhisperXModel, cfg.Subtitles.WhisperXCUDAEnabled, cfg.Subtitles.WhisperXVADMethod, cfg.Subtitles.WhisperXHFToken, logger)
+	transcriber := transcription.New(transcription.Params{
+		Model:       cfg.Subtitles.WhisperXModel,
+		CUDAEnabled: cfg.Subtitles.WhisperXCUDAEnabled,
+		VADMethod:   cfg.Subtitles.WhisperXVADMethod,
+		HFToken:     cfg.Subtitles.WhisperXHFToken,
+	}, logger)
 
 	// Create disc monitor (if optical drive configured).
 	// Created before stage handlers so the ripper can pause/resume detection.
@@ -263,7 +272,18 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Create HTTP API with shutdown channel. The manager supplies the
 	// pipeline template and live resource occupancy for /api/status.
 	shutdownCh := make(chan struct{})
-	api := httpapi.New(store, cfg.API.Token, discMon, shutdownCh, logger, httpapi.NewStatusInfo(cfg), logBuffer, statusTracker, manager.PipelineInfo(), manager)
+	api := httpapi.New(httpapi.Params{
+		Store:         store,
+		Token:         cfg.API.Token,
+		DiscMonitor:   discMon,
+		ShutdownCh:    shutdownCh,
+		Logger:        logger,
+		StatusInfo:    httpapi.NewStatusInfo(cfg),
+		LogBuffer:     logBuffer,
+		StatusTracker: statusTracker,
+		Pipeline:      manager.PipelineInfo(),
+		Scheduler:     manager,
+	})
 
 	// Create netlink monitor if optical drive is configured.
 	var netlinkMon *discmonitor.NetlinkMonitor

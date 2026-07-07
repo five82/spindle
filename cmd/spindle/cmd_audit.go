@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -39,12 +38,7 @@ func newQueueAuditCmd() *cobra.Command {
 				return err
 			}
 
-			data, err := json.MarshalIndent(report, "", "  ")
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(data))
-			return nil
+			return printJSON(report)
 		},
 	}
 }

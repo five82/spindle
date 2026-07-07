@@ -235,58 +235,6 @@ func TestListWithAndWithoutFilter(t *testing.T) {
 	}
 }
 
-func TestNextForStatuses(t *testing.T) {
-	store := openTestStore(t)
-
-	item1, _ := store.NewDisc("A", "fp1")
-	item2, _ := store.NewDisc("B", "fp2")
-	// Mark item1 as in progress.
-	_ = store.StartStage(item1)
-
-	// Should skip item1 (in_progress=1) and return item2.
-	next, err := store.NextForStatuses(StageIdentification)
-	if err != nil {
-		t.Fatalf("next: %v", err)
-	}
-	if next == nil {
-		t.Fatal("expected item, got nil")
-	}
-	if next.ID != item2.ID {
-		t.Errorf("next id = %d, want %d", next.ID, item2.ID)
-	}
-
-	// No matching status.
-	none, err := store.NextForStatuses(StageCompleted)
-	if err != nil {
-		t.Fatalf("next none: %v", err)
-	}
-	if none != nil {
-		t.Error("expected nil for no matches")
-	}
-}
-
-func TestActiveFingerprints(t *testing.T) {
-	store := openTestStore(t)
-
-	_, _ = store.NewDisc("A", "fp-aaa")
-	_, _ = store.NewDisc("B", "fp-bbb")
-	_, _ = store.NewDisc("C", "") // Empty fingerprint, should be excluded.
-
-	fps, err := store.ActiveFingerprints()
-	if err != nil {
-		t.Fatalf("active fingerprints: %v", err)
-	}
-	if len(fps) != 2 {
-		t.Errorf("got %d fingerprints, want 2", len(fps))
-	}
-	if _, ok := fps["fp-aaa"]; !ok {
-		t.Error("missing fp-aaa")
-	}
-	if _, ok := fps["fp-bbb"]; !ok {
-		t.Error("missing fp-bbb")
-	}
-}
-
 func TestStats(t *testing.T) {
 	store := openTestStore(t)
 
@@ -495,7 +443,7 @@ func TestLifecycleMethodsDoNotOverrideUserStoppedItem(t *testing.T) {
 	// StopItems records the stopped stage in failed_at_stage so retry
 	// resumes there; a racing FailStage must not override that or attach
 	// its error message.
-	stoppedAt := string(StageIdentification)
+	stoppedAt := StageIdentification
 	if err := store.FailStage(item, StageEncoding, "encode failed"); err != nil {
 		t.Fatalf("fail stopped item: %v", err)
 	}
@@ -700,5 +648,38 @@ func TestFormatAlsoProcessingHumanizesAndCaps(t *testing.T) {
 	want := "\nAlso processing: Breaking Bad Season 01 (encoding), Fringe Season 01 (subtitles), +1 more"
 	if got != want {
 		t.Fatalf("FormatAlsoProcessing() = %q, want %q", got, want)
+	}
+}
+
+func TestHumanStageCoversAllStages(t *testing.T) {
+	stages := append([]Stage{}, StageOrder...)
+	stages = append(stages, StageCompleted, StageFailed)
+	for _, s := range stages {
+		if _, ok := humanStageLabels[s]; !ok {
+			t.Errorf("HumanStage has no label for stage %q", s)
+		}
+	}
+	if len(humanStageLabels) != len(stages) {
+		t.Errorf("humanStageLabels has %d entries, want %d (stale label?)", len(humanStageLabels), len(stages))
+	}
+}
+
+func TestResumeStageValidatesFailedAtStage(t *testing.T) {
+	cases := []struct {
+		failedAt Stage
+		want     Stage
+	}{
+		{StageEncoding, StageEncoding},
+		{StageOrganizing, StageOrganizing},
+		{"", StageIdentification},
+		{"bogus_stage", StageIdentification},
+		{StageCompleted, StageIdentification},
+		{StageFailed, StageIdentification},
+	}
+	for _, c := range cases {
+		it := &Item{FailedAtStage: c.failedAt}
+		if got := it.ResumeStage(); got != c.want {
+			t.Errorf("ResumeStage() with failed_at %q = %q, want %q", c.failedAt, got, c.want)
+		}
 	}
 }

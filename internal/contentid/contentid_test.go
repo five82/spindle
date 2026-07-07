@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
@@ -396,7 +397,7 @@ func TestVerifyMatchesConfirmsPairWithoutInflatingConfidence(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := llm.New("test-key", server.URL, "test-model", "", "", 5, nil)
+	client := llm.New(config.LLMConfig{APIKey: "test-key", BaseURL: server.URL, Model: "test-model", TimeoutSeconds: 5}, nil)
 	ripPath := writeTestSRT(t, "1\n00:10:00,000 --> 00:10:02,000\nJustice dialogue\n")
 	refPath := writeTestSRT(t, "1\n00:10:00,000 --> 00:10:02,000\nJustice dialogue\n")
 	candidate := matchResult{

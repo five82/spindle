@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/five82/spindle/internal/staging"
+	"github.com/five82/spindle/internal/stagingdir"
 )
 
 func newStagingCmd() *cobra.Command {
@@ -29,18 +28,13 @@ func newStagingListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List staging directories",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			dirs, err := staging.ListDirectories(cfg.Paths.StagingDir)
+			dirs, err := stagingdir.ListDirectories(cfg.Paths.StagingDir)
 			if err != nil {
 				return err
 			}
 
 			if asJSON {
-				data, err := json.MarshalIndent(dirs, "", "  ")
-				if err != nil {
-					return err
-				}
-				fmt.Println(string(data))
-				return nil
+				return printJSON(dirs)
 			}
 
 			if len(dirs) == 0 {
@@ -51,12 +45,8 @@ func newStagingListCmd() *cobra.Command {
 			var totalBytes int64
 			for _, d := range dirs {
 				totalBytes += d.SizeBytes
-				fp := d.Name
-				if len(fp) > 12 {
-					fp = fp[:12]
-				}
 				age := time.Since(d.ModTime).Truncate(time.Minute)
-				fmt.Printf("  %s  %s  %s ago\n", fp, formatBytes(d.SizeBytes), age)
+				fmt.Printf("  %s  %s  %s ago\n", shortFP(d.Name), formatBytes(d.SizeBytes), age)
 			}
 			fmt.Printf("\n%d directories, %s total\n", len(dirs), formatBytes(totalBytes))
 			return nil
@@ -96,7 +86,7 @@ func newStagingCleanCmd() *cobra.Command {
 			}
 
 			logger := slog.Default()
-			result := staging.CleanStale(
+			result := stagingdir.CleanStale(
 				context.Background(),
 				cfg.Paths.StagingDir,
 				0, // no max age for manual clean

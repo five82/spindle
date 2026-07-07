@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/logs"
 )
 
@@ -26,28 +27,31 @@ type Client struct {
 	logger  *slog.Logger
 }
 
-// New creates an LLM client. Returns nil if apiKey is empty.
-func New(apiKey, baseURL, model, referer, title string, timeoutSeconds int, logger *slog.Logger) *Client {
-	if apiKey == "" {
+// New creates an LLM client from the configured LLM section. Returns nil if
+// APIKey is empty.
+func New(cfg config.LLMConfig, logger *slog.Logger) *Client {
+	if cfg.APIKey == "" {
 		return nil
 	}
+	baseURL := cfg.BaseURL
 	if baseURL == "" {
 		baseURL = "https://openrouter.ai/api/v1/chat/completions"
 	}
+	model := cfg.Model
 	if model == "" {
 		model = "google/gemini-3-flash-preview"
 	}
 	logger = logs.Default(logger)
-	timeout := time.Duration(timeoutSeconds) * time.Second
+	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
 	return &Client{
-		apiKey:  apiKey,
+		apiKey:  cfg.APIKey,
 		baseURL: baseURL,
 		model:   model,
-		referer: referer,
-		title:   title,
+		referer: cfg.Referer,
+		title:   cfg.Title,
 		timeout: timeout,
 		client:  &http.Client{Timeout: timeout},
 		logger:  logger,

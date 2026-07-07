@@ -28,9 +28,8 @@ type provisionalClaim struct {
 }
 
 type matchResolution struct {
-	Accepted                   []matchResult
-	PendingByRip               map[string][]matchResult
-	UnresolvedKeys             []string
+	Accepted     []matchResult
+	PendingByRip map[string][]matchResult
 	// RipsWithoutClaims lists rips whose similarity fell below the minimum
 	// against every candidate reference: probable extras rather than
 	// unresolved episodes.
@@ -55,7 +54,6 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 	claims := buildClaims(rips, weightedRefs, scores, policy)
 	if len(claims) == 0 {
 		return matchResolution{
-			UnresolvedKeys:    unresolvedKeysFromRips(rips),
 			RipsWithoutClaims: unresolvedKeysFromRips(rips),
 		}
 	}
@@ -114,7 +112,6 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 	}
 
 	pendingByRip := make(map[string][]matchResult)
-	unresolved := make([]string, 0, len(rips))
 	contested := 0
 	ambiguous := 0
 	decisiveLowSimilarity := 0
@@ -135,7 +132,6 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 				ambiguous++
 			}
 		}
-		unresolved = append(unresolved, rip.EpisodeKey)
 	}
 	suspectRefCount := 0
 	for _, ref := range weightedRefs {
@@ -147,7 +143,6 @@ func resolveEpisodeClaims(rips []ripFingerprint, refs []referenceFingerprint, po
 	return matchResolution{
 		Accepted:                   accepted,
 		PendingByRip:               pendingByRip,
-		UnresolvedKeys:             unresolved,
 		RipsWithoutClaims:          ripsWithoutClaims,
 		ClearMatchCount:            clearAccepted,
 		AmbiguousCount:             ambiguous,

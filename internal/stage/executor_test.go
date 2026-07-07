@@ -76,7 +76,7 @@ func TestExecuteWorkflowStageMarksFailure(t *testing.T) {
 		t.Fatalf("result err=%v failed=%v, want stage error and failed", err, res.Failed)
 	}
 	got, _ := store.GetByID(item.ID)
-	if got.Stage != queue.StageFailed || got.InProgress != 0 || got.FailedAtStage != string(queue.StageIdentification) || got.ErrorMessage != "boom" {
+	if got.Stage != queue.StageFailed || got.InProgress != 0 || got.FailedAtStage != queue.StageIdentification || got.ErrorMessage != "boom" {
 		t.Fatalf("failed state = stage:%q in_progress:%d failed_at:%q err:%q", got.Stage, got.InProgress, got.FailedAtStage, got.ErrorMessage)
 	}
 }

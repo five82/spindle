@@ -7,10 +7,12 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+
+	"github.com/five82/spindle/internal/config"
 )
 
 func TestNewEmptyAPIKey(t *testing.T) {
-	c := New("", "", "", "", "", 0, nil)
+	c := New(config.LLMConfig{}, nil)
 	if c != nil {
 		t.Fatal("expected nil client for empty API key")
 	}
@@ -88,7 +90,7 @@ func TestCompleteJSONSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New("test-key", srv.URL, "test-model", "http://example.com", "TestApp", 10, nil)
+	c := New(config.LLMConfig{APIKey: "test-key", BaseURL: srv.URL, Model: "test-model", Referer: "http://example.com", Title: "TestApp", TimeoutSeconds: 10}, nil)
 
 	var result struct {
 		Answer string `json:"answer"`
@@ -127,7 +129,7 @@ func TestCompleteJSONRetryOn429(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New("test-key", srv.URL, "test-model", "", "", 10, nil)
+	c := New(config.LLMConfig{APIKey: "test-key", BaseURL: srv.URL, Model: "test-model", TimeoutSeconds: 10}, nil)
 
 	var result struct {
 		OK bool `json:"ok"`
