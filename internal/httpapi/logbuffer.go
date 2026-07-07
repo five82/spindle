@@ -28,13 +28,11 @@ type LogEntry struct {
 	Lane      string            `json:"lane,omitempty"`
 	Request   string            `json:"request,omitempty"`
 	Fields    map[string]string `json:"fields,omitempty"`
-	Details   []DetailField     `json:"details,omitempty"`
-}
 
-// DetailField is a label/value pair for structured log details.
-type DetailField struct {
-	Label string `json:"label"`
-	Value string `json:"value"`
+	// parsedTime is Time parsed once at capture so per-query filters
+	// (MinTime clamp) never re-parse the string. Zero when Time was
+	// unparseable.
+	parsedTime time.Time
 }
 
 // LogBuffer is a goroutine-safe ring buffer for structured log events.
@@ -63,6 +61,9 @@ func NewLogBuffer(capacity int) *LogBuffer {
 // Append adds an entry to the buffer and assigns it a sequence number.
 func (b *LogBuffer) Append(entry LogEntry) {
 	entry.Seq = b.nextSeq.Add(1) - 1
+	if entry.parsedTime.IsZero() {
+		entry.parsedTime, _ = time.Parse(time.RFC3339Nano, entry.Time)
+	}
 	b.mu.Lock()
 	b.entries[b.head] = entry
 	b.head = (b.head + 1) % b.cap
@@ -74,9 +75,9 @@ func (b *LogBuffer) Append(entry LogEntry) {
 
 // LogQueryOpts configures a log buffer query.
 type LogQueryOpts struct {
-	Since      uint64 // return entries with seq > Since
+	Since      uint64 // cursor from a prior query's next: return entries with seq >= Since (0 = from the start)
 	Limit      int    // max entries to return (default 200)
-	Tail       bool   // return the most recent entries
+	Tail       bool   // return the most recent entries (ignored when Since > 0)
 	ItemID     int64  // filter by item ID (0 = no filter)
 	Component  string // filter by component (case-insensitive)
 	Lane       string // filter by lane (case-insensitive)
@@ -144,7 +145,7 @@ func (b *LogBuffer) Query(opts LogQueryOpts) ([]LogEntry, uint64) {
 		idx := (startIdx + i) % b.cap
 		e := b.entries[idx]
 
-		if opts.Since > 0 && e.Seq <= opts.Since {
+		if opts.Since > 0 && e.Seq < opts.Since {
 			continue
 		}
 		if !b.matchesFilter(e, opts, minLevel) {
@@ -153,8 +154,11 @@ func (b *LogBuffer) Query(opts LogQueryOpts) ([]LogEntry, uint64) {
 		results = append(results, e)
 	}
 
-	// Apply tail: keep only the last N entries.
-	if opts.Tail && len(results) > opts.Limit {
+	// Apply tail: keep only the last N entries. Tail only applies to the
+	// initial window (Since == 0): a cursor-driven catch-up poll must
+	// return matches oldest-first so the caller's next cursor never skips
+	// past unseen entries during a burst larger than Limit.
+	if opts.Tail && opts.Since == 0 && len(results) > opts.Limit {
 		results = results[len(results)-opts.Limit:]
 	} else if len(results) > opts.Limit {
 		results = results[:opts.Limit]
@@ -168,14 +172,14 @@ func (b *LogBuffer) Query(opts LogQueryOpts) ([]LogEntry, uint64) {
 	return results, next
 }
 
-// bsearchSince returns the ring-relative offset of the first entry with seq > since.
+// bsearchSince returns the ring-relative offset of the first entry with seq >= since.
 // Must be called under b.mu.RLock. startIdx is the absolute ring index of the oldest entry.
 func (b *LogBuffer) bsearchSince(startIdx int, since uint64) int {
 	lo, hi := 0, b.count
 	for lo < hi {
 		mid := lo + (hi-lo)/2
 		idx := (startIdx + mid) % b.cap
-		if b.entries[idx].Seq <= since {
+		if b.entries[idx].Seq < since {
 			lo = mid + 1
 		} else {
 			hi = mid
@@ -206,8 +210,7 @@ func (b *LogBuffer) matchesFilter(e LogEntry, opts LogQueryOpts, minLevel int) b
 	if !opts.MinTime.IsZero() {
 		// Entries that cannot prove they fall inside the window are
 		// dropped: the clamp exists to keep stale history out.
-		t, err := time.Parse(time.RFC3339Nano, e.Time)
-		if err != nil || t.Before(opts.MinTime) {
+		if e.parsedTime.IsZero() || e.parsedTime.Before(opts.MinTime) {
 			return false
 		}
 	}
@@ -228,15 +231,21 @@ func NewLogHandler(inner slog.Handler, buffer *LogBuffer) *LogHandler {
 	return &LogHandler{inner: inner, buffer: buffer}
 }
 
+// Enabled keeps buffer capture independent of the output handlers' levels:
+// the API can always serve DEBUG from the ring even when SIGUSR1 has toggled
+// the file handler to INFO. Output stays gated because multiHandler.Handle
+// re-checks each sub-handler's Enabled before writing.
 func (h *LogHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.inner.Enabled(ctx, level)
+	return level >= slog.LevelDebug || h.inner.Enabled(ctx, level)
 }
 
 func (h *LogHandler) Handle(ctx context.Context, record slog.Record) error {
+	ts := record.Time.UTC()
 	entry := LogEntry{
-		Time:  record.Time.UTC().Format(time.RFC3339Nano),
-		Level: record.Level.String(),
-		Msg:   record.Message,
+		Time:       ts.Format(time.RFC3339Nano),
+		Level:      record.Level.String(),
+		Msg:        record.Message,
+		parsedTime: ts,
 	}
 
 	fields := make(map[string]string)
@@ -443,6 +452,7 @@ func parseJSONLogLine(line []byte) (LogEntry, bool) {
 	if len(fields) > 0 {
 		e.Fields = fields
 	}
+	e.parsedTime, _ = time.Parse(time.RFC3339Nano, e.Time)
 	return e, true
 }
 

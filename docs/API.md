@@ -180,20 +180,44 @@ present.
 | Query | Meaning |
 |-------|---------|
 | `limit` | Maximum event count |
-| `since` | Sequence cursor for incremental reads |
-| `tail=1` or `tail=true` | Return tail window |
+| `since` | Sequence cursor: return events with `seq >= since`. Feed the previous response's `next` back verbatim; every event appears in exactly one window. |
+| `tail=1` or `tail=true` | Seed the initial window from the tail. Only honored when `since` is absent/0; cursor polls always return oldest-first so bursts larger than `limit` are never skipped. |
 | `component` | Filter by component label |
 | `lane` | Filter by processing lane |
 | `request` | Filter by request/correlation ID |
-| `item` | Filter by queue item ID |
+| `item` | Filter by queue item ID (also clamps to the item's lifetime) |
 | `level` | Minimum log level |
 | `daemon_only=1` | Restrict to daemon events |
 
 Response:
 
 ```json
-{"events":[],"next":0}
+{"events":[logEvent], "next":0}
 ```
+
+Each `logEvent`:
+
+```json
+{
+  "seq": 1041,
+  "ts": "2026-07-06T15:04:05.123456789Z",
+  "level": "INFO",
+  "msg": "title selection complete",
+  "component": "ripper",
+  "stage": "ripping",
+  "item_id": 3,
+  "lane": "workflow",
+  "request": "abc123",
+  "fields": {"decision_type": "title_selection", "decision_result": "title:1", "decision_reason": "..."}
+}
+```
+
+`fields` carries all structured attributes not promoted to top-level keys —
+including the decision vocabulary (`decision_type`, `decision_result`,
+`decision_reason`), warning/error context (`event_type`, `error_hint`,
+`impact`), and durations (`stage_duration`). Optional keys are omitted when
+empty. The ring buffer always captures DEBUG regardless of the file handler's
+SIGUSR1 level toggle, so `level=debug` queries work against a detached daemon.
 
 ### Queue item response
 
@@ -220,8 +244,8 @@ Core `queueItem` fields:
 | `failedAtStage` | Stage that failed, when a stage failure recorded it |
 | `errorMessage` | Human-readable failure message, when present |
 | `discFingerprint` | Stable disc fingerprint when known |
-| `needsReview`, `reviewReason` | Operator review state; `reviewReason` is a joined string |
-| `progress` | Current progress object |
+| `needsReview`, `reviewReasons` | Operator review state; `reviewReasons` is a string array |
+| `tasks` | Per-task state, dependencies, timestamps, and progress (the live truth during overlap windows) |
 
 The response also includes additional fields for dashboards and diagnostics such
 as timestamps, metadata, RipSpec envelope, episode status, and encoding telemetry.

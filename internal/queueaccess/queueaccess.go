@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/five82/spindle/internal/httpapi"
@@ -106,6 +107,65 @@ type WorkflowStatus struct {
 
 // DependencyStatus reports an external dependency health check.
 type DependencyStatus = httpapi.DependencyResponse
+
+// LogEntry is a single structured log event from the daemon API.
+type LogEntry = httpapi.LogEntry
+
+// LogsQuery mirrors the /api/logs query parameters.
+type LogsQuery struct {
+	Since      uint64 // seq cursor: return entries with seq > Since
+	Limit      int
+	Tail       bool // seed from the tail on the initial window (Since == 0)
+	ItemID     int64
+	Component  string
+	Lane       string
+	Request    string
+	Level      string
+	DaemonOnly bool
+}
+
+type logsResponse struct {
+	Events []LogEntry `json:"events"`
+	Next   uint64     `json:"next"`
+}
+
+// Logs fetches log events via HTTP. The returned cursor is fed back as
+// q.Since on the next poll.
+func (a *HTTPAccess) Logs(q LogsQuery) ([]LogEntry, uint64, error) {
+	params := url.Values{}
+	if q.Since > 0 {
+		params.Set("since", strconv.FormatUint(q.Since, 10))
+	}
+	if q.Limit > 0 {
+		params.Set("limit", strconv.Itoa(q.Limit))
+	}
+	if q.Tail {
+		params.Set("tail", "1")
+	}
+	if q.ItemID != 0 {
+		params.Set("item", strconv.FormatInt(q.ItemID, 10))
+	}
+	if q.Component != "" {
+		params.Set("component", q.Component)
+	}
+	if q.Lane != "" {
+		params.Set("lane", q.Lane)
+	}
+	if q.Request != "" {
+		params.Set("request", q.Request)
+	}
+	if q.Level != "" {
+		params.Set("level", q.Level)
+	}
+	if q.DaemonOnly {
+		params.Set("daemon_only", "1")
+	}
+	var resp logsResponse
+	if err := a.getJSON("/api/logs?"+params.Encode(), &resp); err != nil {
+		return nil, 0, err
+	}
+	return resp.Events, resp.Next, nil
+}
 
 // List returns queue items via HTTP, optionally filtered by stages.
 func (a *HTTPAccess) List(stages ...queue.Stage) ([]Item, error) {

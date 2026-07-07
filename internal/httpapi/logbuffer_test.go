@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -210,5 +212,73 @@ func TestQueryMinTimeClampsEntries(t *testing.T) {
 	entries, _ = buf.Query(LogQueryOpts{ItemID: 1, Limit: 10})
 	if len(entries) != 3 {
 		t.Fatalf("unclamped query returned %d entries, want 3", len(entries))
+	}
+}
+
+func TestQueryTailIgnoredOnCursorPolls(t *testing.T) {
+	buf := NewLogBuffer(20)
+	for i := 0; i < 10; i++ {
+		buf.Append(LogEntry{Time: "2026-07-06T10:00:00Z", Level: "INFO", Msg: fmt.Sprintf("line%d", i)})
+	}
+
+	// Initial window: tail keeps the newest Limit entries.
+	entries, next := buf.Query(LogQueryOpts{Tail: true, Limit: 3})
+	if len(entries) != 3 || entries[0].Msg != "line7" {
+		t.Fatalf("initial tail window = %+v, want line7..line9", entries)
+	}
+
+	// Burst catch-up: 4 more entries land, poll with Limit 3. Tail must be
+	// ignored so the window is oldest-first and the cursor never skips.
+	for i := 10; i < 14; i++ {
+		buf.Append(LogEntry{Time: "2026-07-06T10:00:01Z", Level: "INFO", Msg: fmt.Sprintf("line%d", i)})
+	}
+	entries, next = buf.Query(LogQueryOpts{Tail: true, Since: next, Limit: 3})
+	if len(entries) != 3 || entries[0].Msg != "line10" || entries[2].Msg != "line12" {
+		t.Fatalf("catch-up window = %+v, want line10..line12", entries)
+	}
+	entries, _ = buf.Query(LogQueryOpts{Tail: true, Since: next, Limit: 3})
+	if len(entries) != 1 || entries[0].Msg != "line13" {
+		t.Fatalf("final catch-up window = %+v, want just line13", entries)
+	}
+}
+
+// TestQueryCursorLosesNothing locks the cursor contract: clients feed next
+// back as since verbatim, and every entry appears in exactly one window --
+// including after an empty poll, whose next points at the first future seq.
+func TestQueryCursorLosesNothing(t *testing.T) {
+	buf := NewLogBuffer(20)
+	buf.Append(LogEntry{Time: "2026-07-06T10:00:00Z", Level: "INFO", Msg: "a"})
+
+	_, next := buf.Query(LogQueryOpts{Limit: 10})
+
+	// Empty poll: cursor must still not skip the next future entry.
+	entries, next2 := buf.Query(LogQueryOpts{Since: next, Limit: 10})
+	if len(entries) != 0 {
+		t.Fatalf("expected empty window, got %+v", entries)
+	}
+
+	buf.Append(LogEntry{Time: "2026-07-06T10:00:01Z", Level: "INFO", Msg: "b"})
+	buf.Append(LogEntry{Time: "2026-07-06T10:00:02Z", Level: "INFO", Msg: "c"})
+
+	entries, _ = buf.Query(LogQueryOpts{Since: next2, Limit: 10})
+	if len(entries) != 2 || entries[0].Msg != "b" || entries[1].Msg != "c" {
+		t.Fatalf("catch-up window = %+v, want b then c", entries)
+	}
+}
+
+func TestLogHandlerCapturesDebugWhenOutputIsInfo(t *testing.T) {
+	buf := NewLogBuffer(10)
+	inner := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})
+	logger := slog.New(NewLogHandler(inner, buf))
+
+	logger.Debug("debug line", "item_id", int64(7))
+	logger.Info("info line")
+
+	entries, _ := buf.Query(LogQueryOpts{Limit: 10})
+	if len(entries) != 2 {
+		t.Fatalf("buffer captured %d entries, want 2 (DEBUG capture must not depend on output level)", len(entries))
+	}
+	if entries[0].Level != "DEBUG" || entries[0].ItemID != 7 {
+		t.Fatalf("first entry = %+v, want DEBUG with item_id 7", entries[0])
 	}
 }
