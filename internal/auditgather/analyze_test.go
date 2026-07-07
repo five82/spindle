@@ -151,6 +151,47 @@ func TestComputeTitleSelectionSummarizesFeatureCandidates(t *testing.T) {
 	}
 }
 
+func TestComputeTitleSelectionFallsBackToRippedAssetTitleID(t *testing.T) {
+	titles := []ripspec.Title{
+		{ID: 0, Duration: 5691, Chapters: 28, Playlist: "00802.mpls"},
+		{ID: 1, Duration: 5691, Chapters: 28, Playlist: "00801.mpls"},
+		{ID: 2, Duration: 5679, Chapters: 28, Playlist: "00800.mpls"},
+	}
+
+	// No title_selection decision in logs (rip-cache restore): the asset's
+	// recovered title ID identifies the selection.
+	r := &Report{
+		Envelope: &ripspec.Envelope{
+			Metadata: ripspec.Metadata{MediaType: "movie"},
+			Titles:   titles,
+			Assets: ripspec.Assets{Ripped: []ripspec.Asset{
+				{EpisodeKey: "main", TitleID: 2, Path: "/staging/Inside Out_t02.mkv", Status: ripspec.AssetStatusCompleted},
+			}},
+		},
+	}
+	summary := computeTitleSelection(r)
+	if summary == nil || summary.SelectedID != 2 {
+		t.Fatalf("summary = %+v, want SelectedID 2", summary)
+	}
+	for _, c := range summary.Candidates {
+		if c.Selected != (c.Playlist == "00800.mpls") {
+			t.Fatalf("candidate %d (%s) selected = %v", c.ID, c.Playlist, c.Selected)
+		}
+	}
+
+	// Unknown title ID (-1) must not mark any candidate as selected.
+	r.Envelope.Assets.Ripped[0].TitleID = -1
+	summary = computeTitleSelection(r)
+	if summary == nil || summary.SelectedID != -1 {
+		t.Fatalf("summary = %+v, want SelectedID -1", summary)
+	}
+	for _, c := range summary.Candidates {
+		if c.Selected {
+			t.Fatalf("candidate %d unexpectedly selected", c.ID)
+		}
+	}
+}
+
 func TestComputeOutputMediaSummarizesStreamsAndLabels(t *testing.T) {
 	media := []MediaFileProbe{{
 		Path:            "/movie.mkv",

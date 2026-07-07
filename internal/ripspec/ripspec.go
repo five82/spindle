@@ -83,7 +83,7 @@ type Episode struct {
 // Asset represents a single file artifact at a pipeline stage.
 type Asset struct {
 	EpisodeKey     string `json:"episode_key"`
-	TitleID        int    `json:"title_id,omitempty"`
+	TitleID        int    `json:"title_id"`
 	Path           string `json:"path"`
 	Status         string `json:"status"`
 	SubtitlesMuxed bool   `json:"subtitles_muxed,omitempty"`

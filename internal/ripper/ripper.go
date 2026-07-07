@@ -596,19 +596,8 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 			"decision_result", "directory_scan",
 			"decision_reason", fmt.Sprintf("media_type=%s", env.Metadata.MediaType),
 		)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return fmt.Errorf("asset mapping: read dir: %w", err)
-		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			env.Assets.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{
-				EpisodeKey: "main",
-				Path:       filepath.Join(dir, entry.Name()),
-				Status:     ripspec.AssetStatusCompleted,
-			})
+		if err := assignMovieAssets(env, dir); err != nil {
+			return err
 		}
 	}
 

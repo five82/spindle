@@ -60,6 +60,48 @@ func TestScanTitleFiles(t *testing.T) {
 	}
 }
 
+func TestAssignMovieAssets(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Inside Out_t02.mkv"), []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := &ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}}
+	if err := assignMovieAssets(env, dir); err != nil {
+		t.Fatalf("assignMovieAssets: %v", err)
+	}
+
+	if len(env.Assets.Ripped) != 1 {
+		t.Fatalf("expected 1 ripped asset, got %d", len(env.Assets.Ripped))
+	}
+	asset := env.Assets.Ripped[0]
+	if asset.EpisodeKey != "main" || asset.Status != ripspec.AssetStatusCompleted {
+		t.Errorf("asset = %+v, want main/completed", asset)
+	}
+	if asset.TitleID != 2 {
+		t.Errorf("asset.TitleID = %d, want 2", asset.TitleID)
+	}
+}
+
+func TestAssignMovieAssets_UnparseableFilename(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "movie.mkv"), []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := &ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}}
+	if err := assignMovieAssets(env, dir); err != nil {
+		t.Fatalf("assignMovieAssets: %v", err)
+	}
+
+	if len(env.Assets.Ripped) != 1 {
+		t.Fatalf("expected 1 ripped asset, got %d", len(env.Assets.Ripped))
+	}
+	if got := env.Assets.Ripped[0].TitleID; got != -1 {
+		t.Errorf("asset.TitleID = %d, want -1 (unknown)", got)
+	}
+}
+
 func TestAssignEpisodeAssets(t *testing.T) {
 	dir := t.TempDir()
 	for _, f := range []string{"Show_t00.mkv", "Show_t02.mkv", "Show_t05.mkv"} {

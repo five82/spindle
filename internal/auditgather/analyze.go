@@ -400,7 +400,7 @@ func computeTitleSelection(r *Report) *TitleSelectionSummary {
 	}
 	if ts.SelectedID < 0 {
 		for _, a := range r.Envelope.Assets.Ripped {
-			if a.IsCompleted() {
+			if a.IsCompleted() && a.TitleID >= 0 {
 				ts.SelectedID = a.TitleID
 				break
 			}

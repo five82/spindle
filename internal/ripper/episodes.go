@@ -1,6 +1,7 @@
 package ripper
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -66,6 +67,32 @@ func assignEpisodeAssets(env *ripspec.Envelope, dir string, titleFiles map[int]s
 		result.Assigned++
 	}
 	return result
+}
+
+// assignMovieAssets maps ripped files in dir to the "main" asset, recovering
+// each title ID from the MakeMKV filename (e.g. "Inside Out_t02.mkv" -> 2).
+// TitleID is -1 when the filename carries no parseable title number.
+func assignMovieAssets(env *ripspec.Envelope, dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("asset mapping: read dir: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		titleID, ok := parseTitleID(entry.Name())
+		if !ok {
+			titleID = -1
+		}
+		env.Assets.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{
+			EpisodeKey: "main",
+			TitleID:    titleID,
+			Path:       filepath.Join(dir, entry.Name()),
+			Status:     ripspec.AssetStatusCompleted,
+		})
+	}
+	return nil
 }
 
 // scanTitleFiles reads dir for MKV files and returns a map of parsed title ID
