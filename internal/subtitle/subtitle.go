@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
@@ -29,13 +30,15 @@ var inspectSubtitleMedia = ffprobe.Inspect
 type Handler struct {
 	cfg         *config.Config
 	transcriber *transcription.Service
+	llm         *llm.Client
 }
 
 // New creates a subtitle handler.
-func New(cfg *config.Config, transcriber *transcription.Service) *Handler {
+func New(cfg *config.Config, transcriber *transcription.Service, llmClient *llm.Client) *Handler {
 	return &Handler{
 		cfg:         cfg,
 		transcriber: transcriber,
+		llm:         llmClient,
 	}
 }
 
@@ -58,7 +61,14 @@ type GenerateDisplaySubtitleRequest struct {
 	ItemID          int64
 	EpisodeKey      string
 	Purpose         string
-	Transcriber     interface {
+	// LLM, when non-nil, audits the formatted display SRT for obvious
+	// WhisperX transcription errors and rewrites it in place before this
+	// call returns. Nil skips the audit.
+	LLM *llm.Client
+	// MediaContext describes the content for the audit prompt, e.g.
+	// `the movie "Air" (2023)` or `the TV episode Breaking Bad s01_001`.
+	MediaContext string
+	Transcriber  interface {
 		SelectPrimaryAudioTrack(context.Context, string, string) (transcription.SelectedAudio, error)
 		Transcribe(context.Context, transcription.TranscribeRequest, ...transcription.ProgressFunc) (*transcription.TranscribeResult, error)
 	}
@@ -84,6 +94,7 @@ type GenerateDisplaySubtitleResult struct {
 	Formatting     FormatResult
 	VideoSeconds   float64
 	DurationSource string
+	Audit          AuditStats
 
 	formatting formatResult
 }
@@ -152,6 +163,16 @@ func GenerateDisplaySubtitle(ctx context.Context, req GenerateDisplaySubtitleReq
 	if err != nil {
 		return nil, &DisplaySubtitleError{Op: "format subtitle", Err: err}
 	}
+
+	// Audit before returning so callers that re-parse formatting.DisplayPath
+	// see the audited cues.
+	audit := auditDisplaySRT(ctx, req.LLM, req.Logger, auditParams{
+		DisplayPath:  formatting.DisplayPath,
+		VideoSeconds: videoSeconds,
+		MediaContext: req.MediaContext,
+		EpisodeKey:   req.EpisodeKey,
+	})
+
 	publicFormatting := FormatResult{
 		DisplayPath:      formatting.DisplayPath,
 		OriginalSegments: formatting.OriginalSegments,
@@ -169,6 +190,7 @@ func GenerateDisplaySubtitle(ctx context.Context, req GenerateDisplaySubtitleReq
 		Formatting:     publicFormatting,
 		VideoSeconds:   videoSeconds,
 		DurationSource: durationSource,
+		Audit:          audit,
 		formatting:     formatting,
 	}, nil
 }
@@ -277,6 +299,7 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 		h.recordSubtitleFailure(logger, sess, key, err.Error())
 		return false, nil
 	}
+	h.applySubtitleAuditReviewIssue(logger, sess, key, result.Audit)
 
 	record, err := h.createDisplaySubtitleRecord(sess, job, result)
 	if err != nil {
@@ -359,6 +382,8 @@ func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Sessi
 		Purpose:         "subtitle_generation",
 		Transcript:      transcriptArtifact(sess, key),
 		Transcriber:     h.transcriber,
+		LLM:             h.llm,
+		MediaContext:    auditMediaContext(sess.Env.Metadata, key),
 		Logger:          sess.Logger,
 		Progress: func(phase transcription.Phase, elapsed time.Duration) {
 			message := sess.Task.ProgressMessage
@@ -455,16 +480,19 @@ func (h *Handler) createDisplaySubtitleRecord(sess *stage.Session, job stage.Ass
 	h.applySubtitleReviewIssues(logger, sess, key, validation)
 
 	record := ripspec.SubtitleGenRecord{
-		EpisodeKey:       key,
-		Source:           "whisperx",
-		SubtitlePath:     formatting.DisplayPath,
-		Segments:         len(formattedCues),
-		DurationSec:      result.VideoSeconds,
-		Language:         result.SelectedAudio.Language,
-		ValidationResult: subtitleValidationResult(validation),
-		QCObservations:   validation.Issues,
-		ReviewIssues:     validation.ReviewIssues,
-		SevereIssues:     validation.SevereIssues,
+		EpisodeKey:        key,
+		Source:            "whisperx",
+		SubtitlePath:      formatting.DisplayPath,
+		Segments:          len(formattedCues),
+		DurationSec:       result.VideoSeconds,
+		Language:          result.SelectedAudio.Language,
+		ValidationResult:  subtitleValidationResult(validation),
+		QCObservations:    validation.Issues,
+		ReviewIssues:      validation.ReviewIssues,
+		SevereIssues:      validation.SevereIssues,
+		AuditResult:       result.Audit.Result,
+		AuditEditsApplied: result.Audit.Applied,
+		AuditEditsDropped: result.Audit.Dropped,
 	}
 
 	return record, nil
@@ -532,24 +560,43 @@ func (h *Handler) applySubtitleReviewIssues(logger *slog.Logger, sess *stage.Ses
 			"episode_key", key,
 			"requires_review", true,
 		)
-		if mergeErr := sess.MergeSave(func(env *ripspec.Envelope) error {
-			if ep := env.EpisodeByKey(key); ep != nil {
-				ep.AppendReviewReason("Subtitle validation: " + issue)
-			}
-			return nil
-		}); mergeErr != nil {
-			logger.Error("subtitle review persistence failed",
-				"event_type", "subtitle_failure_persist_failed",
-				"error", mergeErr,
-			)
-		}
-		if mergeErr := sess.MergeAddReviewReason("srt_validation: " + issue + " (" + key + ")"); mergeErr != nil {
-			logger.Error("subtitle review persistence failed",
-				"event_type", "subtitle_failure_persist_failed",
-				"error", mergeErr,
-			)
-		}
+		h.persistReviewReason(logger, sess, key, "Subtitle validation: "+issue, "srt_validation: "+issue+" ("+key+")")
 	}
+}
+
+// persistReviewReason appends envReason to the episode matching key and
+// queueReason to the queue item, logging persistence failures without
+// failing the stage.
+func (h *Handler) persistReviewReason(logger *slog.Logger, sess *stage.Session, key, envReason, queueReason string) {
+	if mergeErr := sess.MergeSave(func(env *ripspec.Envelope) error {
+		if ep := env.EpisodeByKey(key); ep != nil {
+			ep.AppendReviewReason(envReason)
+		}
+		return nil
+	}); mergeErr != nil {
+		logger.Error("subtitle review persistence failed",
+			"event_type", "subtitle_failure_persist_failed",
+			"error", mergeErr,
+		)
+	}
+	if mergeErr := sess.MergeAddReviewReason(queueReason); mergeErr != nil {
+		logger.Error("subtitle review persistence failed",
+			"event_type", "subtitle_failure_persist_failed",
+			"error", mergeErr,
+		)
+	}
+}
+
+// applySubtitleAuditReviewIssue flags the episode for review when the
+// subtitle audit rejected its edits under the removal-cap guardrail. Every
+// other audit outcome (applied, clean, skipped, or failed) is non-fatal and
+// does not route to review; the unaudited subtitle remains usable.
+func (h *Handler) applySubtitleAuditReviewIssue(logger *slog.Logger, sess *stage.Session, key string, audit AuditStats) {
+	if audit.Result != "rejected" {
+		return
+	}
+	reason := "subtitle audit rejected (removal cap): " + key
+	h.persistReviewReason(logger, sess, key, reason, reason)
 }
 
 func (h *Handler) finishSubtitleStage(sess *stage.Session, summary subtitleRunSummary) error {
@@ -663,6 +710,24 @@ func subtitleValidationResult(validation validationResult) string {
 	default:
 		return "passed"
 	}
+}
+
+// auditMediaContext builds the MediaContext string passed to the subtitle
+// audit LLM prompt: `the movie "Title" (Year)` for movies (year omitted when
+// empty), or `the TV episode ShowTitle episodeKey` for TV, using the
+// pipeline's episode/job key as the episode marker.
+func auditMediaContext(meta ripspec.Metadata, episodeKey string) string {
+	if meta.MediaType == "movie" {
+		if meta.Year == "" {
+			return fmt.Sprintf("the movie %q", meta.Title)
+		}
+		return fmt.Sprintf("the movie %q (%s)", meta.Title, meta.Year)
+	}
+	show := meta.ShowTitle
+	if show == "" {
+		show = meta.Title
+	}
+	return fmt.Sprintf("the TV episode %s %s", show, episodeKey)
 }
 
 // MuxDisplaySubtitle runs mkvmerge to add an SRT subtitle track to the MKV

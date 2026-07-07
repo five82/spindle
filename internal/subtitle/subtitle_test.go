@@ -166,6 +166,47 @@ func TestSubtitleValidationResult(t *testing.T) {
 	}
 }
 
+func TestAuditMediaContext(t *testing.T) {
+	tests := []struct {
+		name string
+		meta ripspec.Metadata
+		key  string
+		want string
+	}{
+		{
+			name: "movie with year",
+			meta: ripspec.Metadata{MediaType: "movie", Title: "Air", Year: "2023"},
+			key:  "main",
+			want: `the movie "Air" (2023)`,
+		},
+		{
+			name: "movie without year",
+			meta: ripspec.Metadata{MediaType: "movie", Title: "Air"},
+			key:  "main",
+			want: `the movie "Air"`,
+		},
+		{
+			name: "tv with show title",
+			meta: ripspec.Metadata{MediaType: "tv", ShowTitle: "Breaking Bad", Title: "Breaking Bad"},
+			key:  "s01_001",
+			want: "the TV episode Breaking Bad s01_001",
+		},
+		{
+			name: "tv falls back to title when show title empty",
+			meta: ripspec.Metadata{MediaType: "tv", Title: "Breaking Bad"},
+			key:  "s01_001",
+			want: "the TV episode Breaking Bad s01_001",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := auditMediaContext(tt.meta, tt.key); got != tt.want {
+				t.Fatalf("auditMediaContext() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAssetKeys_Movie(t *testing.T) {
 	env := &ripspec.Envelope{
 		Metadata: ripspec.Metadata{MediaType: "movie"},

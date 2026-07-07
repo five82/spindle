@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -17,6 +18,7 @@ import (
 	"github.com/five82/spindle/internal/fingerprint"
 	"github.com/five82/spindle/internal/identify"
 	"github.com/five82/spindle/internal/keydb"
+	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/subtitle"
@@ -251,6 +253,9 @@ func newGensubtitleCmd() *cobra.Command {
 				fmt.Printf("  %s en\n", labelStyle("Language:"))
 			}
 
+			llmClient := llm.New(cfg.LLM, cmdLogger)
+			mediaContext := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+
 			selectedLanguage := "en"
 			var formatStart time.Time
 			result, err := subtitle.GenerateDisplaySubtitle(ctx, subtitle.GenerateDisplaySubtitleRequest{
@@ -259,6 +264,8 @@ func newGensubtitleCmd() *cobra.Command {
 				WorkDir:         workDir,
 				Language:        "en",
 				Transcriber:     svc,
+				LLM:             llmClient,
+				MediaContext:    mediaContext,
 				Logger:          cmdLogger,
 				Progress: func(phase transcription.Phase, elapsed time.Duration) {
 					switch {
@@ -296,6 +303,7 @@ func newGensubtitleCmd() *cobra.Command {
 			if err != nil {
 				return standaloneDisplaySubtitleError(err)
 			}
+			printSubtitleAuditSummary(result.Audit)
 
 			displayPath := result.Formatting.DisplayPath
 			if sidecarMode {
@@ -328,6 +336,21 @@ func newGensubtitleCmd() *cobra.Command {
 	cmd.Flags().StringVar(&workDir, "work-dir", "", "Working directory")
 	cmd.Flags().BoolVar(&external, "external", false, "Create external SRT sidecar instead of muxing")
 	return cmd
+}
+
+// printSubtitleAuditSummary prints one line summarizing the LLM subtitle
+// audit outcome, consistent with the subtitle command's other status lines.
+func printSubtitleAuditSummary(audit subtitle.AuditStats) {
+	switch audit.Result {
+	case "applied":
+		fmt.Printf("  Subtitle audit: %d edit(s) applied, %d dropped\n", audit.Applied, audit.Dropped)
+	case "clean":
+		fmt.Println("  Subtitle audit: clean")
+	case "rejected":
+		fmt.Printf("  Subtitle audit: rejected (%s)\n", audit.FailureReason)
+	default:
+		fmt.Printf("  Subtitle audit: skipped (%s)\n", audit.FailureReason)
+	}
 }
 
 func standaloneDisplaySubtitleError(err error) error {

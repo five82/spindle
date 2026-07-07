@@ -178,16 +178,19 @@ func (d *AudioAnalysisData) EpisodeAnalysis(key string) *EpisodeAudioAnalysis {
 
 // SubtitleGenRecord captures the result of subtitle generation for one episode.
 type SubtitleGenRecord struct {
-	EpisodeKey       string   `json:"episode_key"`
-	Source           string   `json:"source"`
-	SubtitlePath     string   `json:"subtitle_path"`
-	Segments         int      `json:"segments"`
-	DurationSec      float64  `json:"duration_sec,omitempty"`
-	Language         string   `json:"language"`
-	ValidationResult string   `json:"validation_result,omitempty"`
-	QCObservations   []string `json:"qc_observations,omitempty"`
-	ReviewIssues     []string `json:"review_issues,omitempty"`
-	SevereIssues     []string `json:"severe_issues,omitempty"`
+	EpisodeKey        string   `json:"episode_key"`
+	Source            string   `json:"source"`
+	SubtitlePath      string   `json:"subtitle_path"`
+	Segments          int      `json:"segments"`
+	DurationSec       float64  `json:"duration_sec,omitempty"`
+	Language          string   `json:"language"`
+	ValidationResult  string   `json:"validation_result,omitempty"`
+	QCObservations    []string `json:"qc_observations,omitempty"`
+	ReviewIssues      []string `json:"review_issues,omitempty"`
+	SevereIssues      []string `json:"severe_issues,omitempty"`
+	AuditResult       string   `json:"audit_result,omitempty"`
+	AuditEditsApplied int      `json:"audit_edits_applied,omitempty"`
+	AuditEditsDropped int      `json:"audit_edits_dropped,omitempty"`
 }
 
 // ContentIDSummary captures envelope-level provenance for the episode

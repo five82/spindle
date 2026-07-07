@@ -170,9 +170,17 @@ features:
   non-primary audio tracks are transcribed and the LLM classifies each candidate
   as commentary or not-commentary. Classification/transcription failures are
   conservative: suspect tracks are preserved as commentary rather than stripped.
+- **Subtitle audit**: after the display SRT is formatted, a single JSON-mode
+  call reviews all cues and proposes remove/replace edits in fixed error
+  categories (hallucination, credits music, music bleed, garbled, homophone,
+  broken, repeated, encoding). It is an improver, not a gate: edits are
+  resolved by exact cue-text match rather than trusting model indices, high-risk
+  removals are capped and trigger a whole-response rejection plus review flag if
+  exceeded, and any missing config, API error, or rejected response just skips
+  the audit with a warning. See ADR 0003.
 
 Spindle does not use LLMs for TMDB search, disc title resolution, encoding,
-subtitle formatting, Jellyfin refresh, or queue control.
+Jellyfin refresh, or queue control.
 The proposal in `docs/proposals/LLM_EPISODE_CANDIDATE_PICKER.md` is not active
 behavior.
 

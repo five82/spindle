@@ -181,7 +181,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	contentidHandler := contentid.New(cfg, llmClient, osClient, tmdbClient, transcriber)
 	encoderHandler := encoder.New(cfg, notifier)
 	analysisHandler := audioanalysis.New(cfg, llmClient, transcriber)
-	subtitleHandler := subtitle.New(cfg, transcriber)
+	subtitleHandler := subtitle.New(cfg, transcriber, llmClient)
 	applyHandler := audioanalysis.NewApply(cfg)
 	organizerHandler := organizer.New(cfg, jfClient, notifier)
 

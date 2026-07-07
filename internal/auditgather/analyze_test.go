@@ -223,7 +223,7 @@ func TestComputeOutputMediaSummarizesStreamsAndLabels(t *testing.T) {
 func TestComputeSubtitleSummarySeparatesValidationResults(t *testing.T) {
 	r := &Report{
 		Envelope: &ripspec.Envelope{Attributes: ripspec.EnvelopeAttributes{SubtitleGenerationResults: []ripspec.SubtitleGenRecord{
-			{EpisodeKey: "main", Source: "whisperx", Language: "en", Segments: 10, ValidationResult: "passed", QCObservations: []string{"high_reading_speed"}},
+			{EpisodeKey: "main", Source: "whisperx", Language: "en", Segments: 10, ValidationResult: "passed", QCObservations: []string{"high_reading_speed"}, AuditResult: "applied", AuditEditsApplied: 7, AuditEditsDropped: 1},
 			{EpisodeKey: "s01e02", Source: "whisperx", Language: "en", Segments: 8, ValidationResult: "needs_review", ReviewIssues: []string{"bad timing"}},
 		}}},
 	}
@@ -237,6 +237,9 @@ func TestComputeSubtitleSummarySeparatesValidationResults(t *testing.T) {
 	}
 	if len(summary.Results) != 2 || len(summary.Results[1].ReviewIssues) != 1 {
 		t.Fatalf("unexpected results: %+v", summary.Results)
+	}
+	if summary.Results[0].AuditResult != "applied" || summary.Results[0].AuditEditsApplied != 7 || summary.Results[0].AuditEditsDropped != 1 {
+		t.Fatalf("audit fields not carried into summary: %+v", summary.Results[0])
 	}
 }
 
@@ -617,4 +620,3 @@ func TestCountDecisiveLowSimilarityInConfidenceBand(t *testing.T) {
 		t.Fatalf("decisive low-similarity count = %d, want 1", got)
 	}
 }
-

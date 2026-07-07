@@ -302,14 +302,17 @@ type SubtitleSummary struct {
 
 // SubtitleResultSummary is the actionable part of one subtitle-generation record.
 type SubtitleResultSummary struct {
-	EpisodeKey       string   `json:"episode_key,omitempty"`
-	Source           string   `json:"source,omitempty"`
-	Language         string   `json:"language,omitempty"`
-	Segments         int      `json:"segments,omitempty"`
-	ValidationResult string   `json:"validation_result,omitempty"`
-	ReviewIssues     []string `json:"review_issues,omitempty"`
-	SevereIssues     []string `json:"severe_issues,omitempty"`
-	QCObservations   []string `json:"qc_observations,omitempty"`
+	EpisodeKey        string   `json:"episode_key,omitempty"`
+	Source            string   `json:"source,omitempty"`
+	Language          string   `json:"language,omitempty"`
+	Segments          int      `json:"segments,omitempty"`
+	ValidationResult  string   `json:"validation_result,omitempty"`
+	ReviewIssues      []string `json:"review_issues,omitempty"`
+	SevereIssues      []string `json:"severe_issues,omitempty"`
+	QCObservations    []string `json:"qc_observations,omitempty"`
+	AuditResult       string   `json:"audit_result,omitempty"`
+	AuditEditsApplied int      `json:"audit_edits_applied,omitempty"`
+	AuditEditsDropped int      `json:"audit_edits_dropped,omitempty"`
 }
 
 // RoutingSummary classifies final outputs against configured library/review roots.
