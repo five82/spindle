@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,15 +15,17 @@ import (
 
 func newStagingCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "staging",
-		Short: "Manage staging directories",
+		Use:     "staging",
+		Short:   "Manage staging directories",
+		GroupID: groupMaintenance,
 	}
 	cmd.AddCommand(newStagingListCmd(), newStagingCleanCmd())
 	return cmd
 }
 
 func newStagingListCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List staging directories",
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -30,6 +33,16 @@ func newStagingListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			if asJSON {
+				data, err := json.MarshalIndent(dirs, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(data))
+				return nil
+			}
+
 			if len(dirs) == 0 {
 				fmt.Println("No staging directories")
 				return nil
@@ -49,14 +62,21 @@ func newStagingListCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output directories as JSON")
+	return cmd
 }
 
 func newStagingCleanCmd() *cobra.Command {
-	var flagAll bool
+	var flagAll, flagYes bool
 	cmd := &cobra.Command{
 		Use:   "clean",
 		Short: "Remove orphaned staging directories",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if flagAll {
+				if err := confirm("Remove ALL staging directories (including active items)?", flagYes); err != nil {
+					return err
+				}
+			}
 			var activeFingerprints map[string]struct{}
 			if !flagAll {
 				acc, err := openQueueAccess()
@@ -91,5 +111,6 @@ func newStagingCleanCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&flagAll, "all", false, "Remove all staging directories")
+	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip the confirmation prompt")
 	return cmd
 }

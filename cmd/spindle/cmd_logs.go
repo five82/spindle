@@ -20,8 +20,16 @@ func newLogsCmd() *cobra.Command {
 		query  queueaccess.LogsQuery
 	)
 	cmd := &cobra.Command{
-		Use:   "logs",
-		Short: "Display daemon logs",
+		Use:     "logs",
+		Short:   "Display daemon logs",
+		GroupID: groupDaemon,
+		Long: `Display daemon logs.
+
+Without filters, tails the log file directly (works with the daemon stopped).
+Filters and --follow use the daemon API and require a running daemon.`,
+		Example: `  spindle logs -n 50
+  spindle logs -f --item 3
+  spindle logs --level warn --component encoder`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			hasFilter := query.Component != "" || query.Lane != "" || query.Request != "" ||
 				query.ItemID != 0 || query.Level != ""

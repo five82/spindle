@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,8 +20,9 @@ import (
 
 func newStartCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "start",
-		Short: "Start the spindle daemon",
+		Use:     "start",
+		Short:   "Start the spindle daemon",
+		GroupID: groupDaemon,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			lp, sp := lockPath(), socketPath()
 			if daemonctl.IsRunning(lp, sp) {
@@ -44,8 +46,9 @@ func newStartCmd() *cobra.Command {
 
 func newStopCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "stop",
-		Short: "Stop the spindle daemon",
+		Use:     "stop",
+		Short:   "Stop the spindle daemon",
+		GroupID: groupDaemon,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			err := daemonctl.Stop(daemonctl.StopOptions{
 				LockPath:   lockPath(),
@@ -67,8 +70,9 @@ func newStopCmd() *cobra.Command {
 
 func newRestartCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "restart",
-		Short: "Restart the spindle daemon",
+		Use:     "restart",
+		Short:   "Restart the spindle daemon",
+		GroupID: groupDaemon,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			lp, sp := lockPath(), socketPath()
 			err := daemonctl.Stop(daemonctl.StopOptions{
@@ -94,12 +98,18 @@ func newRestartCmd() *cobra.Command {
 }
 
 func newStatusCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "status",
-		Short: "Show system and queue status",
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:     "status",
+		Short:   "Show system and queue status",
+		GroupID: groupDaemon,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			lp, sp := lockPath(), socketPath()
 			if !daemonctl.IsRunning(lp, sp) {
+				if asJSON {
+					fmt.Println(`{"running": false}`)
+					return nil
+				}
 				fmt.Println("Daemon stopped")
 				return nil
 			}
@@ -111,6 +121,15 @@ func newStatusCmd() *cobra.Command {
 			status, err := acc.Status()
 			if err != nil {
 				return err
+			}
+
+			if asJSON {
+				data, err := json.MarshalIndent(status, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(data))
+				return nil
 			}
 
 			fmt.Println()
@@ -176,6 +195,8 @@ func newStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output status as JSON")
+	return cmd
 }
 
 func checkPath(label, path string) {

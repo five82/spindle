@@ -333,6 +333,9 @@ func (a *HTTPAccess) doJSON(req *http.Request, dest any) error {
 		return fmt.Errorf("read response from %s: %w", req.URL.Path, err)
 	}
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		return errors.New("daemon rejected the API token; check the api token in the config")
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var errResp struct {
 			Error string `json:"error"`

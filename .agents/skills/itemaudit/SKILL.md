@@ -22,10 +22,10 @@ The goal is to **uncover problems that automated code does not detect**. Quick l
 
 ### Phase 1: Gather Artifacts
 
-Run the `audit-gather` subcommand to collect all artifacts in a single pass, saving to a temp file:
+Run the `queue audit` subcommand to collect all artifacts in a single pass, saving to a temp file:
 
 ```bash
-spindle audit-gather <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
+spindle queue audit <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
 ```
 
 This produces an agent-facing JSON report. The schema may evolve with this skill; treat it as diagnostic input rather than a stable public API. It contains:
@@ -69,12 +69,12 @@ The `analysis` object (always present; sub-fields omitted when empty) contains p
 
 ### Extraction Strategy
 
-After running `spindle audit-gather`, process the full JSON output through a **single comprehensive extraction script** rather than making many narrow extraction passes. The script should produce one compact output that enables all subsequent analysis phases without further extraction calls.
+After running `spindle queue audit`, process the full JSON output through a **single comprehensive extraction script** rather than making many narrow extraction passes. The script should produce one compact output that enables all subsequent analysis phases without further extraction calls.
 
 **Shell mechanics:**
-1. **Save audit-gather output to a temp file first:**
+1. **Save queue audit output to a temp file first:**
    ```bash
-   spindle audit-gather <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
+   spindle queue audit <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
    ```
 2. **Pass the extraction script via a single-quoted heredoc**, never via `python3 -c "..."` (the `-c` form breaks because bash interprets `!`, `\`, and other special characters inside double quotes):
    ```bash
@@ -99,7 +99,7 @@ Prefer pre-computed `analysis` summaries whenever they exist; compute from raw l
 
 ### Stage Gating
 
-The `stage_gate` object in the audit-gather output contains:
+The `stage_gate` object in the audit output contains:
 
 | Field | Meaning |
 |-------|---------|
@@ -124,7 +124,7 @@ The `stage_gate` object in the audit-gather output contains:
 
 ### Phase 2: Log Analysis (when `phase_logs` is true)
 
-Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `logs.stages` from the audit-gather output. **Go beyond simple error counts.**
+Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `logs.stages` from the audit output. **Go beyond simple error counts.**
 
 1. **Decision anomalies** (from `logs.decisions`):
    - Low confidence scores on decisions that were accepted anyway
@@ -173,7 +173,7 @@ Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `lo
 
 ### Phase 3: Rip Cache Analysis (when `phase_rip_cache` is true)
 
-Analyze the `rip_cache` section from audit-gather output:
+Analyze the `rip_cache` section from the audit output:
 
 1. **Verify** `rip_cache.found` is true — if false, check `rip_cache.disabled` first (cache turned off in config); otherwise the entry may have been pruned
 2. **Check metadata**:
@@ -241,7 +241,7 @@ Analyze the actual final routing outcome, not just item-level review flags:
 
 ### Phase 4: Encoded File Analysis (when `phase_encoded` is true)
 
-Analyze the `media` array from audit-gather output. Each entry contains full ffprobe results.
+Analyze the `media` array from the audit output. Each entry contains full ffprobe results.
 
 **TV note:** The encoding snapshot only contains data for the last episode encoded (the snapshot is overwritten per-episode during encoding). The `media[]` array is compressed for TV: only the representative probe (matching the majority profile, marked `representative: true`), deviation probes, and error probes are included. Use `media_omitted` to see how many clean probes were dropped. The representative probe is sufficient for stream-level checks (items 1-6 below); `analysis.episode_consistency` confirms all omitted episodes match the same profile. The snapshot is still useful for crop detection, encoding config, and validation results (which are consistent across episodes from the same disc).
 
@@ -294,7 +294,7 @@ Analyze the `media` array from audit-gather output. Each entry contains full ffp
 
 ### Phase 5: Crop Detection Validation (when `phase_crop` is true)
 
-Analyze crop data from the audit-gather output:
+Analyze crop data from the audit output:
 
 1. **Read pre-computed crop data**: `analysis.crop_analysis` provides `output_width`, `output_height`, `aspect_ratio`, `standard_ratio`, and `required`. Also read `encoding.snapshot.crop_message` for the detection summary.
 
@@ -496,7 +496,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 ### Issues Found
 
 **[CRITICAL] <Issue Name>**
-- Evidence: <specific data from audit-gather output>
+- Evidence: <specific data from the audit output>
 - Expected: <what should have happened>
 - Actual: <what did happen>
 - Impact: <user-facing consequence>
@@ -568,10 +568,10 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 
 ## Execution Checklist
 
-After running `spindle audit-gather`, check only the phases flagged as `true` in `stage_gate`. **Do not check phases beyond the reached stage.**
+After running `spindle queue audit`, check only the phases flagged as `true` in `stage_gate`. **Do not check phases beyond the reached stage.**
 
 ### Always
-- [ ] Ran `spindle audit-gather <id>` and loaded the JSON output
+- [ ] Ran `spindle queue audit <id>` and loaded the JSON output
 - [ ] Checked `errors` array for gathering failures
 - [ ] Reviewed `stage_gate` to determine applicable phases
 - [ ] Reviewed `analysis.anomalies` for pre-flagged issues

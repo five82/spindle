@@ -1,14 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/queueaccess"
@@ -20,7 +25,15 @@ var (
 	flagConfig   string
 	flagLogLevel string
 	flagVerbose  bool
-	flagJSON     bool
+)
+
+// Command group IDs for --help organization.
+const (
+	groupDaemon      = "daemon"
+	groupQueue       = "queue"
+	groupDisc        = "disc"
+	groupMaintenance = "maintenance"
+	groupDiagnostics = "diagnostics"
 )
 
 // cfg holds the loaded configuration (nil for commands that skip config loading).
@@ -30,6 +43,15 @@ func main() {
 	root := &cobra.Command{
 		Use:   "spindle",
 		Short: "Optical disc to Jellyfin media library automation",
+		Long: `Spindle automates optical disc to Jellyfin library processing:
+disc detection, ripping, encoding, metadata, subtitles, and library refresh.
+
+First run: 'spindle config init' to generate a config, then 'spindle start'.`,
+		Example: `  spindle start              # launch the daemon
+  spindle status             # daemon, dependency, and queue overview
+  spindle logs -f --item 3   # follow logs for queue item 3
+  spindle queue list         # list queue items`,
+		Version: buildVersion(),
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if flagVerbose {
 				flagLogLevel = "debug"
@@ -55,7 +77,15 @@ func main() {
 	pf.StringVarP(&flagConfig, "config", "c", "", "Configuration file path")
 	pf.StringVar(&flagLogLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	pf.BoolVarP(&flagVerbose, "verbose", "v", false, "Shorthand for --log-level=debug")
-	pf.BoolVar(&flagJSON, "json", false, "Output in JSON format")
+
+	// Command groups organize --help output.
+	root.AddGroup(
+		&cobra.Group{ID: groupDaemon, Title: "Daemon Commands:"},
+		&cobra.Group{ID: groupQueue, Title: "Queue Commands:"},
+		&cobra.Group{ID: groupDisc, Title: "Disc Commands:"},
+		&cobra.Group{ID: groupMaintenance, Title: "Maintenance Commands:"},
+		&cobra.Group{ID: groupDiagnostics, Title: "Diagnostic Commands:"},
+	)
 
 	// Register all command groups.
 	root.AddCommand(
@@ -65,16 +95,12 @@ func main() {
 		newStatusCmd(),
 		newQueueCmd(),
 		newLogsCmd(),
-		newIdentifyCmd(),
-		newGensubtitleCmd(),
-		newTestNotifyCmd(),
 		newDiscCmd(),
 		newCacheCmd(),
 		newConfigCmd(),
 		newStagingCmd(),
 		newDiscIDCmd(),
 		newDebugCmd(),
-		newAuditGatherCmd(),
 		newDaemonCmd(),
 		newEncodeWorkerCmd(),
 	)
@@ -167,7 +193,75 @@ func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-2] + ".."
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen-2]) + ".."
+}
+
+// buildVersion reports the module version plus VCS revision when available.
+func buildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	version := info.Main.Version
+	if version == "" {
+		version = "unknown"
+	}
+	for _, s := range info.Settings {
+		if s.Key == "vcs.revision" && len(s.Value) >= 8 {
+			return version + " (" + s.Value[:8] + ")"
+		}
+	}
+	return version
+}
+
+// confirm gates a destructive action. assumeYes (--yes) skips the prompt;
+// a non-interactive stdin without --yes errors instead of hanging.
+func confirm(action string, assumeYes bool) error {
+	if assumeYes {
+		return nil
+	}
+	if !stdinIsTTY() {
+		return fmt.Errorf("confirmation required; re-run with --yes")
+	}
+	fmt.Printf("%s [y/N]: ", action)
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		return fmt.Errorf("aborted")
+	}
+	switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
+	case "y", "yes":
+		return nil
+	default:
+		return fmt.Errorf("aborted")
+	}
+}
+
+// stdinIsTTY reports whether stdin is an interactive terminal; prompts are
+// only allowed when it is.
+func stdinIsTTY() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// relativeAge renders an API timestamp string as a compact age ("2h30m ago").
+// Display-only best effort: unparseable values are returned verbatim.
+func relativeAge(ts string) string {
+	s := strings.TrimSpace(ts)
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		t, err = time.ParseInLocation("2006-01-02 15:04:05", s, time.UTC)
+	}
+	if err != nil {
+		return ts
+	}
+	age := time.Since(t).Truncate(time.Minute)
+	if age < time.Minute {
+		return "just now"
+	}
+	return age.String() + " ago"
 }
 
 func formatBytes(b int64) string {

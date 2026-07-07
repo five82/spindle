@@ -22,7 +22,7 @@ var fallbackMountPaths = []string{"/media/cdrom", "/media/cdrom0"}
 // It checks (in order): the provided lsblk mount path, /proc/mounts,
 // fallback paths with disc directory structure, and finally auto-mounts.
 // If auto-mounted, the returned cleanup function unmounts the device.
-// Used by both the daemon (disc monitor) and CLI (spindle identify) to ensure
+// Used by both the daemon (disc monitor) and CLI (spindle disc identify) to ensure
 // identical fingerprint generation paths.
 func ResolveMountPoint(ctx context.Context, device, lsblkMount string, logger *slog.Logger) (mountPoint string, cleanup func(), err error) {
 	logger = logs.Default(logger)

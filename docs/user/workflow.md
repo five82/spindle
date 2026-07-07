@@ -72,7 +72,7 @@ The queue reports coarse identification progress for cleanup, scanning/metadata 
 
 If the rip cache is enabled, fresh raw rips are stored for reuse along with the identification metadata. Cached entries can be re-queued through the running daemon without inserting a disc via `spindle cache process <number>`; the item starts at ripping, restores the cache, and then runs the normal encoding/audio/subtitle/organize stages.
 
-For discs with multiple feature-length titles, use `spindle cache rip --title` while the daemon is stopped to interactively select which title to cache.
+For discs with multiple feature-length titles, use `spindle cache rip --choose` (interactive) or `spindle cache rip --title <id>` while the daemon is stopped to select which title to cache.
 
 ## Stage 4: Episode Identification (`episode_identification`)
 
@@ -117,7 +117,7 @@ When enabled, Spindle generates subtitles per encoded asset:
 
 Spindle intentionally does not use PGS subtitles as final library output. Final primary display subtitles are SRT because SRT works better with Jellyfin and downstream tooling.
 
-`spindle gensubtitle /path/to/video.mkv` generates a WhisperX English SRT for an existing encode. By default, the generated subtitle is muxed into MKV output when subtitle muxing is enabled; `--external` writes a sidecar SRT instead.
+`spindle debug subtitle /path/to/video.mkv` generates a WhisperX English SRT for an existing encode. By default, the generated subtitle is muxed into MKV output when subtitle muxing is enabled; `--external` writes a sidecar SRT instead.
 
 ## Stage 8: Organizing and Jellyfin Refresh (`organizing` -> `completed`)
 
@@ -133,7 +133,7 @@ Spindle intentionally does not use PGS subtitles as final library output. Final 
 
 ## Review vs Failed
 
-- **`failed` stage**: Something stopped progress. This includes external tool failures, read errors, validation/configuration issues, queue persistence failures, and manual stop requests (`spindle queue stop <id>`). Fix the root cause, then use `spindle queue retry <id>` to requeue. A normal stage failure records `failed_at_stage` and the retry resumes from that stage. A user stop records the review reason `Stop requested by user` and retry un-stops the item.
+- **`failed` stage**: Something stopped progress. This includes external tool failures, read errors, validation/configuration issues, queue persistence failures, and manual cancel requests (`spindle queue cancel <id>`). Fix the root cause, then use `spindle queue retry <id>` to requeue. A normal stage failure records `failed_at_stage` and the retry resumes from that stage. A user stop records the review reason `Stop requested by user` and retry un-stops the item.
 - **`needs_review` flag**: Workflow can continue but manual-review routing is enabled. For movies this means final output goes to `review_dir`. For TV, the flag is aggregate: clean resolved episodes may still land in the library while unresolved or episode-flagged outputs go to `review_dir`.
 
 ## Recovery Procedures
@@ -160,7 +160,7 @@ Files in `review_dir` need manual attention:
 2. Common reasons:
    - **Low-confidence TMDB match**: The disc title did not match well. Move the file to the correct library folder manually, or update the Blu-ray disc ID cache / KeyDB inputs and retry.
    - **Unresolved episode numbers**: Episode identification ran but could not map all episodes confidently. Check the file names and move to the correct library folder.
-   - **SRT validation review issues**: Subtitles may have quality problems. Review the SRT file and fix or regenerate with `spindle gensubtitle`. Routine below-threshold QC observations do not route items to review.
+   - **SRT validation review issues**: Subtitles may have quality problems. Review the SRT file and fix or regenerate with `spindle debug subtitle`. Routine below-threshold QC observations do not route items to review.
 3. After manually organizing files, clear the completed item while the daemon is running: `spindle queue clear <id>`.
 
 ### Stuck items
@@ -171,9 +171,9 @@ If items appear stuck (in-progress but not advancing):
 2. If the daemon crashed, restart it: `spindle start`. Stale in-progress items are automatically recovered on startup.
 3. If you want to discard the transient queue while the daemon is stopped, run `spindle queue clear --all`. This deletes only the queue DB files, not staging or media outputs.
 
-### Stopping an item
+### Canceling an item
 
-`spindle queue stop <id>` marks the item as failed with a user-stop review reason. The item will not be automatically reprocessed even if the same disc is re-inserted. Use `spindle queue retry <id>` to un-stop it.
+`spindle queue cancel <id>` marks the item as failed with a user-stop review reason. The item will not be automatically reprocessed even if the same disc is re-inserted. Use `spindle queue retry <id>` to un-cancel it.
 
 ## Monitoring and Control Tips
 
@@ -182,7 +182,7 @@ If items appear stuck (in-progress but not advancing):
 - `spindle status` - reports `Daemon stopped` when the daemon is not running; otherwise shows daemon state, dependency checks, library paths, and queue counts from the daemon API.
 - `spindle queue list` - queue inspection through the daemon API.
 - `spindle queue retry <id>` - retry failed items only.
-- `spindle queue stop <id>` - halt processing for a specific item; if already running, finalization is ignored after the stop state wins.
+- `spindle queue cancel <id>` - halt processing for a specific item; if already running, finalization is ignored after the stop state wins.
 - `spindle disc pause` / `spindle disc resume` - pause or resume detection of new discs; already-queued items continue processing.
 - `spindle staging list` / `spindle staging clean` - inspect or remove stale staging directories. Safe clean asks the daemon for active queue items; `staging clean --all` skips that daemon check, but `queue-*` fallback staging directories remain protected.
 - `spindle discid list` / `spindle discid clear` - inspect or reset the optional disc ID cache.
@@ -211,4 +211,4 @@ episodes, format subtitles, encode video, or control the queue.
 
 ## Notifications
 
-If `ntfy_topic` is set, Spindle posts compact notifications at key steps: item queued, identification completed, rip cache hit, rip completed (including drive-available notice), encoding completed, final clean completion, final review-required completion, queue backlog start/finish, and processing errors. Items routed to `review_dir` generate an explicit review-required notification rather than looking like a clean success. You can test the channel any time with `spindle test-notify`.
+If `ntfy_topic` is set, Spindle posts compact notifications at key steps: item queued, identification completed, rip cache hit, rip completed (including drive-available notice), encoding completed, final clean completion, final review-required completion, queue backlog start/finish, and processing errors. Items routed to `review_dir` generate an explicit review-required notification rather than looking like a clean success. You can test the channel any time with `spindle debug notify`.

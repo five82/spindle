@@ -10,10 +10,10 @@ import (
 	"github.com/five82/spindle/internal/auditgather"
 )
 
-func newAuditGatherCmd() *cobra.Command {
+func newQueueAuditCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "audit-gather <item-id>",
-		Short: "Gather audit artifacts for a queue item",
+		Use:   "audit <id>",
+		Short: "Gather audit artifacts for a queue item (JSON output)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := strconv.ParseInt(args[0], 10, 64)

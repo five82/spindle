@@ -25,12 +25,13 @@ import (
 )
 
 func newIdentifyCmd() *cobra.Command {
-	var device string
 	cmd := &cobra.Command{
-		Use:   "identify [device]",
-		Short: "Identify a disc and show TMDB matching details",
-		Args:  cobra.MaximumNArgs(1),
+		Use:     "identify [device]",
+		Short:   "Identify a disc and show TMDB matching details",
+		Example: "  spindle disc identify          # use the configured optical drive\n  spindle disc identify /dev/sr1",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			var device string
 			if len(args) > 0 {
 				device = args[0]
 			}
@@ -38,7 +39,7 @@ func newIdentifyCmd() *cobra.Command {
 				device = cfg.MakeMKV.OpticalDrive
 			}
 			if device == "" {
-				return fmt.Errorf("no device specified")
+				return fmt.Errorf("no device specified and no optical drive configured")
 			}
 			ctx := context.Background()
 
@@ -146,8 +147,8 @@ func newIdentifyCmd() *cobra.Command {
 				fmt.Println("Spindle will use this result for metadata.")
 				if result.Best.Overview != "" {
 					overview := result.Best.Overview
-					if !flagVerbose && len(overview) > 200 {
-						overview = overview[:200] + "..."
+					if !flagVerbose {
+						overview = truncate(overview, 200)
 					}
 					fmt.Printf("  Overview: %s\n", overview)
 				}
@@ -183,7 +184,6 @@ func newIdentifyCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&device, "device", "d", "", "Optical device path")
 	return cmd
 }
 
@@ -194,8 +194,8 @@ func newGensubtitleCmd() *cobra.Command {
 		external bool
 	)
 	cmd := &cobra.Command{
-		Use:   "gensubtitle <encoded-file>",
-		Short: "Create subtitles for an encoded media file",
+		Use:   "subtitle <encoded-file>",
+		Short: "Generate a WhisperX display subtitle for an encoded file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			file := args[0]
@@ -366,7 +366,7 @@ func formatContentDuration(secs float64) string {
 
 func newTestNotifyCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "test-notify",
+		Use:   "notify",
 		Short: "Send a test notification",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			n := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout, nil)

@@ -282,7 +282,7 @@ func (m *Manager) hasStaleWorker(itemID int64) bool {
 }
 
 // cancelStoppedWorkers cancels the workers of items the user has stopped.
-// Without this, `queue stop` only flips queue state and the stage worker
+// Without this, `queue cancel` only flips queue state and the stage worker
 // keeps running as a zombie -- and a subsequent retry can re-run earlier
 // stages (staging wipe) underneath it.
 func (m *Manager) cancelStoppedWorkers() {

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,12 +32,13 @@ import (
 
 func newCacheCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "cache",
-		Short: "Manage the rip cache",
+		Use:     "cache",
+		Short:   "Manage the rip cache",
+		GroupID: groupDisc,
 	}
 	cmd.AddCommand(
 		newCacheRipCmd(),
-		newCacheStatsCmd(),
+		newCacheListCmd(),
 		newCacheProcessCmd(),
 		newCacheRemoveCmd(),
 		newCacheClearCmd(),
@@ -45,17 +47,25 @@ func newCacheCmd() *cobra.Command {
 }
 
 func newCacheRipCmd() *cobra.Command {
-	var device string
-	var selectTitle bool
+	var titleID int
+	var chooseTitle bool
 	cmd := &cobra.Command{
 		Use:   "rip [device]",
 		Short: "Rip a disc into the rip cache",
-		Args:  cobra.MaximumNArgs(1),
+		Example: `  spindle cache rip               # rip from the configured optical drive
+  spindle cache rip /dev/sr1
+  spindle cache rip --title 2     # rip only title 2
+  spindle cache rip --choose      # pick the title interactively`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			lp, sp := lockPath(), socketPath()
 			if daemonctl.IsRunning(lp, sp) {
 				return fmt.Errorf("cannot rip while daemon is running")
 			}
+			if titleID >= 0 && chooseTitle {
+				return fmt.Errorf("cannot combine --title and --choose")
+			}
+			var device string
 			if len(args) > 0 {
 				device = args[0]
 			}
@@ -63,7 +73,7 @@ func newCacheRipCmd() *cobra.Command {
 				device = cfg.MakeMKV.OpticalDrive
 			}
 			if device == "" {
-				return fmt.Errorf("no device specified")
+				return fmt.Errorf("no device specified and no optical drive configured")
 			}
 			ctx := context.Background()
 
@@ -170,9 +180,9 @@ func newCacheRipCmd() *cobra.Command {
 				return fmt.Errorf("identification: %w", err)
 			}
 
-			// Interactive title selection when --title flag is set.
+			// Title selection: --title <id> selects directly; --choose prompts.
 			titleOverride := ripper.NoTitleOverride
-			if selectTitle {
+			if titleID >= 0 || chooseTitle {
 				env, parseErr := ripspec.Parse(item.RipSpecData)
 				if parseErr != nil {
 					return fmt.Errorf("parse ripspec for title selection: %w", parseErr)
@@ -190,11 +200,27 @@ func newCacheRipCmd() *cobra.Command {
 					return fmt.Errorf("no titles above minimum duration (%ds)", cfg.MakeMKV.MinTitleLength)
 				}
 
-				if len(candidates) == 1 {
+				validIDs := make(map[int]bool, len(candidates))
+				var ids []int
+				for _, t := range candidates {
+					validIDs[t.ID] = true
+					ids = append(ids, t.ID)
+				}
+
+				switch {
+				case titleID >= 0:
+					if !validIDs[titleID] {
+						return fmt.Errorf("title %d is not a candidate; valid IDs: %v", titleID, ids)
+					}
+					titleOverride = titleID
+				case len(candidates) == 1:
 					titleOverride = candidates[0].ID
 					dur := time.Duration(candidates[0].Duration) * time.Second
 					fmt.Printf("Only one candidate title: %d (%s)\n", candidates[0].ID, dur.Truncate(time.Second))
-				} else {
+				default:
+					if !stdinIsTTY() {
+						return fmt.Errorf("--choose needs an interactive terminal; use --title <id> instead (valid IDs: %v)", ids)
+					}
 					fmt.Printf("\nCandidate titles:\n")
 					for _, t := range candidates {
 						dur := time.Duration(t.Duration) * time.Second
@@ -203,12 +229,6 @@ func newCacheRipCmd() *cobra.Command {
 							line += fmt.Sprintf(" (%s)", t.Name)
 						}
 						fmt.Println(line)
-					}
-
-					// Build lookup set for validation.
-					validIDs := make(map[int]bool, len(candidates))
-					for _, t := range candidates {
-						validIDs[t.ID] = true
 					}
 
 					fmt.Printf("\nEnter title ID to rip: ")
@@ -222,10 +242,6 @@ func newCacheRipCmd() *cobra.Command {
 						return fmt.Errorf("invalid title ID %q: %w", input, err)
 					}
 					if !validIDs[chosen] {
-						var ids []int
-						for _, t := range candidates {
-							ids = append(ids, t.ID)
-						}
 						return fmt.Errorf("title %d is not a candidate; valid IDs: %v", chosen, ids)
 					}
 					titleOverride = chosen
@@ -255,20 +271,30 @@ func newCacheRipCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&device, "device", "d", "", "Optical device path")
-	cmd.Flags().BoolVar(&selectTitle, "title", false, "Interactively select which title to rip")
+	cmd.Flags().IntVar(&titleID, "title", -1, "Rip only this title ID")
+	cmd.Flags().BoolVar(&chooseTitle, "choose", false, "Interactively select which title to rip")
 	return cmd
 }
 
-func newCacheStatsCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "stats",
-		Short: "Show cached entries",
+func newCacheListCmd() *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List cached rips",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			store := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
 			entries, err := store.List()
 			if err != nil {
 				return err
+			}
+
+			if asJSON {
+				data, err := json.MarshalIndent(entries, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(data))
+				return nil
 			}
 
 			if flagVerbose {
@@ -304,6 +330,8 @@ func newCacheStatsCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output entries as JSON")
+	return cmd
 }
 
 func cacheEntryByNumber(num int) (ripcache.EntryMetadata, error) {
@@ -413,10 +441,14 @@ func newCacheRemoveCmd() *cobra.Command {
 }
 
 func newCacheClearCmd() *cobra.Command {
-	return &cobra.Command{
+	var flagYes bool
+	cmd := &cobra.Command{
 		Use:   "clear",
 		Short: "Remove all cache entries",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if err := confirm("Remove ALL cached rips?", flagYes); err != nil {
+				return err
+			}
 			store := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
 			if err := store.Clear(); err != nil {
 				return err
@@ -425,4 +457,6 @@ func newCacheClearCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip the confirmation prompt")
+	return cmd
 }

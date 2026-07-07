@@ -12,8 +12,9 @@ import (
 
 func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "config",
-		Short: "Manage configuration",
+		Use:     "config",
+		Short:   "Manage configuration",
+		GroupID: groupMaintenance,
 	}
 	cmd.AddCommand(newConfigInitCmd(), newConfigValidateCmd())
 	return cmd
@@ -70,8 +71,7 @@ func newConfigValidateCmd() *cobra.Command {
 		Short: "Validate configuration file",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if err := cfg.Validate(); err != nil {
-				fmt.Printf("%s\n%v\n", failStyle("Config: INVALID"), err)
-				return err
+				return fmt.Errorf("config invalid: %w", err)
 			}
 			if err := cfg.EnsureDirectories(); err != nil {
 				return fmt.Errorf("ensure directories: %w", err)

@@ -17,7 +17,7 @@ const (
 )
 
 // ReviewReasonUserStopped is the review reason appended when a user manually
-// stops an item via "spindle queue stop".
+// stops an item via "spindle queue cancel".
 const ReviewReasonUserStopped = "Stop requested by user"
 
 // HumanStage returns a user-facing label for a queue stage.

@@ -39,15 +39,17 @@ func printTaskLines(indent string, tasks []httpapi.TaskResponse, verbose bool) {
 
 func newQueueCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "queue",
-		Short: "Manage the processing queue",
+		Use:     "queue",
+		Short:   "Manage the processing queue",
+		GroupID: groupQueue,
 	}
 	cmd.AddCommand(
 		newQueueListCmd(),
 		newQueueShowCmd(),
 		newQueueClearCmd(),
 		newQueueRetryCmd(),
-		newQueueStopCmd(),
+		newQueueCancelCmd(),
+		newQueueAuditCmd(),
 	)
 	return cmd
 }
@@ -74,6 +76,7 @@ func parseQueueIDs(args []string) ([]int64, error) {
 
 func newQueueListCmd() *cobra.Command {
 	var stages []string
+	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List queue items",
@@ -92,16 +95,25 @@ func newQueueListCmd() *cobra.Command {
 				return err
 			}
 
+			if asJSON {
+				data, err := json.MarshalIndent(items, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(data))
+				return nil
+			}
+
 			if len(items) == 0 {
 				fmt.Println("No queue items")
 				return nil
 			}
 
 			if flagVerbose {
-				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-40s %-24s %-20s %-20s %s", "ID", "Title", "Stage", "Created", "Updated", "Fingerprint")))
-				fmt.Println(dimStyle(strings.Repeat("-", 140)))
+				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-40s %-24s %-30s %-30s %s", "ID", "Title", "Stage", "Created", "Updated", "Fingerprint")))
+				fmt.Println(dimStyle(strings.Repeat("-", 160)))
 				for _, item := range items {
-					fmt.Printf("%-6d %-40s %-24s %-20s %-20s %s\n",
+					fmt.Printf("%-6d %-40s %-24s %-30s %-30s %s\n",
 						item.ID,
 						item.DiscTitle,
 						item.Stage,
@@ -115,18 +127,18 @@ func newQueueListCmd() *cobra.Command {
 					}
 				}
 			} else {
-				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-30s %-24s %-20s %-14s", "ID", "Title", "Stage", "Created", "Fingerprint")))
-				fmt.Println(dimStyle(strings.Repeat("-", 96)))
+				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-30s %-24s %-16s %-14s", "ID", "Title", "Stage", "Created", "Fingerprint")))
+				fmt.Println(dimStyle(strings.Repeat("-", 92)))
 				for _, item := range items {
 					fp := item.DiscFingerprint
 					if len(fp) > 12 {
 						fp = fp[:12]
 					}
-					fmt.Printf("%-6d %-30s %-24s %-20s %-14s\n",
+					fmt.Printf("%-6d %-30s %-24s %-16s %-14s\n",
 						item.ID,
 						truncate(item.DiscTitle, 28),
 						item.Stage,
-						item.CreatedAt,
+						relativeAge(item.CreatedAt),
 						fp,
 					)
 				}
@@ -135,11 +147,13 @@ func newQueueListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringSliceVarP(&stages, "stage", "s", nil, "Filter by queue stage (repeatable)")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output items as JSON")
 	return cmd
 }
 
 func newQueueShowCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "show <id>",
 		Short: "Show detailed information for a queue item",
 		Args:  cobra.ExactArgs(1),
@@ -161,7 +175,7 @@ func newQueueShowCmd() *cobra.Command {
 				return fmt.Errorf("queue item %d not found", id)
 			}
 
-			if flagJSON {
+			if asJSON {
 				data, err := json.MarshalIndent(item, "", "  ")
 				if err != nil {
 					return err
@@ -198,13 +212,18 @@ func newQueueShowCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the item as JSON")
+	return cmd
 }
 
 func newQueueClearCmd() *cobra.Command {
-	var flagAll, flagCompleted bool
+	var flagAll, flagCompleted, flagYes bool
 	cmd := &cobra.Command{
 		Use:   "clear [id...]",
 		Short: "Remove queue items",
+		Example: `  spindle queue clear 3 5        # remove specific items
+  spindle queue clear --completed
+  spindle queue clear --all --yes`,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if flagAll && flagCompleted {
 				return fmt.Errorf("cannot combine --all and --completed")
@@ -214,6 +233,12 @@ func newQueueClearCmd() *cobra.Command {
 			}
 			if len(args) == 0 && !flagAll && !flagCompleted {
 				return fmt.Errorf("provide item IDs, --all, or --completed")
+			}
+
+			if flagAll {
+				if err := confirm("Remove ALL queue items?", flagYes); err != nil {
+					return err
+				}
 			}
 
 			if flagAll && !daemonctl.IsRunning(lockPath(), socketPath()) {
@@ -248,18 +273,24 @@ func newQueueClearCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			failed := 0
 			for _, id := range ids {
 				if _, err := acc.Remove(id); err != nil {
+					failed++
 					fmt.Fprintf(os.Stderr, "%s could not remove item %d: %v\n", warnStyle("Warning:"), id, err)
 				} else {
 					fmt.Println(successStyle(fmt.Sprintf("Removed item %d", id)))
 				}
+			}
+			if failed > 0 {
+				return fmt.Errorf("failed to remove %d of %d item(s)", failed, len(ids))
 			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&flagAll, "all", false, "Remove all items")
 	cmd.Flags().BoolVar(&flagCompleted, "completed", false, "Remove only completed items")
+	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip the confirmation prompt")
 	return cmd
 }
 
@@ -268,6 +299,9 @@ func newQueueRetryCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "retry [id...]",
 		Short: "Retry failed queue items",
+		Example: `  spindle queue retry                    # retry all failed items
+  spindle queue retry 5                  # retry item 5
+  spindle queue retry 5 --episode s01e05 # retry one episode of item 5`,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if episode != "" && len(args) != 1 {
 				return fmt.Errorf("--episode requires exactly one item ID")
@@ -332,10 +366,10 @@ func newQueueRetryCmd() *cobra.Command {
 	return cmd
 }
 
-func newQueueStopCmd() *cobra.Command {
+func newQueueCancelCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "stop <id...>",
-		Short: "Stop processing for specific queue items",
+		Use:   "cancel <id...>",
+		Short: "Cancel processing for specific queue items",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			acc, err := openQueueAccess()
@@ -351,7 +385,7 @@ func newQueueStopCmd() *cobra.Command {
 			if _, err := acc.Stop(ids...); err != nil {
 				return err
 			}
-			fmt.Println(successStyle(fmt.Sprintf("Stopped %d item(s)", len(ids))))
+			fmt.Println(successStyle(fmt.Sprintf("Canceled %d item(s); use 'spindle queue retry' to resume", len(ids))))
 			return nil
 		},
 	}

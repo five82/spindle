@@ -21,10 +21,16 @@ import (
 
 func newDebugCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "debug",
-		Short: "Diagnostic tools",
+		Use:     "debug",
+		Short:   "Diagnostic tools",
+		GroupID: groupDiagnostics,
 	}
-	cmd.AddCommand(newDebugCropCmd(), newDebugCommentaryCmd())
+	cmd.AddCommand(
+		newDebugCropCmd(),
+		newDebugCommentaryCmd(),
+		newGensubtitleCmd(),
+		newTestNotifyCmd(),
+	)
 	return cmd
 }
 
@@ -258,8 +264,11 @@ func newDebugCommentaryCmd() *cobra.Command {
 				nil,
 			)
 
-			// Use a synthetic fingerprint for cache keys.
-			debugFP := textutil.SanitizePathSegment(filepath.Base(path))
+			workDir, err := os.MkdirTemp("", "spindle-debug-commentary-*")
+			if err != nil {
+				return fmt.Errorf("create work dir: %w", err)
+			}
+			defer func() { _ = os.RemoveAll(workDir) }()
 
 			fmt.Printf("\n%s\n", headerStyle("=== Commentary Analysis ==="))
 			fmt.Printf("%s %.3f\n", labelStyle("Similarity threshold:"), cfg.Commentary.SimilarityThreshold)
@@ -280,7 +289,7 @@ func newDebugCommentaryCmd() *cobra.Command {
 					InputPath:  path,
 					AudioIndex: 0,
 					Language:   "en",
-					OutputDir:  fmt.Sprintf("/tmp/spindle-debug-commentary-%s-0", debugFP),
+					OutputDir:  filepath.Join(workDir, "audio-0"),
 				})
 				if pErr != nil {
 					logger.Warn("primary transcription failed", "error", pErr)
@@ -292,7 +301,7 @@ func newDebugCommentaryCmd() *cobra.Command {
 					InputPath:  path,
 					AudioIndex: candidateAudioIdx,
 					Language:   "en",
-					OutputDir:  fmt.Sprintf("/tmp/spindle-debug-commentary-%s-%d", debugFP, candidateAudioIdx),
+					OutputDir:  filepath.Join(workDir, fmt.Sprintf("audio-%d", candidateAudioIdx)),
 				})
 				if cErr != nil {
 					logger.Warn("candidate transcription failed", "error", cErr)

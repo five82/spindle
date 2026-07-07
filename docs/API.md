@@ -22,22 +22,22 @@ spindle queue list
 spindle queue show <id>
 spindle queue retry [id...]
 spindle queue retry --episode s01e05 <id>
-spindle queue stop <id...>
+spindle queue cancel <id...>
 spindle queue clear <id...>
 spindle queue clear --completed
 spindle queue clear --all
+spindle queue audit <id>
 spindle disc pause
 spindle disc resume
 spindle disc detect
+spindle disc identify [device]
 ```
 
 Utility and recovery commands:
 
 ```bash
-spindle identify [device]
-spindle gensubtitle <encoded-file>
-spindle cache rip [--title] [device]
-spindle cache stats
+spindle cache rip [--title <id> | --choose] [device]
+spindle cache list
 spindle cache process <number>
 spindle cache remove <number>
 spindle cache clear
@@ -46,21 +46,27 @@ spindle staging clean [--all]
 spindle discid list
 spindle discid remove <number>
 spindle discid clear
-spindle audit-gather <item-id>
-spindle test-notify
 spindle debug crop <entry-or-path>
 spindle debug commentary <entry-or-path>
+spindle debug subtitle <encoded-file>
+spindle debug notify
 ```
+
+Machine-readable output: `--json` is available on `status`, `queue list`,
+`queue show`, `cache list`, `staging list`, and `discid list`. `queue audit`
+always emits JSON. Destructive bulk commands (`queue clear --all`,
+`cache clear`, `discid clear`, `staging clean --all`) prompt for confirmation
+on a terminal and require `--yes` when run non-interactively.
 
 Operational notes:
 
 - Most commands load and validate config first; use `spindle config init` to
   create the sample config. See [CONFIG.md](CONFIG.md).
-- Queue list/show/retry/clear/stop commands use the daemon HTTP API.
+- Queue list/show/retry/clear/cancel commands use the daemon HTTP API.
 - Queue commands require a running daemon except `spindle queue clear --all`,
   which may be used while the daemon is stopped to delete the transient queue DB
   files.
-- `spindle audit-gather` also requires the daemon because it fetches the queue
+- `spindle queue audit` also requires the daemon because it fetches the queue
   item through the API before gathering artifacts.
 - `spindle staging clean` requires the daemon unless `--all` is supplied,
   because the safe mode asks the daemon for active queue fingerprints. The
@@ -79,8 +85,9 @@ Operational notes:
 - `spindle cache rip` refuses to run while the daemon is running because it uses
   the optical drive directly; the disc must already be mounted.
 
-Global flags include `--config`/`-c`, `--socket`, `--log-level`,
-`--verbose`/`-v`, and `--json` where supported by a command.
+Global flags include `--config`/`-c`, `--socket`, `--log-level`, and
+`--verbose`/`-v`. `--json` is a per-command flag on the listing/status
+commands noted above.
 
 See [user/workflow.md](user/workflow.md) for the operator lifecycle and recovery
 procedures.

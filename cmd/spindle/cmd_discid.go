@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -11,15 +12,17 @@ import (
 
 func newDiscIDCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "discid",
-		Short: "Manage the disc ID cache",
+		Use:     "discid",
+		Short:   "Manage the disc ID cache",
+		GroupID: groupMaintenance,
 	}
 	cmd.AddCommand(newDiscIDListCmd(), newDiscIDRemoveCmd(), newDiscIDClearCmd())
 	return cmd
 }
 
 func newDiscIDListCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List cached disc ID mappings",
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -28,6 +31,16 @@ func newDiscIDListCmd() *cobra.Command {
 				return err
 			}
 			entries := store.List()
+
+			if asJSON {
+				data, err := json.MarshalIndent(entries, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(data))
+				return nil
+			}
+
 			if len(entries) == 0 {
 				fmt.Println("No disc ID cache entries")
 				return nil
@@ -49,6 +62,8 @@ func newDiscIDListCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output entries as JSON")
+	return cmd
 }
 
 func newDiscIDRemoveCmd() *cobra.Command {
@@ -82,10 +97,14 @@ func newDiscIDRemoveCmd() *cobra.Command {
 }
 
 func newDiscIDClearCmd() *cobra.Command {
-	return &cobra.Command{
+	var flagYes bool
+	cmd := &cobra.Command{
 		Use:   "clear",
 		Short: "Remove all disc ID cache entries",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if err := confirm("Remove ALL disc ID cache entries?", flagYes); err != nil {
+				return err
+			}
 			store, err := discidcache.Open(cfg.DiscIDCachePath(), nil)
 			if err != nil {
 				return err
@@ -97,4 +116,6 @@ func newDiscIDClearCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip the confirmation prompt")
+	return cmd
 }
