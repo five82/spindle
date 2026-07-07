@@ -2,6 +2,7 @@ package queue
 
 import (
 	"testing"
+	"time"
 )
 
 var testSpecs = []TaskSpec{
@@ -313,5 +314,44 @@ func TestEnsureTasksRejectsForwardDependency(t *testing.T) {
 	}
 	if err := store.EnsureTasks(item, bad); err == nil {
 		t.Fatal("expected error for forward dependency")
+	}
+}
+
+// The sqlite driver surfaces TIMESTAMP columns as time.Time, which
+// database/sql renders into string fields as RFC3339Nano; raw SQLite
+// CURRENT_TIMESTAMP strings are the fallback form. Both must parse, or
+// task durations and item lifetimes silently vanish from logs and the
+// item-scoped log clamp.
+func TestTaskDurationParsesBothTimestampFormats(t *testing.T) {
+	rfc := Task{StartedAt: "2026-07-06T16:45:23.5Z", FinishedAt: "2026-07-06T16:46:23.5Z"}
+	if d, ok := rfc.Duration(); !ok || d != time.Minute {
+		t.Fatalf("RFC3339Nano timestamps: got %v, %v; want 1m0s, true", d, ok)
+	}
+	sqlite := Task{StartedAt: "2026-07-06 16:45:23", FinishedAt: "2026-07-06 16:46:23"}
+	if d, ok := sqlite.Duration(); !ok || d != time.Minute {
+		t.Fatalf("SQLite timestamps: got %v, %v; want 1m0s, true", d, ok)
+	}
+	missing := Task{StartedAt: "2026-07-06 16:45:23"}
+	if _, ok := missing.Duration(); ok {
+		t.Fatal("missing finished_at should not produce a duration")
+	}
+	garbage := Task{StartedAt: "garbage", FinishedAt: "garbage"}
+	if _, ok := garbage.Duration(); ok {
+		t.Fatal("unparseable timestamps should not produce a duration")
+	}
+}
+
+func TestItemCreatedTimeFromStore(t *testing.T) {
+	store := openTestStore(t)
+	item, err := store.NewDisc("A", "fp-created")
+	if err != nil {
+		t.Fatalf("new disc: %v", err)
+	}
+	created, ok := item.CreatedTime()
+	if !ok {
+		t.Fatalf("CreatedTime failed to parse store-produced value %q", item.CreatedAt)
+	}
+	if age := time.Since(created); age < 0 || age > time.Hour {
+		t.Fatalf("CreatedTime %v implausible for a just-created item", created)
 	}
 }

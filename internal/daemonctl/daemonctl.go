@@ -24,7 +24,10 @@ var ErrDaemonNotRunning = fmt.Errorf("daemon is not running")
 type StartOptions struct {
 	LockPath   string
 	SocketPath string
-	LogPath    string // Daemon stderr is redirected here.
+	// LogPath receives the daemon's stdout/stderr (panic and pre-logging
+	// output only -- the daemon writes its real log itself). It is truncated
+	// on every start so it never masquerades as a durable log.
+	LogPath    string
 	ConfigFlag string // If non-empty, passed as --config to the daemon.
 }
 
@@ -75,9 +78,9 @@ func Start(opts StartOptions) error {
 		return fmt.Errorf("create log directory: %w", err)
 	}
 
-	logFile, err := os.OpenFile(opts.LogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := os.OpenFile(opts.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
-		return fmt.Errorf("open daemon log: %w", err)
+		return fmt.Errorf("open daemon console log: %w", err)
 	}
 
 	cmd := exec.Command(exe, args...)

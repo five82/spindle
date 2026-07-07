@@ -22,6 +22,11 @@ type Client struct {
 func New(url, apiKey string, logger *slog.Logger) *Client {
 	logger = logs.Default(logger)
 	if url == "" || apiKey == "" {
+		logger.Info("jellyfin integration disabled",
+			"decision_type", logs.DecisionIntegrationConfig,
+			"decision_result", "disabled",
+			"decision_reason", "jellyfin url or api key not configured",
+		)
 		return nil
 	}
 	return &Client{

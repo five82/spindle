@@ -73,6 +73,12 @@ type Manager struct {
 	// dispatch policy allows at most one live worker per item.
 	runningMu sync.Mutex
 	running   map[int64]map[int64]context.CancelFunc
+
+	// blocked tracks when each ready task first failed to reserve its
+	// resource claims, so resource waits are logged once on entry and once
+	// with the wait duration on grant, not on every scheduler pass.
+	blockedMu sync.Mutex
+	blocked   map[int64]time.Time
 }
 
 // New creates a workflow manager. statusTracker may be nil.
@@ -84,6 +90,7 @@ func New(store *queue.Store, notifier *notify.Notifier, statusTracker *httpapi.S
 		persistenceFailures: make(chan error, 1),
 		wake:                make(chan struct{}, 1),
 		running:             make(map[int64]map[int64]context.CancelFunc),
+		blocked:             make(map[int64]time.Time),
 		pipeline: &pipelineState{
 			logger: logs.Default(logger),
 		},
@@ -393,6 +400,20 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		return
 	}
 
+	// Drop blocked-wait state for tasks that left the ready set (stopped,
+	// retried, or dispatched by an earlier pass).
+	readyIDs := make(map[int64]struct{}, len(ready))
+	for _, task := range ready {
+		readyIDs[task.ID] = struct{}{}
+	}
+	m.blockedMu.Lock()
+	for id := range m.blocked {
+		if _, ok := readyIDs[id]; !ok {
+			delete(m.blocked, id)
+		}
+	}
+	m.blockedMu.Unlock()
+
 	for _, task := range ready {
 		if ctx.Err() != nil {
 			return
@@ -427,8 +448,10 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		}
 		holder := httpapi.ResourceHolder{ItemID: item.ID, Task: string(task.Type)}
 		if !m.reserve(claims, holder) {
+			m.noteTaskBlocked(task, claims)
 			continue
 		}
+		m.noteTaskGranted(task, claims)
 
 		// Mark in_progress for the first worker of an overlap window;
 		// sibling branches already hold the flag.
@@ -476,18 +499,64 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 			defer m.signalWake()
 			defer m.release(claims, holder)
 			defer cancelTask()
-			m.runTask(taskCtx, task, item, ps)
+			m.runTask(taskCtx, task, item, ps, claims)
 			m.untrackWorker(item.ID, task.ID)
 			m.finalizeItem(item.ID)
 		}(task, &itemCopy, ps, claims, holder, taskCtx, cancelTask)
 	}
 }
 
+// noteTaskBlocked records and logs the first scheduler pass on which a ready
+// task could not reserve its resource claims. Subsequent passes stay silent
+// until the claim is granted.
+func (m *Manager) noteTaskBlocked(task *queue.Task, claims map[string]int) {
+	m.blockedMu.Lock()
+	_, seen := m.blocked[task.ID]
+	if !seen {
+		m.blocked[task.ID] = time.Now()
+	}
+	m.blockedMu.Unlock()
+	if seen {
+		return
+	}
+	m.pipeline.logger.Info("task waiting for resources",
+		"decision_type", logs.DecisionStageExecution,
+		"decision_result", "blocked",
+		"decision_reason", "resource claims exceed available budget",
+		"item_id", task.ItemID,
+		"stage", task.Type,
+		"claims", logs.FormatCounts(claims),
+	)
+}
+
+// noteTaskGranted logs the wait duration for a task that was previously
+// blocked on resources; tasks that reserved on their first pass stay silent.
+func (m *Manager) noteTaskGranted(task *queue.Task, claims map[string]int) {
+	m.blockedMu.Lock()
+	since, ok := m.blocked[task.ID]
+	if ok {
+		delete(m.blocked, task.ID)
+	}
+	m.blockedMu.Unlock()
+	if !ok {
+		return
+	}
+	m.pipeline.logger.Info("task resources granted",
+		"decision_type", logs.DecisionStageExecution,
+		"decision_result", "unblocked",
+		"decision_reason", "resource claims now fit budget",
+		"item_id", task.ItemID,
+		"stage", task.Type,
+		"claims", logs.FormatCounts(claims),
+		"waited", time.Since(since).Round(time.Millisecond).String(),
+	)
+}
+
 // runTask executes one task via the stage handler and records its terminal
 // state. Cancellation, user stops, and persistence failures revert the task
 // to pending: the item-level filters decide whether it ever runs again.
-func (m *Manager) runTask(ctx context.Context, task *queue.Task, item *queue.Item, ps PipelineStage) {
-	outcome := m.processItem(ctx, task, item, ps)
+func (m *Manager) runTask(ctx context.Context, task *queue.Task, item *queue.Item, ps PipelineStage, claims map[string]int) {
+	outcome := m.processItem(ctx, task, item, ps, claims)
 
 	var state, errMsg string
 	switch outcome {
@@ -521,7 +590,7 @@ const (
 // processItem executes a single stage handler for an item and reports the
 // outcome. Item-level persistence (advance, failure, review, notifications)
 // happens here; task-level bookkeeping is the scheduler caller's job.
-func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue.Item, ps PipelineStage) itemOutcome {
+func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue.Item, ps PipelineStage, claims map[string]int) itemOutcome {
 	p := m.pipeline
 
 	itemLogger := p.logger.With("item_id", item.ID)
@@ -531,6 +600,7 @@ func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue
 		"decision_result", "started",
 		"decision_reason", fmt.Sprintf("item %d ready for %s", item.ID, ps.Stage),
 		"stage", ps.Stage,
+		"claims", logs.FormatCounts(claims),
 	)
 	m.maybeStartQueueCycle(ctx, itemLogger)
 
@@ -558,7 +628,7 @@ func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue
 			"decision_result", "user_stopped",
 			"decision_reason", "item was explicitly stopped before stage finalization",
 			"stage", ps.Stage,
-			"stage_duration", res.Duration,
+			"stage_duration", logs.FormatDuration(res.Duration),
 		)
 		m.maybeCompleteQueueCycle(ctx, itemLogger)
 		return outcomeStopped
@@ -587,7 +657,7 @@ func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue
 			"error_hint", res.DegradedMsg,
 			"impact", "continuing to next stage",
 			"stage", ps.Stage,
-			"stage_duration", res.Duration,
+			"stage_duration", logs.FormatDuration(res.Duration),
 		)
 	}
 
@@ -596,7 +666,7 @@ func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue
 		"decision_result", "completed",
 		"event_type", "stage_complete",
 		"stage", ps.Stage,
-		"stage_duration", res.Duration,
+		"stage_duration", logs.FormatDuration(res.Duration),
 	)
 
 	if m.statusTracker != nil {
@@ -664,13 +734,39 @@ func (m *Manager) finalizeItem(itemID int64) {
 			"completion_persist_failed", "failed to persist derived stage", itemID)
 		return
 	}
-	p.logger.Info("item stage derived",
+	p.logger.Debug("item stage derived",
 		"decision_type", logs.DecisionStageExecution,
 		"decision_result", "advanced",
 		"decision_reason", fmt.Sprintf("earliest incomplete task is %s", derived),
 		"item_id", itemID,
 		"stage", derived,
 	)
+	if derived == queue.StageCompleted {
+		m.logItemCompleted(item, tasks)
+	}
+}
+
+// logItemCompleted emits the one-line lifecycle summary for an item whose
+// every task finished: per-stage wall times plus the end-to-end total, so a
+// completed run can be judged from a single log line.
+func (m *Manager) logItemCompleted(item *queue.Item, tasks []*queue.Task) {
+	attrs := []any{
+		"decision_type", logs.DecisionStageExecution,
+		"decision_result", "completed",
+		"event_type", "item_complete",
+		"item_id", item.ID,
+		"title", item.DisplayTitle(),
+		"needs_review", item.NeedsReview == 1,
+	}
+	if created, ok := item.CreatedTime(); ok {
+		attrs = append(attrs, "total_wall_time", time.Since(created).Round(time.Second).String())
+	}
+	for _, t := range tasks {
+		if d, ok := t.Duration(); ok {
+			attrs = append(attrs, string(t.Type)+"_duration", d.Round(time.Second).String())
+		}
+	}
+	m.pipeline.logger.Info("item completed", attrs...)
 }
 
 // recordStageFailure records status/notification state after stage execution
@@ -684,7 +780,7 @@ func (m *Manager) recordStageFailure(ctx context.Context, item *queue.Item, err 
 		"error_hint", ps.Stage,
 		"error", err,
 		"stage", ps.Stage,
-		"stage_duration", duration,
+		"stage_duration", logs.FormatDuration(duration),
 	)
 
 	if m.statusTracker != nil {
@@ -694,7 +790,6 @@ func (m *Manager) recordStageFailure(ctx context.Context, item *queue.Item, err 
 	title := fmt.Sprintf("Failed: %s during %s", item.DisplayTitle(), queue.HumanStage(ps.Stage))
 	msg := fmt.Sprintf("Processing stopped.\nStage: %s\nReason: %s\nItem ID: %d", queue.HumanStage(ps.Stage), err.Error(), item.ID)
 	_ = notify.SendLogged(ctx, m.notifier, itemLogger, notify.EventError, title, msg,
-		"item_id", item.ID,
 		"stage", ps.Stage,
 	)
 
@@ -718,7 +813,6 @@ func (m *Manager) reportPersistenceFailure(logger *slog.Logger, err error, event
 		_ = notify.SendLogged(context.Background(), m.notifier, logger, notify.EventError,
 			"Workflow paused: queue persistence failed",
 			fmt.Sprintf("Spindle could not persist queue state and stopped workflow processing to avoid untracked side effects.\nItem ID: %d\nReason: %s", itemID, err.Error()),
-			"item_id", itemID,
 			"source_event_type", eventType,
 		)
 	})

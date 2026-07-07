@@ -79,7 +79,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return nil
 	}
 
-	logger.Info("episode identification stage started", "event_type", "stage_start", "stage", "episode_identification")
+	logger.Debug("episode identification stage started", "event_type", "stage_start", "stage", "episode_identification")
 	logger.Info("episode identification plan",
 		"event_type", "episode_identification_plan",
 		"episodes", len(env.Episodes),
@@ -186,7 +186,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	_ = sess.Progress(95, "Phase 3/3 - Episode identification complete", stage.WithActiveEpisode(""))
 
-	logger.Info("episode identification stage completed",
+	logger.Debug("episode identification stage completed",
 		"event_type", "stage_complete",
 		"stage", "episode_identification",
 		"transcribed_episodes", len(ripPrints),
@@ -245,6 +245,20 @@ func (h *Handler) matchEpisodes(
 		"contested_rips", resolution.ContestedCount,
 		"suspect_references", resolution.SuspectReferenceCount,
 	)
+	for ripKey, claims := range resolution.PendingByRip {
+		for rank, claim := range claims {
+			logger.Debug("content ID pending claim",
+				"episode_key", ripKey,
+				"rank", rank+1,
+				"candidate_episode", claim.TargetEpisode,
+				"score", claim.Score,
+				"weighted_score", claim.WeightedScore,
+				"raw_score", claim.RawScore,
+				"confidence", claim.Confidence,
+				"confidence_quality", claim.ConfidenceQuality,
+			)
+		}
+	}
 
 	matches := append([]matchResult(nil), resolution.Accepted...)
 	verifiedMatches, remainingPending, verifyResult := verifyMatches(ctx, h.llmClient, matches, resolution.PendingByRip, ripPrints, refs, logger)
@@ -272,7 +286,7 @@ func (h *Handler) matchEpisodes(
 	for _, key := range resolution.RipsWithoutClaims {
 		noClaimRips[strings.ToLower(key)] = struct{}{}
 	}
-	h.applyMatches(logger, env, seasonNum, season, matches, sess, noClaimRips)
+	h.applyMatches(logger, env, seasonNum, season, matches, sess, noClaimRips, remainingPending)
 
 	// Structural gaps are checked on the envelope after opening-double
 	// correction so a legitimately renumbered E1-E2 opener is not flagged. A
@@ -445,10 +459,15 @@ func (h *Handler) applyMatches(
 	matches []matchResult,
 	sess *stage.Session,
 	noClaimRips map[string]struct{},
+	pending map[string][]matchResult,
 ) {
 	matchMap := make(map[string]matchResult, len(matches))
 	for _, m := range matches {
 		matchMap[strings.ToLower(m.EpisodeKey)] = m
+	}
+	pendingByKey := make(map[string][]matchResult, len(pending))
+	for key, claims := range pending {
+		pendingByKey[strings.ToLower(key)] = claims
 	}
 
 	episodeDetails := make(map[int]tmdb.Episode, len(season.Episodes))
@@ -476,6 +495,29 @@ func (h *Handler) applyMatches(
 			} else {
 				unresolvedCount++
 				ep.AppendReviewReason("Episode ID: unresolved")
+				attrs := []any{
+					"decision_type", logs.DecisionEpisodeMatch,
+					"decision_result", fmt.Sprintf("%s -> unresolved", ep.Key),
+					"decision_reason", "no claim met acceptance policy",
+					"episode_key", ep.Key,
+					"title_id", ep.TitleID,
+				}
+				if claims := pendingByKey[strings.ToLower(ep.Key)]; len(claims) > 0 {
+					best := claims[0]
+					attrs = append(attrs,
+						"best_candidate_episode", best.TargetEpisode,
+						"best_candidate_score", best.Score,
+						"best_candidate_confidence", best.Confidence,
+						"best_candidate_quality", best.ConfidenceQuality,
+					)
+					if len(claims) > 1 {
+						attrs = append(attrs,
+							"runner_up_episode", claims[1].TargetEpisode,
+							"runner_up_score", claims[1].Score,
+						)
+					}
+				}
+				logger.Info("rip unresolved by content ID", attrs...)
 			}
 			continue
 		}

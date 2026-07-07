@@ -29,14 +29,14 @@ var yearPattern = regexp.MustCompile(`(?:\b|_)((19|20)\d{2})(?:\b|_|$)`)
 
 // studioPrefixes maps lowercase prefixes to full studio names.
 var studioPrefixes = map[string]string{
-	"sony":       "Sony Pictures",
-	"warner":     "Warner Bros.",
-	"universal":  "Universal Pictures",
-	"disney":     "Walt Disney Studios",
-	"paramount":  "Paramount Pictures",
-	"mgm":        "Metro-Goldwyn-Mayer",
-	"fox":        "20th Century Studios",
-	"lionsgate":  "Lionsgate",
+	"sony":      "Sony Pictures",
+	"warner":    "Warner Bros.",
+	"universal": "Universal Pictures",
+	"disney":    "Walt Disney Studios",
+	"paramount": "Paramount Pictures",
+	"mgm":       "Metro-Goldwyn-Mayer",
+	"fox":       "20th Century Studios",
+	"lionsgate": "Lionsgate",
 }
 
 // RunBDInfo executes bd_info on the given device and returns parsed results.

@@ -131,7 +131,9 @@ Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `lo
    - Unexpected fallbacks (encoding retries)
    - Decisions that contradict expected behavior for the content type
    - Filter by `decision_type` to find specific categories (`commentary_classification`, `tmdb_match`, etc.)
-   - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=duplicate_detection` (duplicate guard), `decision_type=episode_id_skip` (episode-ID skips)
+   - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=duplicate_detection` (duplicate guard), `decision_type=episode_id_skip` (episode-ID skips), `decision_type=rip_cache` (hit/miss/incomplete — misses log explicitly)
+   - Movie title selection: `decision_type=title_selection_funnel` records each elimination stage (rule, `candidates_before/after`, `eliminated_title_ids`, `evidence` with the threshold values); the winner is the `decision_type=title_selection` "primary title decision" line. When the wrong cut/title was picked, the funnel shows which rule eliminated the right one.
+   - Scheduler resource waits: `decision_type=stage_execution` with `decision_result=blocked` / `unblocked` shows a task waiting on GPU/drive/encode-tier claims (`claims` attr) and the `waited` duration on grant. "stage started" lines also carry the resolved `claims` (so GPU-for-TV and encode-tier choices are visible per dispatch).
    - Warnings/errors include `extras` maps with non-standard log fields for diagnostic context; decisions use structured fields only (full log lines available at `logs.path`)
 
 2. **Timing/progress anomalies** (from `logs.stages` and `logs.events`):
@@ -139,6 +141,9 @@ Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `lo
    - Large gaps between stage events suggesting hangs
    - Repeated retry attempts
    - Use `logs.events` for long-running work visibility: `encoding_progress`, `rip_progress`, `copy_progress`, `transcription_extract[_complete]`, `transcription_whisperx[_complete]`, `commentary_llm_start/_complete`, `mux_start/_complete`, `jellyfin_refresh_start`, and plan events such as `*_plan`
+   - Encode lifecycle events (2026-07-06+): `encode_init` (input resolution/dynamic range), `encoder_config` (preset/quality and full `svtav1_params` — check level/mbr cap here for playback-compat questions), `encoding_substage` (reel pipeline phase: chunking/encoding/merging/muxing), `encode_result` (sizes, wall time, speed). `encoding_progress` carries `bitrate` and `chunks_complete/chunks_total` (no `fps` field anymore — it was always 0).
+   - Item lifecycle: `event_type=item_complete` is the one-line completion summary (per-stage `<stage>_duration` attrs plus `total_wall_time`); `event_type=operator_action` records user-initiated retry/stop/remove/clear/disc-pause; `event_type=startup_queue_state` shows what a daemon restart resumed.
+   - Level layout (2026-07-06+): handler-level `stage_start`/`stage_complete` events and "item stage derived" are DEBUG (still present in the log file and in gather output); the INFO narrative is the workflow "stage started/completed" pair, whose `stage_duration` is a human-readable Go duration string (older logs carry raw nanoseconds; gather parses both).
    - Transcription is BATCHED: expect one `transcription_whisperx[_complete]` pair per batch (with a `batch_files` extra), not one per episode; `transcription_extract` still fires per file. A missing per-episode WhisperX event is not an anomaly.
    - Episode-ID reference fetching runs CONCURRENTLY with transcription (`decision_result=fetch_overlapped`), so OpenSubtitles and WhisperX log lines legitimately interleave — do not flag the interleaving as disorder.
    - Rip-cache restores and stores hardlink when cache and staging share a filesystem: near-instant `copy_progress` (a single jump to 100%) is expected, not a truncated copy.
@@ -160,6 +165,8 @@ Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `lo
    - `event_type=episode_id_no_transcripts` or item review/error messages about missing references — degraded episode-ID failures
    - `event_type=low_confidence_match` — episodes with `MatchConfidence` below 0.70
    - `decision_type=contentid_matches` — final episode-to-reference matching results; compare `ambiguous_rips`, `decisive_low_similarity_rips`, and `contested_rips`
+   - `decision_type=episode_match` with `decision_result=<key> -> unresolved` — per-rip unresolved lines carry `best_candidate_episode/score/confidence` and runner-up; the full pending-claim matrix is at DEBUG (`content ID pending claim`)
+   - TV title exclusions carry their evidence: `outlier_bar_seconds`/`weighted_median_seconds` on `gross_runtime_outlier`, `expected_runtimes_seconds` on `expected_runtime_mismatch`/`over_expected_episode_count` — compare the excluded title's `duration` against these to judge the exclusion
    - `decision_type=reference_search` — reference subtitle candidate quality and suspect/fallback selections
    - Asset keys are PERMANENT placeholder identifiers (stable-key model, 2026-07-04): `episodeid` never renames `s01_001`-style keys. Episode identity lives in `envelope.episodes[]` fields (`season`, `episode`, `episode_end`) -- join assets to episodes by key and read identity from those fields. Placeholder-looking keys in logs, review reasons, and final routing are correct, not a defect
    - **Do not stop at episode-ID quality.** If organizer/review routing is implicated, compare per-episode review state against final destinations.
@@ -423,8 +430,12 @@ These details are optional context. Some are parsed into `logs.decisions` when d
 | Pattern | Stage | Evidence |
 |---------|-------|----------|
 | TMDB candidate scoring | Identification | DEBUG `decision_type=tmdb_search`; final selection is visible at INFO as `tmdb_match` |
-| TV title filtering | Identification | DEBUG `tv title excluded`; placeholders are visible at INFO as `decision_type=episode_placeholders` |
+| TV `below_min_title_length` exclusions | Identification | DEBUG `tv title excluded` (other exclusion reasons are INFO with evidence attrs) |
 | Audio candidate scoring | Audio Analysis | Raw DEBUG `audio candidate scored`; final selection is visible at INFO as `audio_selection` |
+| Content-ID pending claims | Episode ID | DEBUG `content ID pending claim` — full per-rip candidate scores behind unresolved/contested outcomes |
+| Reel internals (chunk plan, CVVDP target-quality config, CRF search, timings) | Encoding | DEBUG `reel verbose` |
+| SRT validation observations | Subtitles | DEBUG `SRT validation observation` (per-check detail); the INFO `SRT validation QC summary` and `SRT validation issue` lines carry the verdicts |
+| Handler stage start/complete, item stage derived | All | DEBUG since 2026-07-06; the INFO narrative is the workflow stage pair + `item_complete` |
 | LLM retry details | Various | Raw logs around the failed/slow decision |
 
 ## Audit Report Format

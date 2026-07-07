@@ -34,6 +34,17 @@ func partitionValidTitles(titles []ripspec.Title) (valid, rejected []ripspec.Tit
 	return valid, rejected
 }
 
+// funnelStep records one narrowing stage of the primary-title funnel: the
+// rule that ran, how many candidates it kept, which title IDs it eliminated,
+// and the numeric evidence behind the cut.
+type funnelStep struct {
+	Rule       string
+	Before     int
+	After      int
+	Eliminated []int
+	Detail     string
+}
+
 // ChoosePrimaryTitle selects the best title for a movie rip using multi-stage filtering:
 //  1. Validate candidates (ID >= 0, Duration > 0)
 //  2. Disney 800-series multi-language playlist detection
@@ -45,17 +56,43 @@ func partitionValidTitles(titles []ripspec.Title) (valid, rejected []ripspec.Tit
 //  8. TitleHash fingerprint frequency (most common hash)
 //  9. Sort by duration desc, ID asc
 func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
+	selection, ok, _ := choosePrimaryTitleTraced(titles)
+	return selection, ok
+}
+
+// choosePrimaryTitleTraced runs the funnel and records every stage that
+// narrowed the field (or declined to, with a reason) so the ripper can log
+// the evidence behind the final pick.
+func choosePrimaryTitleTraced(titles []ripspec.Title) (ripspec.Title, bool, []funnelStep) {
 	candidates, _ := partitionValidTitles(titles)
 	if len(candidates) == 0 {
-		return ripspec.Title{}, false
+		return ripspec.Title{}, false, nil
+	}
+
+	var steps []funnelStep
+	record := func(rule string, before, after []ripspec.Title, detail string) {
+		if len(after) == len(before) && detail == "" {
+			return
+		}
+		steps = append(steps, funnelStep{
+			Rule:       rule,
+			Before:     len(before),
+			After:      len(after),
+			Eliminated: eliminatedTitleIDs(before, after),
+			Detail:     detail,
+		})
 	}
 
 	// Early check for Disney/Pixar multi-language discs.
 	// These have 00800.mpls (English), 00801.mpls (Spanish), 00802.mpls (French) with
 	// the English version often being slightly shorter due to language-specific credits.
 	// If we find feature-length 800-series playlists, prefer 00800.mpls before duration filtering.
-	if preferred := filterPreferredPlaylistFeatureLength(candidates, minPrimaryRuntimeSeconds); len(preferred) > 0 {
+	preferred, note := filterPreferredPlaylistFeatureLength(candidates, minPrimaryRuntimeSeconds)
+	if len(preferred) > 0 {
+		record("disney_800_series", candidates, preferred, note)
 		candidates = preferred
+	} else if note != "" {
+		record("disney_800_series", candidates, candidates, note)
 	}
 
 	// Prefer feature-length runtimes within a small tolerance window.
@@ -71,6 +108,9 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 			featureLength = append(featureLength, t)
 		}
 	}
+	record("duration_window", candidates, featureLength,
+		fmt.Sprintf("max_duration=%ds tolerance=%ds", maxDuration, durationToleranceSeconds))
+
 	featureOnly := make([]ripspec.Title, 0, len(featureLength))
 	for _, t := range featureLength {
 		if t.Duration >= minPrimaryRuntimeSeconds {
@@ -78,12 +118,16 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 		}
 	}
 	if len(featureOnly) > 0 {
+		record("feature_length_gate", featureLength, featureOnly,
+			fmt.Sprintf("min_runtime=%ds", minPrimaryRuntimeSeconds))
 		featureLength = featureOnly
 	}
 
 	// Prefer titles with chapter metadata.
 	withChapters := bestByInt(featureLength, func(t ripspec.Title) int { return t.Chapters })
 	if len(withChapters) > 0 {
+		record("chapter_preference", featureLength, withChapters,
+			fmt.Sprintf("max_chapters=%d", withChapters[0].Chapters))
 		featureLength = withChapters
 	}
 
@@ -95,12 +139,15 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 		}
 	}
 	if len(mplsOnly) > 0 {
+		record("mpls_preference", featureLength, mplsOnly, "")
 		featureLength = mplsOnly
 	}
 
 	// Prefer playlists with more segments (helps dodge dummy/short playlists).
 	withSegments := bestByInt(featureLength, func(t ripspec.Title) int { return t.SegmentCount })
 	if len(withSegments) > 0 {
+		record("segment_count_preference", featureLength, withSegments,
+			fmt.Sprintf("max_segments=%d", withSegments[0].SegmentCount))
 		featureLength = withSegments
 	}
 
@@ -128,6 +175,8 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 			}
 		}
 		if len(filtered) > 0 {
+			record("titlehash_frequency", featureLength, filtered,
+				fmt.Sprintf("shared_hash_count=%d", bestFreq))
 			featureLength = filtered
 		}
 	}
@@ -140,12 +189,28 @@ func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
 		}
 		return left.Duration > right.Duration
 	})
-	return featureLength[0], true
+	return featureLength[0], true, steps
 }
 
-// PrimaryTitleDecisionSummary returns the primary selection plus candidate and rejection summaries.
-func PrimaryTitleDecisionSummary(titles []ripspec.Title) (ripspec.Title, bool, []string, []string) {
-	selection, ok := ChoosePrimaryTitle(titles)
+// eliminatedTitleIDs returns the IDs present in before but not in after.
+func eliminatedTitleIDs(before, after []ripspec.Title) []int {
+	kept := make(map[int]struct{}, len(after))
+	for _, t := range after {
+		kept[t.ID] = struct{}{}
+	}
+	var out []int
+	for _, t := range before {
+		if _, ok := kept[t.ID]; !ok {
+			out = append(out, t.ID)
+		}
+	}
+	return out
+}
+
+// PrimaryTitleDecisionSummary returns the primary selection plus candidate and
+// rejection summaries and the funnel steps that produced the pick.
+func PrimaryTitleDecisionSummary(titles []ripspec.Title) (ripspec.Title, bool, []string, []string, []funnelStep) {
+	selection, ok, steps := choosePrimaryTitleTraced(titles)
 	valid, rejected := partitionValidTitles(titles)
 	candidateStrs := make([]string, 0, len(valid))
 	for _, t := range valid {
@@ -162,7 +227,7 @@ func PrimaryTitleDecisionSummary(titles []ripspec.Title) (ripspec.Title, bool, [
 	}
 	sort.Strings(candidateStrs)
 	sort.Strings(rejectStrs)
-	return selection, ok, candidateStrs, rejectStrs
+	return selection, ok, candidateStrs, rejectStrs, steps
 }
 
 // parse800SeriesNum extracts the 800-series number from an MPLS filename like "00800.mpls".
@@ -189,8 +254,9 @@ func parse800SeriesNum(s string) (int, bool) {
 // (indicating a multi-language disc). If runtimes differ by more than 30 seconds, assumes
 // different cuts (e.g., theatrical vs director's cut) and returns empty to let normal
 // selection prefer the longer version.
-// Returns empty slice if not a multi-language disc pattern.
-func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int) []ripspec.Title {
+// Returns an empty slice if not a multi-language disc pattern; the note
+// explains the decision either way so the funnel trace can surface it.
+func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int) ([]ripspec.Title, string) {
 	// Collect feature-length titles with 800-series playlists.
 	type scored struct {
 		title ripspec.Title
@@ -218,7 +284,7 @@ func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int
 
 	// Only apply if we have multiple 800-series playlists (indicating multi-language disc).
 	if len(candidates) < 2 {
-		return nil
+		return nil, ""
 	}
 
 	// Check if we have different playlist numbers (e.g., 800, 801, 802).
@@ -227,7 +293,7 @@ func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int
 		playlistNums[c.num] = true
 	}
 	if len(playlistNums) < 2 {
-		return nil
+		return nil, ""
 	}
 
 	// Check runtime variance - if playlists differ by more than the threshold,
@@ -244,7 +310,8 @@ func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int
 		}
 	}
 	if maxDuration-minDuration > maxLanguageVariantRuntimeDiff {
-		return nil
+		return nil, fmt.Sprintf("800-series runtime spread %ds exceeds %ds; treating playlists as different cuts, not language variants",
+			maxDuration-minDuration, maxLanguageVariantRuntimeDiff)
 	}
 
 	// Find minimum playlist number (00800 = English).
@@ -262,7 +329,8 @@ func filterPreferredPlaylistFeatureLength(titles []ripspec.Title, minRuntime int
 			result = append(result, c.title)
 		}
 	}
-	return result
+	return result, fmt.Sprintf("multi-language 800-series disc; preferring playlist 00%d (runtime spread %ds within %ds)",
+		minNum, maxDuration-minDuration, maxLanguageVariantRuntimeDiff)
 }
 
 func bestByInt(list []ripspec.Title, score func(ripspec.Title) int) []ripspec.Title {

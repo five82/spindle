@@ -151,7 +151,7 @@ func TestUserStoppedItemIsNotRecordedAsStageSuccess(t *testing.T) {
 		},
 	}}})
 
-	manager.processItem(context.Background(), nil, item, manager.pipeline.stages[0])
+	manager.processItem(context.Background(), nil, item, manager.pipeline.stages[0], nil)
 
 	lastErr, _ := statusTracker.Snapshot()
 	if lastErr != "" {
@@ -179,7 +179,7 @@ func TestFinalPersistenceFailureSignalsWorkflowStop(t *testing.T) {
 	manager := New(store, nil, nil, logger)
 	manager.ConfigureStages([]PipelineStage{{Stage: queue.StageOrganizing, Handler: stubHandler{}}})
 
-	manager.processItem(context.Background(), nil, item, manager.pipeline.stages[0])
+	manager.processItem(context.Background(), nil, item, manager.pipeline.stages[0], nil)
 
 	select {
 	case <-manager.persistenceFailures:

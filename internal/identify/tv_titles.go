@@ -1,7 +1,6 @@
 package identify
 
 import (
-	"fmt"
 	"maps"
 	"slices"
 	"strconv"
@@ -53,6 +52,13 @@ type tvTitleSelectionResult struct {
 	ExtraCount       int
 	Ambiguous        bool
 	AmbiguityReasons []string
+	// Evidence behind the structural exclusions, surfaced for decision logs:
+	// the duration-weighted median and outlier bar that drove
+	// gross_runtime_outlier, and the TMDB runtime targets (seconds) that drove
+	// expected_runtime_mismatch / over_expected_episode_count.
+	WeightedMedianSeconds  int
+	OutlierBarSeconds      int
+	ExpectedRuntimeTargets []int
 }
 
 type tvTitleCandidate struct {
@@ -133,7 +139,10 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int, expected 
 // the duration-weighted median. The duration weighting keeps the bar anchored
 // to episode-length content even when short extras outnumber episodes.
 func excludeGrossOutliers(candidates []tvTitleCandidate, result *tvTitleSelectionResult) []tvTitleCandidate {
-	bar := int(float64(durationWeightedMedian(candidates)) * tvGrossOutlierRatio)
+	median := durationWeightedMedian(candidates)
+	bar := int(float64(median) * tvGrossOutlierRatio)
+	result.WeightedMedianSeconds = median
+	result.OutlierBarSeconds = bar
 	alive := make([]tvTitleCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
 		if candidate.title.Duration < bar {
@@ -340,6 +349,7 @@ func hasSameLengthAlternate(alive []tvTitleCandidate, composite compositeTitle) 
 // season with no TMDB runtimes) degrades to structural evidence only.
 func excludeRuntimeMismatches(alive []tvTitleCandidate, expected []tmdb.Episode, result *tvTitleSelectionResult) []tvTitleCandidate {
 	targets := expectedRuntimeTargets(expected)
+	result.ExpectedRuntimeTargets = targets
 	if len(targets) == 0 || len(alive) == 0 {
 		return alive
 	}
@@ -586,20 +596,6 @@ func summarizeAmbiguity(reasons []string) string {
 		return ""
 	}
 	return strings.Join(reasons, ", ")
-}
-
-func describeTVSelection(result tvTitleSelectionResult) string {
-	return fmt.Sprintf("%d selected from %d candidates", len(result.SelectedTitles), len(result.Decisions)-countBelowMin(result.Decisions))
-}
-
-func countBelowMin(decisions []tvTitleDecision) int {
-	count := 0
-	for _, decision := range decisions {
-		if decision.Reason == "below_min_title_length" {
-			count++
-		}
-	}
-	return count
 }
 
 func abs(v int) int {

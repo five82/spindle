@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // Task states. Readiness (all deps done) is derived at query time, never
@@ -68,6 +69,20 @@ type Task struct {
 	ActiveAssetKey      string
 	StartedAt           string
 	FinishedAt          string
+}
+
+// Duration derives the task's wall time from its start/finish timestamps;
+// ok is false when either timestamp is missing, unparseable, or inverted.
+func (t *Task) Duration() (d time.Duration, ok bool) {
+	start, err := parseTimestamp(t.StartedAt)
+	if err != nil {
+		return 0, false
+	}
+	end, err := parseTimestamp(t.FinishedAt)
+	if err != nil || end.Before(start) {
+		return 0, false
+	}
+	return end.Sub(start), true
 }
 
 // TaskSpec describes one task type for compilation. Specs must be listed in

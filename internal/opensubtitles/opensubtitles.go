@@ -98,7 +98,7 @@ func (c *Client) Search(ctx context.Context, tmdbID int, season, episode int, la
 		return nil, fmt.Errorf("opensubtitles: client not configured")
 	}
 	c.rateLimit()
-	c.logger.Info("OpenSubtitles search started",
+	c.logger.Debug("OpenSubtitles search started",
 		"event_type", "opensubtitles_search_start",
 		"tmdb_id", tmdbID,
 	)
@@ -162,7 +162,7 @@ func (c *Client) Download(ctx context.Context, fileID int) (*DownloadResponse, e
 
 // DownloadToFile downloads a subtitle and saves it to destPath.
 func (c *Client) DownloadToFile(ctx context.Context, fileID int, destPath string) error {
-	c.logger.Info("downloading subtitle file",
+	c.logger.Debug("downloading subtitle file",
 		"event_type", "opensubtitles_download_start",
 		"file_id", fileID,
 		"dest", destPath,

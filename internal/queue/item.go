@@ -4,10 +4,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/five82/spindle/internal/mediameta"
 	"github.com/five82/spindle/internal/textutil"
 )
+
+// parseTimestamp parses the timestamp strings this package's rows carry.
+// Columns are SQLite CURRENT_TIMESTAMP values; the sqlite driver surfaces
+// TIMESTAMP columns as time.Time, which database/sql renders into string
+// fields as RFC3339Nano, so that is the form scans normally produce. The
+// raw SQLite layout ("2006-01-02 15:04:05", UTC) is kept as a fallback.
+// The format knowledge is owned here; consumers must go through
+// CreatedTime/Duration instead of parsing the raw strings.
+func parseTimestamp(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	return time.ParseInLocation("2006-01-02 15:04:05", s, time.UTC)
+}
 
 // Item represents a single queue item with all database columns.
 // Progress lives on task rows (Task.Progress*), not here: each running
@@ -34,6 +50,16 @@ type Item struct {
 // UserStopped reports whether the item was explicitly stopped by the user.
 func (it *Item) UserStopped() bool {
 	return it != nil && it.userStopped != 0
+}
+
+// CreatedTime parses the item's creation timestamp; ok is false when the
+// stored value is missing or unparseable.
+func (it *Item) CreatedTime() (created time.Time, ok bool) {
+	t, err := parseTimestamp(it.CreatedAt)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // StagingRoot computes the per-item working directory under base.

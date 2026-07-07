@@ -512,7 +512,7 @@ func TestApplyMatchesSetsEpisodeFieldsWithoutRenamingKeys(t *testing.T) {
 		Assets:   ripspec.Assets{Ripped: []ripspec.Asset{{EpisodeKey: "s03_001", Path: "/rip/1.mkv", Status: ripspec.AssetStatusCompleted}, {EpisodeKey: "s03_002", Path: "/rip/2.mkv", Status: ripspec.AssetStatusCompleted}}},
 	}
 	season := &tmdb.Season{Episodes: []tmdb.Episode{{EpisodeNumber: 3, Name: "Three"}, {EpisodeNumber: 4, Name: "Four"}}}
-	h.applyMatches(logger, env, 3, season, []matchResult{{EpisodeKey: "s03_001", TargetEpisode: 3, Score: 0.91}, {EpisodeKey: "s03_002", TargetEpisode: 4, Score: 0.88}}, nil, nil)
+	h.applyMatches(logger, env, 3, season, []matchResult{{EpisodeKey: "s03_001", TargetEpisode: 3, Score: 0.91}, {EpisodeKey: "s03_002", TargetEpisode: 4, Score: 0.88}}, nil, nil, nil)
 	if env.Episodes[0].Key != "s03_001" || env.Episodes[1].Key != "s03_002" {
 		t.Fatalf("episode keys must stay permanent placeholders: %+v", env.Episodes)
 	}
@@ -541,7 +541,7 @@ func TestApplyMatchesInfersOpeningDoubleEpisode(t *testing.T) {
 		}},
 	}
 	season := &tmdb.Season{Episodes: []tmdb.Episode{{EpisodeNumber: 1, Name: "Pilot Part 1"}, {EpisodeNumber: 2, Name: "Pilot Part 2"}, {EpisodeNumber: 3, Name: "Third"}, {EpisodeNumber: 4, Name: "Fourth"}}}
-	h.applyMatches(logger, env, 1, season, []matchResult{{EpisodeKey: "s01_001", TargetEpisode: 1, Score: 0.91}, {EpisodeKey: "s01_002", TargetEpisode: 2, Score: 0.88}, {EpisodeKey: "s01_003", TargetEpisode: 3, Score: 0.89}}, nil, nil)
+	h.applyMatches(logger, env, 1, season, []matchResult{{EpisodeKey: "s01_001", TargetEpisode: 1, Score: 0.91}, {EpisodeKey: "s01_002", TargetEpisode: 2, Score: 0.88}, {EpisodeKey: "s01_003", TargetEpisode: 3, Score: 0.89}}, nil, nil, nil)
 	if env.Episodes[0].Key != "s01_001" || env.Episodes[0].Episode != 1 || env.Episodes[0].EpisodeEnd != 2 {
 		t.Fatalf("opening episode not converted to range: %+v", env.Episodes[0])
 	}
@@ -565,7 +565,7 @@ func TestApplyMatchesProbableExtra(t *testing.T) {
 	}
 	season := &tmdb.Season{Episodes: []tmdb.Episode{{EpisodeNumber: 1, Name: "One"}}}
 	noClaimRips := map[string]struct{}{"s01_002": {}}
-	h.applyMatches(logger, env, 1, season, []matchResult{{EpisodeKey: "s01_001", TargetEpisode: 1, Score: 0.91, Confidence: 0.91}}, nil, noClaimRips)
+	h.applyMatches(logger, env, 1, season, []matchResult{{EpisodeKey: "s01_001", TargetEpisode: 1, Score: 0.91, Confidence: 0.91}}, nil, noClaimRips, nil)
 
 	if env.Episodes[0].NeedsReview {
 		t.Fatalf("matched episode s01_001 should not need review: %+v", env.Episodes[0])

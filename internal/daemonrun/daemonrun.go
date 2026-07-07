@@ -25,6 +25,7 @@ import (
 	"github.com/five82/spindle/internal/jellyfin"
 	"github.com/five82/spindle/internal/keydb"
 	"github.com/five82/spindle/internal/llm"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
@@ -98,12 +99,22 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		_ = os.Link(logFilePath, symlinkPath)
 	}
 
-	// Set up logging: stderr (INFO) + file (DEBUG, toggleable via SIGUSR1).
+	// Set up logging: file (DEBUG, toggleable via SIGUSR1), plus stderr text
+	// (INFO) only when stderr is a terminal. A detached daemon's stderr is
+	// redirected to the console log for panic capture; mirroring every
+	// record there would duplicate the JSON file in a second format.
 	var fileLevel slog.LevelVar
 	fileLevel.Set(slog.LevelDebug)
-	stderrHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
 	fileHandler := slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: &fileLevel})
-	multi := newMultiHandler(stderrHandler, fileHandler)
+	handlers := []slog.Handler{fileHandler}
+	consoleLogging := false
+	if fi, statErr := os.Stderr.Stat(); statErr == nil && fi.Mode()&os.ModeCharDevice != 0 {
+		handlers = append([]slog.Handler{
+			slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}),
+		}, handlers...)
+		consoleLogging = true
+	}
+	multi := newMultiHandler(handlers...)
 
 	logBuffer := httpapi.NewLogBuffer(0) // default capacity
 	if err := logBuffer.HydrateFromDir(logDir); err != nil {
@@ -112,7 +123,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	slog.SetDefault(slog.New(httpapi.NewLogHandler(multi, logBuffer)))
 	logger := slog.Default()
 
-	logger.Info("daemon log file opened", "path", logFilePath)
+	logger.Info("daemon log file opened", "path", logFilePath, "console_logging", consoleLogging)
 
 	// Open queue database.
 	store, err := queue.Open(cfg.QueueDBPath())
@@ -125,6 +136,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, logger)
 	llmClient := llm.New(cfg.LLM.APIKey, cfg.LLM.BaseURL, cfg.LLM.Model, cfg.LLM.Referer, cfg.LLM.Title, cfg.LLM.TimeoutSeconds, logger)
 	notifier := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout, logger)
+	if notifier == nil {
+		logger.Info("ntfy notifications disabled",
+			"decision_type", logs.DecisionIntegrationConfig,
+			"decision_result", "disabled",
+			"decision_reason", "no ntfy topic configured",
+		)
+	}
 	jfClient := jellyfin.New(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, logger)
 	osClient := opensubtitles.New(cfg.Subtitles.OpenSubtitlesAPIKey, cfg.Subtitles.OpenSubtitlesUserAgent, cfg.Subtitles.OpenSubtitlesUserToken, "", logger)
 
@@ -302,6 +320,25 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			"event_type", "startup_recovery_failed",
 			"error_hint", "failed to reset running tasks on startup",
 			"error", err,
+		)
+	}
+
+	// Summarize what the scheduler is resuming so a restart's starting point
+	// is visible without querying the API.
+	if stats, statsErr := store.Stats(); statsErr == nil {
+		total := 0
+		counts := make(map[string]int, len(stats))
+		for stg, n := range stats {
+			if n == 0 {
+				continue
+			}
+			total += n
+			counts[string(stg)] = n
+		}
+		logger.Info("queue state at startup",
+			"event_type", "startup_queue_state",
+			"items", total,
+			"by_stage", logs.FormatCounts(counts),
 		)
 	}
 

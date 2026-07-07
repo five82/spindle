@@ -260,6 +260,7 @@ func newGensubtitleCmd() *cobra.Command {
 				WorkDir:         workDir,
 				Language:        "en",
 				Transcriber:     svc,
+				Logger:          cmdLogger,
 				Progress: func(phase transcription.Phase, elapsed time.Duration) {
 					switch {
 					case phase == transcription.PhaseExtract && elapsed == 0:

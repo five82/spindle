@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +37,7 @@ func New(cfg *config.Config, notifier *notify.Notifier) *Handler {
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	item := sess.Item
 	logger := sess.Logger
-	logger.Info("encoding stage started", "event_type", "stage_start", "stage", "encoding")
+	logger.Debug("encoding stage started", "event_type", "stage_start", "stage", "encoding")
 	env := sess.Env
 
 	stagingRoot, err := item.StagingRoot(h.cfg.Paths.StagingDir)
@@ -142,10 +143,9 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventEncodeComplete,
 		"Encode Complete: "+item.DisplayTitle(),
 		msg,
-		"item_id", item.ID,
 	)
 
-	logger.Info("encoding stage completed",
+	logger.Debug("encoding stage completed",
 		"event_type", "stage_complete",
 		"stage", "encoding",
 		"jobs", attempted,
@@ -271,6 +271,12 @@ func (h *Handler) initialEncodingSnapshot(ctx context.Context, logger *slog.Logg
 
 	probeResult, probeErr := ffprobe.Inspect(ctx, "", job.Input.Path)
 	if probeErr != nil {
+		logger.Warn("input probe failed",
+			"event_type", "probe_error",
+			"error_hint", probeErr.Error(),
+			"impact", "encode proceeds without probe metadata",
+			"episode_key", job.Key,
+		)
 		return snap
 	}
 
@@ -290,7 +296,9 @@ func (h *Handler) initialEncodingSnapshot(ctx context.Context, logger *slog.Logg
 	logger.Info("input file probed",
 		"decision_type", logs.DecisionFileProbe,
 		"decision_result", "success",
-		"decision_reason", fmt.Sprintf("resolution=%s codecs=%s original_size=%d", resolution, strings.Join(codecs, ","), snap.OriginalSize),
+		"resolution", resolution,
+		"codecs", strings.Join(codecs, ","),
+		"original_size_bytes", snap.OriginalSize,
 		"episode_key", job.Key,
 	)
 	return snap
@@ -391,6 +399,10 @@ const encodingProgressLogInterval = 3 * time.Minute
 // spindleReporter implements reel.Reporter, adapting Reel progress events into
 // encodingstate.Snapshot updates on the queue item. Progress persistence is
 // throttled to every 2 seconds.
+// round1 and round2 round log-attribute floats to 1 and 2 decimal places.
+func round1(v float64) float64 { return math.Round(v*10) / 10 }
+func round2(v float64) float64 { return math.Round(v*100) / 100 }
+
 type spindleReporter struct {
 	reel.NullReporter
 	sess          *stage.Session
@@ -455,12 +467,16 @@ func (r *spindleReporter) EncodingProgress(p reel.ProgressSnapshot) {
 		r.logger.Info("encoding progress",
 			"event_type", "encoding_progress",
 			"episode_key", r.episodeKey,
-			"percent", p.Percent,
-			"fps", p.FPS,
-			"speed", p.Speed,
-			"eta_seconds", p.ETA.Seconds(),
+			"percent", round1(float64(p.Percent)),
+			"speed", round2(float64(p.Speed)),
+			"bitrate", p.Bitrate,
+			"eta_seconds", int(p.ETA.Seconds()),
 			"current_frame", p.CurrentFrame,
 			"total_frames", p.TotalFrames,
+			"chunks_complete", p.ChunksComplete,
+			"chunks_total", p.ChunksTotal,
+			"workers_active", p.ActiveWorkers,
+			"workers_target", p.TargetWorkers,
 		)
 	}
 }
@@ -492,6 +508,37 @@ func (r *spindleReporter) Initialization(s reel.InitializationSummary) {
 			"error", err,
 		)
 	}
+
+	r.logger.Info("encode input initialized",
+		"event_type", "encode_init",
+		"episode_key", r.episodeKey,
+		"input", filepath.Base(s.InputFile),
+		"resolution", s.Resolution,
+		"dynamic_range", s.DynamicRange,
+		"duration", s.Duration,
+		"audio", s.AudioDescription,
+	)
+}
+
+func (r *spindleReporter) StageProgress(s reel.StageProgress) {
+	attrs := []any{
+		"event_type", "encoding_substage",
+		"episode_key", r.episodeKey,
+		"substage", s.Stage,
+		"message", s.Message,
+	}
+	if s.Percent > 0 {
+		attrs = append(attrs, "percent", round1(float64(s.Percent)))
+	}
+	r.logger.Info("encoding substage", attrs...)
+}
+
+func (r *spindleReporter) Verbose(message string) {
+	r.logger.Debug("reel verbose",
+		"event_type", "reel_verbose",
+		"episode_key", r.episodeKey,
+		"message", message,
+	)
 }
 
 func (r *spindleReporter) EncodingConfig(s reel.EncodingConfigSummary) {
@@ -510,6 +557,20 @@ func (r *spindleReporter) EncodingConfig(s reel.EncodingConfigSummary) {
 			"error", err,
 		)
 	}
+
+	r.logger.Info("encoder configured",
+		"event_type", "encoder_config",
+		"episode_key", r.episodeKey,
+		"encoder", s.Encoder,
+		"encoder_version", s.EncoderVersion,
+		"preset", s.Preset,
+		"quality", s.Quality,
+		"tune", s.Tune,
+		"pixel_format", s.PixelFormat,
+		"matrix_coefficients", s.MatrixCoefficients,
+		"audio_codec", s.AudioCodec,
+		"svtav1_params", s.SVTAV1Params,
+	)
 }
 
 func (r *spindleReporter) CropResult(s reel.CropSummary) {
@@ -604,6 +665,17 @@ func (r *spindleReporter) EncodingComplete(s reel.EncodingOutcome) {
 			"error", err,
 		)
 	}
+
+	r.logger.Info("encode result",
+		"event_type", "encode_result",
+		"episode_key", r.episodeKey,
+		"original_size_bytes", s.OriginalSize,
+		"encoded_size_bytes", s.EncodedSize,
+		"video_original_size_bytes", s.VideoOriginalSize,
+		"video_encoded_size_bytes", s.VideoEncodedSize,
+		"wall_time", s.TotalTime.Round(time.Second).String(),
+		"average_speed", round2(float64(s.AverageSpeed)),
+	)
 }
 
 func (r *spindleReporter) Warning(message string) {

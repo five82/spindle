@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -254,10 +255,10 @@ func TestResolveSubtitleVideoDuration(t *testing.T) {
 		return &ffprobe.Result{Format: ffprobe.Format{Duration: "123.456"}}, nil
 	}
 
-	if got, source := resolveSubtitleVideoDuration(context.Background(), "/tmp/video.mkv", 90); got != 123.456 || source != "media_probe" {
+	if got, source := resolveSubtitleVideoDuration(context.Background(), slog.Default(), "/tmp/video.mkv", 90); got != 123.456 || source != "media_probe" {
 		t.Fatalf("resolveSubtitleVideoDuration() = %v, %q; want 123.456, media_probe", got, source)
 	}
-	if got, source := resolveSubtitleVideoDuration(context.Background(), "/tmp/fail.mkv", 90); got != 90 || source != "transcript_fallback" {
+	if got, source := resolveSubtitleVideoDuration(context.Background(), slog.Default(), "/tmp/fail.mkv", 90); got != 90 || source != "transcript_fallback" {
 		t.Fatalf("fallback = %v, %q; want 90, transcript_fallback", got, source)
 	}
 }

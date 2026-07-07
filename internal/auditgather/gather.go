@@ -13,6 +13,7 @@ import (
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/httpapi"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/mediameta"
 	"github.com/five82/spindle/internal/queue"
@@ -462,13 +463,11 @@ func getFloat(m map[string]any, key string) (float64, bool) {
 	return f, ok
 }
 
-// getStageDurationSeconds extracts stage duration in seconds.
-// The workflow manager logs this as "stage_duration" in nanoseconds (slog.Duration).
+// getStageDurationSeconds extracts stage duration in seconds; the format
+// contract (string vs legacy nanoseconds) lives with the writer in
+// internal/logs.
 func getStageDurationSeconds(entry map[string]any) float64 {
-	if ns, ok := getFloat(entry, "stage_duration"); ok && ns > 0 {
-		return ns / 1e9
-	}
-	return 0
+	return logs.DurationSeconds(entry["stage_duration"])
 }
 
 func logLineMatchesItem(entry map[string]any, item *httpapi.ItemResponse) bool {

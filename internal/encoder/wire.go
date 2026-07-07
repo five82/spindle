@@ -33,6 +33,7 @@ type wireEvent struct {
 
 const (
 	wireInitialization     = "initialization"
+	wireStageProgress      = "stage_progress"
 	wireCropResult         = "crop_result"
 	wireEncodingConfig     = "encoding_config"
 	wireEncodingStarted    = "encoding_started"
@@ -40,6 +41,7 @@ const (
 	wireValidationComplete = "validation_complete"
 	wireEncodingComplete   = "encoding_complete"
 	wireWarning            = "warning"
+	wireVerbose            = "verbose"
 	wireError              = "error"
 	wireResult             = "result"
 	wireFailure            = "failure"
@@ -78,6 +80,7 @@ type wireReporter struct {
 }
 
 func (r *wireReporter) Initialization(s reel.InitializationSummary) { r.w.emit(wireInitialization, s) }
+func (r *wireReporter) StageProgress(s reel.StageProgress)          { r.w.emit(wireStageProgress, s) }
 func (r *wireReporter) CropResult(s reel.CropSummary)               { r.w.emit(wireCropResult, s) }
 func (r *wireReporter) EncodingConfig(s reel.EncodingConfigSummary) { r.w.emit(wireEncodingConfig, s) }
 func (r *wireReporter) EncodingStarted(totalFrames uint64) {
@@ -89,6 +92,7 @@ func (r *wireReporter) ValidationComplete(s reel.ValidationSummary) {
 }
 func (r *wireReporter) EncodingComplete(s reel.EncodingOutcome) { r.w.emit(wireEncodingComplete, s) }
 func (r *wireReporter) Warning(message string)                  { r.w.emit(wireWarning, wireMessage{Message: message}) }
+func (r *wireReporter) Verbose(message string)                  { r.w.emit(wireVerbose, wireMessage{Message: message}) }
 func (r *wireReporter) Error(e reel.ReporterError)              { r.w.emit(wireError, e) }
 
 // RunWorker is the `spindle encode-worker` entry point: encode one file in
@@ -122,6 +126,12 @@ func dispatchWireEvent(ev wireEvent, rep *spindleReporter) (*reel.Result, string
 			return nil, "", err
 		}
 		rep.Initialization(s)
+	case wireStageProgress:
+		var s reel.StageProgress
+		if err := json.Unmarshal(ev.Payload, &s); err != nil {
+			return nil, "", err
+		}
+		rep.StageProgress(s)
 	case wireCropResult:
 		var s reel.CropSummary
 		if err := json.Unmarshal(ev.Payload, &s); err != nil {
@@ -164,6 +174,12 @@ func dispatchWireEvent(ev wireEvent, rep *spindleReporter) (*reel.Result, string
 			return nil, "", err
 		}
 		rep.Warning(s.Message)
+	case wireVerbose:
+		var s wireMessage
+		if err := json.Unmarshal(ev.Payload, &s); err != nil {
+			return nil, "", err
+		}
+		rep.Verbose(s.Message)
 	case wireError:
 		var e reel.ReporterError
 		if err := json.Unmarshal(ev.Payload, &e); err != nil {

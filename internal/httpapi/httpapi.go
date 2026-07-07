@@ -182,6 +182,13 @@ func (s *Server) tasksFor(itemID int64) []*queue.Task {
 	return tasks
 }
 
+// logOperatorAction records a user-initiated mutation (retry, stop, clear,
+// disc control) with the shared operator_action vocabulary.
+func (s *Server) logOperatorAction(msg, action string, extra ...any) {
+	attrs := append([]any{"event_type", "operator_action", "action", action}, extra...)
+	s.logger.Info(msg, attrs...)
+}
+
 func (s *Server) handleQueueRetry(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		IDs []int64 `json:"ids"`
@@ -196,6 +203,10 @@ func (s *Server) handleQueueRetry(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to retry items")
 		return
 	}
+	s.logOperatorAction("queue retry requested", "retry",
+		"item_ids", fmt.Sprint(body.IDs),
+		"updated", count,
+	)
 	writeJSON(w, http.StatusOK, map[string]int{"updated": count})
 }
 
@@ -218,6 +229,11 @@ func (s *Server) handleQueueRetryEpisode(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to retry episode")
 		return
 	}
+	s.logOperatorAction("episode retry requested", "retry_episode",
+		"item_id", body.ID,
+		"episode_key", body.EpisodeKey,
+		"result", string(result),
+	)
 	writeJSON(w, http.StatusOK, map[string]string{"result": string(result)})
 }
 
@@ -235,6 +251,10 @@ func (s *Server) handleQueueStop(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to stop items")
 		return
 	}
+	s.logOperatorAction("queue stop requested", "stop",
+		"item_ids", fmt.Sprint(body.IDs),
+		"updated", count,
+	)
 	writeJSON(w, http.StatusOK, map[string]int{"updated": count})
 }
 
@@ -288,6 +308,7 @@ func (s *Server) handleQueueRemove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to remove item")
 		return
 	}
+	s.logOperatorAction("queue item removed", "remove", "item_id", id)
 	writeJSON(w, http.StatusOK, map[string]int64{"removed": 1})
 }
 
@@ -316,6 +337,10 @@ func (s *Server) handleQueueClear(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to clear queue")
 		return
 	}
+	s.logOperatorAction("queue cleared", "clear",
+		"scope", body.Scope,
+		"removed", count,
+	)
 	writeJSON(w, http.StatusOK, map[string]int64{"removed": count})
 }
 
@@ -352,7 +377,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 			// Clamp to the item's lifetime so hydrated history from a
 			// previous queue generation's item with the same ID stays out.
 			if item, err := s.store.GetByID(n); err == nil && item != nil {
-				if created, perr := time.Parse(time.RFC3339Nano, item.CreatedAt); perr == nil {
+				if created, ok := item.CreatedTime(); ok {
 					opts.MinTime = created
 				}
 			}
@@ -438,6 +463,7 @@ func (s *Server) handleDiscPause(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	changed := s.discMonitor.PauseDisc()
+	s.logOperatorAction("disc monitoring paused by operator", "disc_pause", "changed", changed)
 	writeJSON(w, http.StatusOK, map[string]any{"paused": true, "changed": changed})
 }
 
@@ -447,6 +473,7 @@ func (s *Server) handleDiscResume(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	changed := s.discMonitor.ResumeDisc()
+	s.logOperatorAction("disc monitoring resumed by operator", "disc_resume", "changed", changed)
 	writeJSON(w, http.StatusOK, map[string]any{"resumed": true, "changed": changed})
 }
 

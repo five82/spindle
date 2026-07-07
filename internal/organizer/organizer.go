@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,7 +45,7 @@ func New(cfg *config.Config, jfClient *jellyfin.Client, notifier *notify.Notifie
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	item := sess.Item
 	logger := sess.Logger
-	logger.Info("organization stage started", "event_type", "stage_start", "stage", "organizing")
+	logger.Debug("organization stage started", "event_type", "stage_start", "stage", "organizing")
 	env := sess.Env
 
 	meta := mediameta.FromJSON(item.MetadataJSON, item.DiscTitle)
@@ -78,7 +79,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			}
 			reviewCount = len(keys)
 			h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
-			logger.Info("organization stage completed",
+			logger.Debug("organization stage completed",
 				"event_type", "stage_complete",
 				"stage", "organizing",
 				"library_count", libraryCount,
@@ -99,7 +100,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			}
 			reviewCount = len(reviewKeys)
 			h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
-			logger.Info("organization stage completed",
+			logger.Debug("organization stage completed",
 				"event_type", "stage_complete",
 				"stage", "organizing",
 				"library_count", libraryCount,
@@ -188,7 +189,7 @@ func (h *Handler) finalize(ctx context.Context, logger *slog.Logger, sess *stage
 	h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
 	h.cleanupStaging(logger, sess.Item)
 
-	logger.Info("organization stage completed",
+	logger.Debug("organization stage completed",
 		"event_type", "stage_complete",
 		"stage", "organizing",
 		"library_count", libraryCount,
@@ -411,7 +412,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 					"total_bytes", p.TotalBytes,
 					"overall_bytes_copied", sess.Task.ProgressBytesCopied,
 					"overall_total_bytes", totalBytes,
-					"overall_percent", sess.Task.ProgressPercent,
+					"overall_percent", math.Round(sess.Task.ProgressPercent*10)/10,
 				)
 			}
 		}); err != nil {
@@ -518,7 +519,6 @@ func (h *Handler) sendTerminalNotification(ctx context.Context, logger *slog.Log
 		}
 		msg += alsoProcessing
 		_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventReviewRequired, title, msg,
-			"item_id", item.ID,
 			"library_count", libraryCount,
 			"review_count", reviewCount,
 		)
@@ -532,7 +532,6 @@ func (h *Handler) sendTerminalNotification(ctx context.Context, logger *slog.Log
 	}
 	msg += alsoProcessing
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventPipelineComplete, title, msg,
-		"item_id", item.ID,
 		"library_count", libraryCount,
 	)
 }

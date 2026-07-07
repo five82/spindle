@@ -65,7 +65,11 @@ type GenerateDisplaySubtitleRequest struct {
 	// Transcript, when non-nil, is a pre-existing canonical WhisperX result
 	// (the shared per-episode transcript artifact) reused instead of running
 	// WhisperX again. Audio selection still runs for language and labeling.
-	Transcript              *transcription.TranscribeResult
+	Transcript *transcription.TranscribeResult
+	// Logger receives degraded-behavior warnings from the generation run.
+	// Pass an item-scoped logger so warnings carry item_id; nil falls back
+	// to slog.Default().
+	Logger                  *slog.Logger
 	Progress                transcription.ProgressFunc
 	OnAudioSelected         func(transcription.SelectedAudio)
 	OnTranscriptionComplete func(*transcription.TranscribeResult)
@@ -128,7 +132,7 @@ func GenerateDisplaySubtitle(ctx context.Context, req GenerateDisplaySubtitleReq
 		req.OnTranscriptionComplete(transcript)
 	}
 
-	videoSeconds, durationSource := resolveSubtitleVideoDuration(ctx, req.VideoPath, transcript.Duration)
+	videoSeconds, durationSource := resolveSubtitleVideoDuration(ctx, logs.Default(req.Logger), req.VideoPath, transcript.Duration)
 	if req.OnDurationSelected != nil {
 		req.OnDurationSelected(videoSeconds, durationSource, transcript.Duration)
 	}
@@ -172,7 +176,7 @@ func GenerateDisplaySubtitle(ctx context.Context, req GenerateDisplaySubtitleReq
 // Run executes the subtitle generation stage.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	logger := sess.Logger
-	logger.Info("subtitle stage started", "event_type", "stage_start", "stage", "subtitling")
+	logger.Debug("subtitle stage started", "event_type", "stage_start", "stage", "subtitling")
 
 	if !h.cfg.Subtitles.Enabled {
 		logger.Info("subtitles disabled, skipping",
@@ -350,11 +354,12 @@ func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Sessi
 		DisplayBasePath: filepath.Join(subtitleDir, key+".mkv"),
 		WorkDir:         workDir,
 		Language:        "en",
-		ItemID:      item.ID,
-		EpisodeKey:  key,
-		Purpose:     "subtitle_generation",
-		Transcript:  transcriptArtifact(sess, key),
-		Transcriber: h.transcriber,
+		ItemID:          item.ID,
+		EpisodeKey:      key,
+		Purpose:         "subtitle_generation",
+		Transcript:      transcriptArtifact(sess, key),
+		Transcriber:     h.transcriber,
+		Logger:          sess.Logger,
 		Progress: func(phase transcription.Phase, elapsed time.Duration) {
 			message := sess.Task.ProgressMessage
 			switch phase {
@@ -511,7 +516,7 @@ func (h *Handler) applySubtitleReviewIssues(logger *slog.Logger, sess *stage.Ses
 	for _, issue := range validation.Issues {
 		requiresReview := reviewIssueSet[issue]
 		if !requiresReview {
-			logger.Info("SRT validation observation",
+			logger.Debug("SRT validation observation",
 				"decision_type", logs.DecisionSRTValidation,
 				"decision_result", issue,
 				"decision_reason", "automated quality check recorded without review routing",
@@ -552,7 +557,7 @@ func (h *Handler) finishSubtitleStage(sess *stage.Session, summary subtitleRunSu
 		return fmt.Errorf("all %d subtitle job(s) failed", summary.attempted)
 	}
 
-	sess.Logger.Info("subtitle stage completed",
+	sess.Logger.Debug("subtitle stage completed",
 		"event_type", "stage_complete",
 		"stage", "subtitling",
 		"attempted", summary.attempted,
@@ -562,12 +567,18 @@ func (h *Handler) finishSubtitleStage(sess *stage.Session, summary subtitleRunSu
 	return nil
 }
 
-func resolveSubtitleVideoDuration(ctx context.Context, videoPath string, fallback float64) (seconds float64, source string) {
+func resolveSubtitleVideoDuration(ctx context.Context, logger *slog.Logger, videoPath string, fallback float64) (seconds float64, source string) {
 	probe, err := inspectSubtitleMedia(ctx, "", videoPath)
 	if err == nil {
 		if duration := probe.DurationSeconds(); duration > 0 {
 			return duration, "media_probe"
 		}
+	} else {
+		logger.Warn("video duration probe failed",
+			"event_type", "probe_error",
+			"error_hint", err.Error(),
+			"impact", "subtitle duration falls back to transcript length",
+		)
 	}
 	if fallback > 0 {
 		return fallback, "transcript_fallback"

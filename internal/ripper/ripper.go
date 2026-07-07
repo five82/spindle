@@ -44,7 +44,7 @@ func New(cfg *config.Config, notifier *notify.Notifier, cache *ripcache.Store, m
 // Run executes the ripping stage.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	logger := sess.Logger
-	logger.Info("ripping stage started", "event_type", "stage_start", "stage", "ripping")
+	logger.Debug("ripping stage started", "event_type", "stage_start", "stage", "ripping")
 
 	rippedDir, err := h.prepareRipStaging(sess)
 	if err != nil {
@@ -53,7 +53,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	if restored, err := h.restoreFromRipCache(ctx, sess, rippedDir); restored || err != nil {
 		if err == nil {
-			logger.Info("ripping stage completed",
+			logger.Debug("ripping stage completed",
 				"event_type", "stage_complete",
 				"stage", "ripping",
 				"rip_cache_restored", true,
@@ -93,7 +93,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	h.cacheFreshRip(logger, sess, rippedDir, len(targets))
 	h.notifyRipComplete(ctx, logger, sess, len(targets))
 
-	logger.Info("ripping stage completed",
+	logger.Debug("ripping stage completed",
 		"event_type", "stage_complete",
 		"stage", "ripping",
 		"titles_ripped", len(targets),
@@ -135,6 +135,16 @@ func (h *Handler) restoreFromRipCache(ctx context.Context, sess *stage.Session, 
 
 	meta, err := h.cache.Restore(item.DiscFingerprint, rippedDir, h.cacheProgressFunc(sess, "Restoring from cache..."))
 	if err != nil || meta == nil {
+		attrs := []any{
+			"decision_type", logs.DecisionRipCache,
+			"decision_result", "miss",
+		}
+		if err != nil {
+			attrs = append(attrs, "decision_reason", "cache restore failed", "error", err.Error())
+		} else {
+			attrs = append(attrs, "decision_reason", "no cache entry for fingerprint")
+		}
+		logger.Info("rip cache miss, fresh rip required", attrs...)
 		return false, nil
 	}
 
@@ -172,7 +182,6 @@ func (h *Handler) restoreFromRipCache(ctx context.Context, sess *stage.Session, 
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventRipCacheHit,
 		"Rip Cache Hit: "+item.DisplayTitle(),
 		msg,
-		"item_id", item.ID,
 	)
 
 	if err := h.mapAndValidateAssets(ctx, logger, sess, rippedDir, cachedTitleFiles); err != nil {
@@ -418,7 +427,6 @@ func (h *Handler) notifyRipComplete(ctx context.Context, logger *slog.Logger, se
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventRipComplete,
 		"Rip Complete: "+item.DisplayTitle(),
 		msg,
-		"item_id", item.ID,
 	)
 }
 
@@ -446,8 +454,28 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 
 	switch env.Metadata.MediaType {
 	case "movie":
-		selection, ok, candidates, rejects := PrimaryTitleDecisionSummary(env.Titles)
+		selection, ok, candidates, rejects, steps := PrimaryTitleDecisionSummary(env.Titles)
 		if ok {
+			for _, step := range steps {
+				result := "narrowed"
+				if step.After == step.Before {
+					result = "not_applied"
+				}
+				stepAttrs := []any{
+					"decision_type", logs.DecisionTitleSelectionFunnel,
+					"decision_result", result,
+					"decision_reason", step.Rule,
+					"candidates_before", step.Before,
+					"candidates_after", step.After,
+				}
+				if len(step.Eliminated) > 0 {
+					stepAttrs = append(stepAttrs, "eliminated_title_ids", fmt.Sprint(step.Eliminated))
+				}
+				if step.Detail != "" {
+					stepAttrs = append(stepAttrs, "evidence", step.Detail)
+				}
+				logger.Info("primary title funnel", stepAttrs...)
+			}
 			attrs := []any{
 				"decision_type", logs.DecisionTitleSelection,
 				"decision_result", fmt.Sprintf("title %d (%ds)", selection.ID, selection.Duration),
@@ -503,8 +531,10 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 		}
 		logger.Info("TV titles selected for ripping",
 			"decision_type", logs.DecisionTitleSelection,
-			"decision_result", fmt.Sprintf("%d titles from %d episodes", len(targets), len(env.Episodes)),
+			"decision_result", "selected",
 			"decision_reason", "episode-referenced titles only",
+			"titles", len(targets),
+			"episodes", len(env.Episodes),
 		)
 		return targets, nil
 
@@ -518,8 +548,10 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 		}
 		logger.Info("fallback title selection",
 			"decision_type", logs.DecisionTitleSelection,
-			"decision_result", fmt.Sprintf("%d titles above minimum duration", len(targets)),
+			"decision_result", "selected",
 			"decision_reason", "unknown media type, using duration filter",
+			"titles", len(targets),
+			"min_title_length", h.cfg.MakeMKV.MinTitleLength,
 		)
 		return targets, nil
 	}

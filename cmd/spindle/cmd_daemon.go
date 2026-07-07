@@ -30,7 +30,7 @@ func newStartCmd() *cobra.Command {
 			err := daemonctl.Start(daemonctl.StartOptions{
 				LockPath:   lp,
 				SocketPath: sp,
-				LogPath:    cfg.DaemonLogPath(),
+				LogPath:    cfg.DaemonConsoleLogPath(),
 				ConfigFlag: flagConfig,
 			})
 			if err != nil {
@@ -82,7 +82,7 @@ func newRestartCmd() *cobra.Command {
 			if err := daemonctl.Start(daemonctl.StartOptions{
 				LockPath:   lp,
 				SocketPath: sp,
-				LogPath:    cfg.DaemonLogPath(),
+				LogPath:    cfg.DaemonConsoleLogPath(),
 				ConfigFlag: flagConfig,
 			}); err != nil {
 				return fmt.Errorf("start: %w", err)

@@ -162,7 +162,9 @@ func (h *Handler) scanDisc(ctx context.Context, item *queue.Item, logger *slog.L
 			logger.Info("bd_info results",
 				"decision_type", logs.DecisionBDInfoScan,
 				"decision_result", "completed",
-				"decision_reason", fmt.Sprintf("disc_id=%s studio=%s year=%s", result.BDInfo.DiscID, result.BDInfo.Studio, result.BDInfo.Year),
+				"disc_id", result.BDInfo.DiscID,
+				"studio", strings.TrimSpace(result.BDInfo.Studio),
+				"year", result.BDInfo.Year,
 				"disc_name", result.BDInfo.DiscName,
 				"volume_id", result.BDInfo.VolumeIdentifier,
 			)
@@ -361,7 +363,7 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	item := sess.Item
 	logger := sess.Logger
-	logger.Info("identification stage started",
+	logger.Debug("identification stage started",
 		"event_type", "stage_start",
 		"stage", "identification",
 		"disc_title", item.DiscTitle,
@@ -428,10 +430,9 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventIdentificationComplete,
 		"Identification Complete: "+item.DisplayTitle(),
 		msg,
-		"item_id", item.ID,
 	)
 
-	logger.Info("identification stage completed",
+	logger.Debug("identification stage completed",
 		"event_type", "stage_complete",
 		"stage", "identification",
 		"media_type", result.MediaType,
@@ -764,13 +765,25 @@ func (h *Handler) createEpisodePlaceholders(ctx context.Context, logger *slog.Lo
 				"duplicate_of", decision.DuplicateOf,
 			)
 		default:
-			logger.Info("tv title excluded",
+			attrs := []any{
 				"decision_type", logs.DecisionTitleSelection,
 				"decision_result", "excluded",
 				"decision_reason", decision.Reason,
 				"title_id", decision.Title.ID,
 				"duration", decision.Title.Duration,
-			)
+			}
+			switch decision.Reason {
+			case "gross_runtime_outlier":
+				attrs = append(attrs,
+					"outlier_bar_seconds", selection.OutlierBarSeconds,
+					"weighted_median_seconds", selection.WeightedMedianSeconds,
+				)
+			case "expected_runtime_mismatch", "over_expected_episode_count":
+				attrs = append(attrs,
+					"expected_runtimes_seconds", fmt.Sprint(selection.ExpectedRuntimeTargets),
+				)
+			}
+			logger.Info("tv title excluded", attrs...)
 		}
 	}
 	if selection.Ambiguous {
@@ -783,8 +796,13 @@ func (h *Handler) createEpisodePlaceholders(ctx context.Context, logger *slog.Lo
 
 	logger.Info("tv title selection summary",
 		"decision_type", logs.DecisionTitleSelection,
-		"decision_result", describeTVSelection(selection),
+		"decision_result", "selected",
 		"decision_reason", fmt.Sprintf("duplicates=%d extras=%d expected_episodes=%d", selection.DuplicateCount, selection.ExtraCount, len(expected)),
+		"selected", len(selection.SelectedTitles),
+		"candidates", len(selection.Decisions),
+		"weighted_median_seconds", selection.WeightedMedianSeconds,
+		"outlier_bar_seconds", selection.OutlierBarSeconds,
+		"expected_runtimes_seconds", fmt.Sprint(selection.ExpectedRuntimeTargets),
 	)
 
 	for idx, title := range selection.SelectedTitles {
@@ -798,8 +816,12 @@ func (h *Handler) createEpisodePlaceholders(ctx context.Context, logger *slog.Lo
 
 	logger.Info("episode placeholders created",
 		"decision_type", logs.DecisionEpisodePlaceholders,
-		"decision_result", fmt.Sprintf("%d episodes", len(selection.SelectedTitles)),
-		"decision_reason", fmt.Sprintf("season=%d titles=%d duplicates=%d", season, len(env.Titles), selection.DuplicateCount),
+		"decision_result", "created",
+		"decision_reason", "one placeholder per selected title",
+		"episodes", len(selection.SelectedTitles),
+		"season", season,
+		"titles", len(env.Titles),
+		"duplicates", selection.DuplicateCount,
 	)
 }
 
@@ -824,8 +846,9 @@ func (h *Handler) fetchExpectedEpisodes(ctx context.Context, logger *slog.Logger
 	}
 	logger.Info("expected episode profile fetched",
 		"decision_type", logs.DecisionTitleSelection,
-		"decision_result", fmt.Sprintf("%d expected episodes", len(s.Episodes)),
+		"decision_result", "fetched",
 		"decision_reason", "tmdb_season_episode_list",
+		"expected_episodes", len(s.Episodes),
 		"season", season,
 	)
 	return s.Episodes

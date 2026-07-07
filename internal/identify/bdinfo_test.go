@@ -100,7 +100,7 @@ func TestMapStudio(t *testing.T) {
 		{"Fox Home Entertainment", "20th Century Studios"},
 		{"Lionsgate Films", "Lionsgate"},
 		{"Unknown Provider Inc", "Unknown Provider Inc"}, // > 3 chars fallback
-		{"AB", ""},                                        // <= 3 chars, no match
+		{"AB", ""}, // <= 3 chars, no match
 	}
 	for _, tt := range tests {
 		got := mapStudio(tt.provider)
