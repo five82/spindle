@@ -68,6 +68,52 @@ func TestValidateAudioDurationsAcceptsMatchingAudio(t *testing.T) {
 	}
 }
 
+func TestValidateAudioDurationsToleratesShortCommentary(t *testing.T) {
+	// The Secret of My Success (Kino): source commentary ends 34s before the
+	// video does. Commentary-flagged streams may run short of the video.
+	result := &ffprobe.Result{
+		Format: ffprobe.Format{Duration: "6614.674000"},
+		Streams: []ffprobe.Stream{
+			{CodecType: "video"},
+			{CodecType: "audio", Duration: "6614.674000"},
+			{CodecType: "audio", Duration: "6580.296000", Disposition: map[string]int{"comment": 1}},
+		},
+	}
+
+	if err := validateAudioDurations("movie.mkv", result); err != nil {
+		t.Fatalf("validateAudioDurations returned error: %v", err)
+	}
+}
+
+func TestValidateAudioDurationsFlagsTruncatedCommentary(t *testing.T) {
+	result := &ffprobe.Result{
+		Format: ffprobe.Format{Duration: "6614.674000"},
+		Streams: []ffprobe.Stream{
+			{CodecType: "video"},
+			{CodecType: "audio", Duration: "6614.674000"},
+			{CodecType: "audio", Duration: "291.530000", Disposition: map[string]int{"comment": 1}},
+		},
+	}
+
+	if err := validateAudioDurations("movie.mkv", result); err == nil {
+		t.Fatal("expected truncated commentary duration error")
+	}
+}
+
+func TestValidateAudioDurationsFlagsLongCommentary(t *testing.T) {
+	result := &ffprobe.Result{
+		Format: ffprobe.Format{Duration: "6614.674000"},
+		Streams: []ffprobe.Stream{
+			{CodecType: "video"},
+			{CodecType: "audio", Duration: "6700.000000", Disposition: map[string]int{"comment": 1}},
+		},
+	}
+
+	if err := validateAudioDurations("movie.mkv", result); err == nil {
+		t.Fatal("expected over-long commentary duration error")
+	}
+}
+
 func TestValidateAudioDurationsFallsBackToVideoStreamDuration(t *testing.T) {
 	result := &ffprobe.Result{
 		Streams: []ffprobe.Stream{

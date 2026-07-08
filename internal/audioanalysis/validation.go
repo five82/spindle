@@ -46,9 +46,18 @@ func validateAudioDurations(label string, result *ffprobe.Result) error {
 		if !ok {
 			continue
 		}
-		if diff := math.Abs(videoDuration - audioDuration); diff > audioDurationToleranceSeconds {
-			return fmt.Errorf("%s: audio stream %d duration %.3fs differs from video %.3fs by %.3fs", label, i, audioDuration, videoDuration, diff)
+		diff := math.Abs(videoDuration - audioDuration)
+		if diff <= audioDurationToleranceSeconds {
+			continue
 		}
+		// Commentary tracks (disposition set in apply Phase 1, before this
+		// runs) often end before the credits on the source disc, so shorter
+		// than video is a source characteristic, not pipeline truncation.
+		// Under half the video still reads as truncation.
+		if stream.Disposition["comment"] == 1 && audioDuration < videoDuration && audioDuration >= videoDuration/2 {
+			continue
+		}
+		return fmt.Errorf("%s: audio stream %d duration %.3fs differs from video %.3fs by %.3fs", label, i, audioDuration, videoDuration, diff)
 	}
 	return nil
 }
