@@ -19,6 +19,18 @@ import (
 // the removal-cap guardrail.
 const creditsWindowSeconds = 420.0
 
+// creditsRegionStart returns when the end-credits region is assumed to
+// begin. The window is creditsWindowSeconds capped at 10% of runtime so
+// short TV content does not get a large share of its running time treated
+// as credits (where removals are uncapped). Unknown duration (<= 0) means
+// no credits region.
+func creditsRegionStart(videoSeconds float64) float64 {
+	if videoSeconds <= 0 {
+		return math.Inf(1)
+	}
+	return videoSeconds - math.Min(creditsWindowSeconds, videoSeconds*0.1)
+}
+
 // auditRemovalCapFailureReason is the AuditStats.FailureReason set when
 // resolved removals exceed the non-credits removal guardrail cap.
 const auditRemovalCapFailureReason = "non-credits removal cap exceeded"
@@ -30,7 +42,7 @@ const subtitleAuditSystemPrompt = `You are auditing an English SRT subtitle file
 
 FLAG ONLY these categories:
 - hallucination: a short phrase like "Thank you.", "Thanks for watching.", "Subscribe." appearing repeatedly in isolation (large timestamp gaps around it, not part of a conversation)
-- credits_music: lyric cues in the end-credits region after all narrative dialogue has ended
+- credits_music: lyric cues in the end-credits region after all narrative dialogue has ended. The final scene's real dialogue often continues into and interleaves with the credits song: remove only lyric lines, never conversational exchanges between characters, even inside the end-credits region.
 - music_bleed: soundtrack lyrics mid-film transcribed as dialogue (poetic/verse-chorus phrasing that does not fit the scene's conversation). PRESERVE diegetic singing: characters singing on-screen, performances, karaoke, plot-relevant lyrics. NEVER remove songs playing over the opening titles or title sequence; leave them alone. When unsure, skip.
 - garbled: text that is clearly not real English or makes no sense in any context. If garbled text is mid-film speech, propose a replacement only when the correct wording is unambiguous; NEVER remove garbled speech cues.
 - homophone: wrong word where surrounding text makes the correct word unambiguous (e.g. their/there, "would of" for "would have")
@@ -308,10 +320,7 @@ func applyResolvedEdits(cues []srtutil.Cue, resolved []resolvedEdit) []srtutil.C
 // outside the end-credits region exceed the guardrail cap of
 // max(5, len(cues)/10).
 func auditRemovalCap(cues []srtutil.Cue, resolved []resolvedEdit, videoSeconds float64) (exceeded bool, nonCreditsRemovals, cap int) {
-	creditsStart := math.Inf(1)
-	if videoSeconds > 0 {
-		creditsStart = videoSeconds - creditsWindowSeconds
-	}
+	creditsStart := creditsRegionStart(videoSeconds)
 	for _, r := range resolved {
 		if r.Action != "remove" {
 			continue
@@ -343,9 +352,8 @@ func buildAuditUserPrompt(cues []srtutil.Cue, params auditParams) string {
 	b.WriteString(params.MediaContext)
 	b.WriteString(".")
 	if params.VideoSeconds > 0 {
-		creditsStart := params.VideoSeconds - creditsWindowSeconds
 		fmt.Fprintf(&b, " Video duration: %s. Cues starting after %s are likely in the end-credits region.",
-			formatHMS(params.VideoSeconds), formatHMS(creditsStart))
+			formatHMS(params.VideoSeconds), formatHMS(creditsRegionStart(params.VideoSeconds)))
 	}
 	b.WriteString("\n\nSUBTITLE CUES (index|start-->end|text, cue line breaks shown as \\n):\n")
 	for i, c := range cues {

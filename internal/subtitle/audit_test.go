@@ -3,6 +3,7 @@ package subtitle
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -233,12 +234,11 @@ func TestAuditRemovalCapExceeded(t *testing.T) {
 }
 
 func TestAuditRemovalCapCreditsRegionExcluded(t *testing.T) {
-	// videoSeconds=1000 -> creditsStart=580. Cues 90..990 in steps of 10 for
-	// n=100 puts the last several cues in the credits region.
+	// videoSeconds=1000 -> window=min(420, 100)=100 -> creditsStart=900.
 	cues := manyCues(100) // cap = max(5, 100/10) = 10
 	var resolved []resolvedEdit
-	// Remove the last 12 cues (Start 890..990), all >= creditsStart=580.
-	for i := 88; i < 100; i++ {
+	// Remove the last 10 cues (Start 900..990), all >= creditsStart=900.
+	for i := 90; i < 100; i++ {
 		resolved = append(resolved, resolvedEdit{CueIndex: i, Action: "remove"})
 	}
 	exceeded, nonCredits, cap := auditRemovalCap(cues, resolved, 1000)
@@ -250,6 +250,26 @@ func TestAuditRemovalCapCreditsRegionExcluded(t *testing.T) {
 	}
 	if cap != 10 {
 		t.Fatalf("expected cap 10, got %d", cap)
+	}
+}
+
+func TestCreditsRegionStart(t *testing.T) {
+	tests := []struct {
+		name         string
+		videoSeconds float64
+		want         float64
+	}{
+		{name: "feature film uses full window", videoSeconds: 7200, want: 7200 - 420},
+		{name: "hour drama scales to 10 percent", videoSeconds: 3486.5, want: 3486.5 - 348.65},
+		{name: "sitcom episode scales to 10 percent", videoSeconds: 1320, want: 1320 - 132},
+		{name: "unknown duration has no credits region", videoSeconds: 0, want: math.Inf(1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := creditsRegionStart(tt.videoSeconds); math.Abs(got-tt.want) > 1e-9 && got != tt.want {
+				t.Fatalf("creditsRegionStart(%v) = %v, want %v", tt.videoSeconds, got, tt.want)
+			}
+		})
 	}
 }
 
