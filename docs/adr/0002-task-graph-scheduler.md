@@ -34,8 +34,9 @@ subtitling) reads ripped sources and runs concurrently with encoding; apply
 joins both branches and owns every write to encoded files. Task rows are a
 projection of `(template, item stage)` — retry and stage moves delete them
 and the scheduler recompiles lazily. Tasks are idempotent. Retries are
-manual-only. A failed task transitively fails its dependents; sibling
-subtrees run to completion.
+manual-only. A failed task moves its item to the failed stage, which stops
+dispatch of all the item's remaining pending tasks; already-running sibling
+tasks finish normally.
 
 **Resources.** Claims are declared per stage: `drive`, `gpu`, and `encode`,
 capacity 1 each. Episode identification claims the GPU only for TV items.

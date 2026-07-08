@@ -293,3 +293,66 @@ func TestRestoreSkipsMetadataSidecar(t *testing.T) {
 		t.Errorf("restored file missing: %v", err)
 	}
 }
+
+func registerEntry(t *testing.T, store *Store, fingerprint string, size int, cachedAt time.Time) {
+	t.Helper()
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "title01.mkv"), make([]byte, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Register(fingerprint, srcDir, nil); err != nil {
+		t.Fatalf("Register(%s): %v", fingerprint, err)
+	}
+	meta := EntryMetadata{
+		Fingerprint: fingerprint,
+		CachedAt:    cachedAt,
+		TitleCount:  1,
+		TotalBytes:  int64(size),
+	}
+	if err := store.WriteMetadata(fingerprint, meta); err != nil {
+		t.Fatalf("WriteMetadata(%s): %v", fingerprint, err)
+	}
+}
+
+func TestPruneRemovesOldestUntilUnderLimit(t *testing.T) {
+	cacheDir := t.TempDir()
+	store := New(cacheDir, 1)
+	store.maxBytes = 25
+
+	now := time.Now()
+	registerEntry(t, store, "oldest", 10, now.Add(-3*time.Hour))
+	registerEntry(t, store, "middle", 10, now.Add(-2*time.Hour))
+	registerEntry(t, store, "newest", 10, now.Add(-1*time.Hour))
+
+	if err := store.Prune(); err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+
+	if store.HasCache("oldest") {
+		t.Error("expected oldest entry to be pruned")
+	}
+	if !store.HasCache("middle") || !store.HasCache("newest") {
+		t.Error("expected middle and newest entries to survive prune")
+	}
+}
+
+func TestPruneNoOpUnderLimit(t *testing.T) {
+	cacheDir := t.TempDir()
+	store := New(cacheDir, 1)
+
+	registerEntry(t, store, "only", 10, time.Now())
+
+	if err := store.Prune(); err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if !store.HasCache("only") {
+		t.Error("expected entry under limit to survive prune")
+	}
+}
+
+func TestPruneMissingCacheDir(t *testing.T) {
+	store := New(filepath.Join(t.TempDir(), "does-not-exist"), 1)
+	if err := store.Prune(); err != nil {
+		t.Fatalf("Prune on missing dir: %v", err)
+	}
+}

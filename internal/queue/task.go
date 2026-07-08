@@ -8,10 +8,10 @@ import (
 )
 
 // TaskState is a task's lifecycle state. Readiness (all deps done) is derived
-// at query time, never stored. A failed item's remaining pending tasks are
-// gated by the item filter in ReadyTasks rather than being marked failed
-// themselves; when sibling subtrees can continue independently (Phase 4 of
-// the task-graph plan), transitive dependent failure moves here.
+// at query time, never stored. A task failure moves its item to the failed
+// stage, so the item filter in ReadyTasks stops dispatching ALL of the item's
+// remaining pending tasks (dependents and pending siblings alike) rather than
+// marking them failed; already-running sibling tasks finish normally.
 type TaskState string
 
 const (

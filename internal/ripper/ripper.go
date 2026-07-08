@@ -411,10 +411,27 @@ func (h *Handler) cacheFreshRip(logger *slog.Logger, sess *stage.Session, ripped
 		return
 	}
 	if err := h.cache.WriteMetadata(item.DiscFingerprint, meta); err != nil {
+		// An entry without metadata can never be restored or pruned; drop it
+		// rather than leave dead weight in the cache.
 		logger.Warn("rip cache metadata write failed",
 			"event_type", "cache_metadata_error",
 			"error_hint", err.Error(),
-			"impact", "cache entry may not be reused",
+			"impact", "cache entry removed; no cache for next rip of this disc",
+		)
+		if removeErr := h.cache.Remove(item.DiscFingerprint); removeErr != nil {
+			logger.Warn("rip cache entry removal failed",
+				"event_type", "cache_remove_error",
+				"error_hint", removeErr.Error(),
+				"impact", "unusable cache entry left on disk",
+			)
+		}
+		return
+	}
+	if err := h.cache.Prune(); err != nil {
+		logger.Warn("rip cache prune failed",
+			"event_type", "cache_prune_error",
+			"error_hint", err.Error(),
+			"impact", "rip cache may exceed its configured size limit",
 		)
 	}
 }
