@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/five82/spindle/internal/config"
@@ -329,5 +330,58 @@ func TestFindNewFile(t *testing.T) {
 	got = findNewFile(before, before)
 	if got != "" {
 		t.Errorf("findNewFile() = %q, want empty", got)
+	}
+}
+
+func TestCheckStagingSpaceInsufficient(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}, titleOverride: -1}
+	h.cfg.Paths.StagingDir = t.TempDir()
+
+	// No filesystem has 4 EiB free.
+	targets := []ripspec.Title{{ID: 0, SizeBytes: 1 << 62}}
+	err := h.checkStagingSpace(testLogger(), targets)
+	if err == nil {
+		t.Fatal("expected insufficient-space error")
+	}
+	if !strings.Contains(err.Error(), "insufficient staging space") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestCheckStagingSpaceSufficient(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}, titleOverride: -1}
+	h.cfg.Paths.StagingDir = t.TempDir()
+
+	targets := []ripspec.Title{
+		{ID: 0, SizeBytes: 1024},
+		{ID: 1, SizeBytes: 2048},
+	}
+	if err := h.checkStagingSpace(testLogger(), targets); err != nil {
+		t.Fatalf("expected sufficient space, got: %v", err)
+	}
+}
+
+func TestCheckStagingSpaceSkippedOnUnknownSize(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}, titleOverride: -1}
+	h.cfg.Paths.StagingDir = t.TempDir()
+
+	// One title without a scan size estimate disables the check entirely,
+	// even when another title alone would exceed free space.
+	targets := []ripspec.Title{
+		{ID: 0, SizeBytes: 1 << 62},
+		{ID: 1, SizeBytes: 0},
+	}
+	if err := h.checkStagingSpace(testLogger(), targets); err != nil {
+		t.Fatalf("expected skip on unknown size, got: %v", err)
+	}
+}
+
+func TestCheckStagingSpaceSkippedOnStatfsFailure(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}, titleOverride: -1}
+	h.cfg.Paths.StagingDir = "/nonexistent/spindle-staging"
+
+	targets := []ripspec.Title{{ID: 0, SizeBytes: 1 << 62}}
+	if err := h.checkStagingSpace(testLogger(), targets); err != nil {
+		t.Fatalf("expected skip on statfs failure, got: %v", err)
 	}
 }

@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite" // Pure-Go SQLite driver.
+	sqlite "modernc.org/sqlite" // Pure-Go SQLite driver.
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 const createTableSQL = `
@@ -106,15 +107,19 @@ func retryOnBusy(fn func() error) error {
 	return nil // unreachable
 }
 
-// isBusyError checks if an error indicates SQLite BUSY.
+// isBusyError checks if an error indicates SQLite BUSY or LOCKED, matching
+// on the driver's error code (masked to cover extended codes such as
+// SQLITE_BUSY_SNAPSHOT) rather than error-message substrings.
 func isBusyError(err error) bool {
-	if err == nil {
+	var se *sqlite.Error
+	if !errors.As(err, &se) {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "database is locked") ||
-		strings.Contains(msg, "SQLITE_BUSY") ||
-		strings.Contains(msg, "(5)")
+	switch se.Code() & 0xff {
+	case sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED:
+		return true
+	}
+	return false
 }
 
 // allColumns is the column list for SELECT queries.

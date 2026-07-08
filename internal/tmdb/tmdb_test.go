@@ -3,10 +3,12 @@ package tmdb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestDisplayTitle(t *testing.T) {
@@ -287,5 +289,107 @@ func TestAuthHeader(t *testing.T) {
 	expected := "Bearer my-secret-key"
 	if gotAuth != expected {
 		t.Errorf("Authorization header = %q, want %q", gotAuth, expected)
+	}
+}
+
+func withFastRetry(t *testing.T) {
+	t.Helper()
+	prev := retryBaseDelay
+	retryBaseDelay = time.Millisecond
+	t.Cleanup(func() { retryBaseDelay = prev })
+}
+
+func TestGetRetriesTransientFailures(t *testing.T) {
+	withFastRetry(t)
+	for _, status := range []int{http.StatusInternalServerError, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var calls int
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if calls < 3 {
+					w.WriteHeader(status)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if _, err := w.Write([]byte(`{"results":[{"id":1,"title":"Inception"}],"total_pages":1}`)); err != nil {
+					t.Errorf("writing response: %v", err)
+				}
+			}))
+			defer srv.Close()
+
+			client := New("key", srv.URL, "", nil)
+			results, err := client.SearchMulti(context.Background(), "inception")
+			if err != nil {
+				t.Fatalf("SearchMulti() after transient failures: %v", err)
+			}
+			if calls != 3 {
+				t.Errorf("server calls = %d, want 3", calls)
+			}
+			if len(results) != 1 || results[0].Title != "Inception" {
+				t.Errorf("unexpected results: %+v", results)
+			}
+		})
+	}
+}
+
+func TestGetDoesNotRetryClientErrors(t *testing.T) {
+	withFastRetry(t)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New("key", srv.URL, "", nil)
+	if _, err := client.SearchMulti(context.Background(), "nope"); err == nil {
+		t.Fatal("expected error for 404")
+	}
+	if calls != 1 {
+		t.Errorf("server calls = %d, want 1 (no retry on 4xx)", calls)
+	}
+}
+
+func TestGetGivesUpAfterMaxAttempts(t *testing.T) {
+	withFastRetry(t)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	client := New("key", srv.URL, "", nil)
+	_, err := client.SearchMulti(context.Background(), "down")
+	if err == nil {
+		t.Fatal("expected error after exhausting retries")
+	}
+	if calls != maxRequestAttempts {
+		t.Errorf("server calls = %d, want %d", calls, maxRequestAttempts)
+	}
+}
+
+func TestGetStopsRetryingOnContextCancel(t *testing.T) {
+	// Do NOT shorten retryBaseDelay: cancellation must win during the wait.
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	client := New("key", srv.URL, "", nil)
+	_, err := client.SearchMulti(ctx, "canceled")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("server calls = %d, want 1 (canceled during backoff)", calls)
 	}
 }

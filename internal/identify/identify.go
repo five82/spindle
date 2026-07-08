@@ -599,6 +599,7 @@ func convertTitles(discInfo *makemkv.DiscInfo) []ripspec.Title {
 			Name:         t.Name,
 			Duration:     t.Duration,
 			Chapters:     t.Chapters,
+			SizeBytes:    t.SizeBytes,
 			Playlist:     t.Playlist,
 			SegmentCount: t.SegmentCount,
 			SegmentMap:   t.SegmentMap,

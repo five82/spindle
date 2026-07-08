@@ -100,8 +100,14 @@ type searchResponse struct {
 	TotalPages int            `json:"total_pages"`
 }
 
+// Transient failures (network errors, 429, 5xx) are retried so a blip during
+// identification does not park the item in failed until a manual retry.
+const maxRequestAttempts = 3
+
+var retryBaseDelay = time.Second // var so tests can shorten it
+
 // get builds a URL, sets the Authorization Bearer header, makes the GET request,
-// reads the body, and unmarshals into result.
+// reads the body, and unmarshals into result, retrying transient failures.
 func (c *Client) get(ctx context.Context, path string, params url.Values, result any) error {
 	if params == nil {
 		params = url.Values{}
@@ -110,32 +116,66 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, result
 
 	reqURL := c.baseURL + path + "?" + params.Encode()
 
+	var lastErr error
+	for attempt := 1; attempt <= maxRequestAttempts; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(retryBaseDelay << (attempt - 2)):
+			}
+		}
+		retryable, err := c.doGet(ctx, reqURL, result)
+		if err == nil {
+			return nil
+		}
+		if !retryable || ctx.Err() != nil {
+			return err
+		}
+		lastErr = err
+		if attempt < maxRequestAttempts {
+			c.logger.Warn("TMDB request failed, retrying",
+				"event_type", "tmdb_retry",
+				"error_hint", err.Error(),
+				"impact", "identification delayed",
+				"attempt", attempt,
+				"max_attempts", maxRequestAttempts,
+			)
+		}
+	}
+	return fmt.Errorf("tmdb: %d attempts failed: %w", maxRequestAttempts, lastErr)
+}
+
+// doGet performs one GET round trip. retryable reports whether the failure is
+// transient: network/read errors, HTTP 429, or 5xx.
+func (c *Client) doGet(ctx context.Context, reqURL string, result any) (retryable bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return fmt.Errorf("tmdb: creating request: %w", err)
+		return false, fmt.Errorf("tmdb: creating request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("tmdb: request failed: %w", err)
+		return true, fmt.Errorf("tmdb: request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("tmdb: reading response: %w", err)
+		return true, fmt.Errorf("tmdb: reading response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("tmdb: unexpected status %d: %s", resp.StatusCode, string(body))
+		transient := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
+		return transient, fmt.Errorf("tmdb: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
 	if err := json.Unmarshal(body, result); err != nil {
-		return fmt.Errorf("tmdb: decoding response: %w", err)
+		return false, fmt.Errorf("tmdb: decoding response: %w", err)
 	}
-	return nil
+	return false, nil
 }
 
 // SearchTV searches for TV shows by name with an optional year filter.

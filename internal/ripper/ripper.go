@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/logs"
@@ -77,6 +79,10 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		"titles", len(targets),
 		"media_type", sess.Env.Metadata.MediaType,
 	)
+
+	if err := h.checkStagingSpace(logger, targets); err != nil {
+		return err
+	}
 
 	if err := h.ripTitles(ctx, sess, rippedDir, targets); err != nil {
 		return err
@@ -411,10 +417,27 @@ func (h *Handler) cacheFreshRip(logger *slog.Logger, sess *stage.Session, ripped
 		return
 	}
 	if err := h.cache.WriteMetadata(item.DiscFingerprint, meta); err != nil {
+		// An entry without metadata can never be restored or pruned; drop it
+		// rather than leave dead weight in the cache.
 		logger.Warn("rip cache metadata write failed",
 			"event_type", "cache_metadata_error",
 			"error_hint", err.Error(),
-			"impact", "cache entry may not be reused",
+			"impact", "cache entry removed; no cache for next rip of this disc",
+		)
+		if removeErr := h.cache.Remove(item.DiscFingerprint); removeErr != nil {
+			logger.Warn("rip cache entry removal failed",
+				"event_type", "cache_remove_error",
+				"error_hint", removeErr.Error(),
+				"impact", "unusable cache entry left on disk",
+			)
+		}
+		return
+	}
+	if err := h.cache.Prune(); err != nil {
+		logger.Warn("rip cache prune failed",
+			"event_type", "cache_prune_error",
+			"error_hint", err.Error(),
+			"impact", "rip cache may exceed its configured size limit",
 		)
 	}
 }
@@ -556,6 +579,58 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 		return targets, nil
 	}
 }
+
+// stagingSpaceMargin oversizes the MakeMKV scan estimate to absorb estimate
+// drift and other writes on the staging volume during the rip.
+const stagingSpaceMargin = 1.1
+
+// checkStagingSpace fails the rip immediately when the staging volume cannot
+// hold the selected titles, instead of surfacing a confusing copy error deep
+// into the rip. The check is advisory-only in the other direction: unknown
+// title sizes or a statfs failure never block a rip that might succeed.
+func (h *Handler) checkStagingSpace(logger *slog.Logger, targets []ripspec.Title) error {
+	var estimated int64
+	for _, t := range targets {
+		if t.SizeBytes <= 0 {
+			logger.Debug("staging space preflight skipped",
+				"event_type", "staging_space_preflight",
+				"reason", "title size unknown",
+				"title_id", t.ID,
+			)
+			return nil
+		}
+		estimated += t.SizeBytes
+	}
+	if estimated == 0 {
+		return nil
+	}
+
+	var fs unix.Statfs_t
+	if err := unix.Statfs(h.cfg.Paths.StagingDir, &fs); err != nil {
+		logger.Debug("staging space preflight skipped",
+			"event_type", "staging_space_preflight",
+			"reason", "statfs failed",
+			"error", err.Error(),
+		)
+		return nil
+	}
+	free := int64(fs.Bavail) * int64(fs.Bsize)
+	required := int64(float64(estimated) * stagingSpaceMargin)
+	if free < required {
+		return fmt.Errorf(
+			"insufficient staging space: rip needs about %.1f GiB (%.1f GiB estimated plus margin) but %s has %.1f GiB free; free up space and retry",
+			gib(required), gib(estimated), h.cfg.Paths.StagingDir, gib(free))
+	}
+	logger.Debug("staging space preflight passed",
+		"event_type", "staging_space_preflight",
+		"estimated_bytes", estimated,
+		"required_bytes", required,
+		"free_bytes", free,
+	)
+	return nil
+}
+
+func gib(bytes int64) float64 { return float64(bytes) / (1 << 30) }
 
 // mapAndValidateAssets maps ripped files to envelope assets and validates them.
 // For TV content, uses title ID parsing from filenames. For movies, scans the

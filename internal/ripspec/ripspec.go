@@ -52,6 +52,7 @@ type Title struct {
 	Name           string `json:"name"`
 	Duration       int    `json:"duration"`
 	Chapters       int    `json:"chapters"`
+	SizeBytes      int64  `json:"size_bytes,omitempty"`
 	Playlist       string `json:"playlist,omitempty"`
 	SegmentCount   int    `json:"segment_count,omitempty"`
 	SegmentMap     string `json:"segment_map,omitempty"`
