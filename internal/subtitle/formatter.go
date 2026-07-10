@@ -56,49 +56,37 @@ type whisperXPayload struct {
 	SpeechSegments   []map[string]any `json:"speech_segments,omitempty"`
 }
 
-func formatSubtitleFromCanonical(ctx context.Context, canonical transcriptionArtifacts, workDir, displayPath string, videoSeconds float64, subtitleLanguage string) (formatResult, error) {
+func formatSubtitleFromCanonical(ctx context.Context, canonical transcriptionArtifacts, workDir, displayPath string, videoSeconds float64, subtitleLanguage string) (FormatResult, error) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		return formatResult{}, fmt.Errorf("create subtitle work dir: %w", err)
+		return FormatResult{}, fmt.Errorf("create subtitle work dir: %w", err)
 	}
 	filteredJSONPath := filepath.Join(workDir, "audio.filtered.json")
 	stats, err := filterWhisperXJSON(canonical.JSONPath, filteredJSONPath, videoSeconds)
 	if err != nil {
-		return formatResult{}, err
+		return FormatResult{}, err
 	}
 	if err := runStableTSFormatter(ctx, filteredJSONPath, displayPath, subtitleLanguage); err != nil {
-		return formatResult{}, err
+		return FormatResult{}, err
 	}
 	postStats, err := postProcessDisplaySRT(displayPath, videoSeconds)
 	if err != nil {
-		return formatResult{}, err
+		return FormatResult{}, err
 	}
-	return formatResult{
+	return FormatResult{
 		DisplayPath:                displayPath,
 		OriginalSegments:           stats.OriginalSegments,
 		FilteredSegments:           stats.FilteredSegments,
 		RemovedByTextRules:         stats.RemovedByTextRules,
 		RemovedBySegmentHeuristics: stats.RemovedBySegmentHeuristics,
 		SplitCues:                  postStats.SplitCues,
+		MergedCues:                 postStats.MergedCues,
 		WrappedCues:                postStats.WrappedCues,
 		RetimedCues:                postStats.RetimedCues,
-		FormatterDecision:          "formatted",
 	}, nil
 }
 
 type transcriptionArtifacts struct {
 	JSONPath string
-}
-
-type formatResult struct {
-	DisplayPath                string
-	OriginalSegments           int
-	FilteredSegments           int
-	RemovedByTextRules         int
-	RemovedBySegmentHeuristics int
-	SplitCues                  int
-	WrappedCues                int
-	RetimedCues                int
-	FormatterDecision          string
 }
 
 // filterStats summarizes derived-subtitle filtering decisions.
@@ -111,12 +99,15 @@ type filterStats struct {
 
 // FormatResult summarizes display-subtitle formatting output.
 type FormatResult struct {
-	DisplayPath      string
-	OriginalSegments int
-	FilteredSegments int
-	SplitCues        int
-	WrappedCues      int
-	RetimedCues      int
+	DisplayPath                string
+	OriginalSegments           int
+	FilteredSegments           int
+	RemovedByTextRules         int
+	RemovedBySegmentHeuristics int
+	SplitCues                  int
+	MergedCues                 int
+	WrappedCues                int
+	RetimedCues                int
 }
 
 // DisplaySubtitlePath returns the standard sidecar subtitle path for a video.

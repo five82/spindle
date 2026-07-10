@@ -7,6 +7,17 @@ import (
 	"github.com/five82/spindle/internal/srtutil"
 )
 
+// indexedCuesFrom builds []indexedTimedCue from []srtutil.Cue for tests that
+// exercise the indexed hallucination filters directly (production only uses
+// the *Indexed variants; there is no srtutil.Cue-based wrapper anymore).
+func indexedCuesFrom(cues []srtutil.Cue) []indexedTimedCue {
+	indexed := make([]indexedTimedCue, 0, len(cues))
+	for i, cue := range cues {
+		indexed = append(indexed, indexedTimedCue{Orig: i, Start: cue.Start, End: cue.End, Text: cue.Text})
+	}
+	return indexed
+}
+
 func TestParseSRT_Basic(t *testing.T) {
 	content := `1
 00:00:01,000 --> 00:00:03,000
@@ -67,7 +78,7 @@ func TestNormalizeText(t *testing.T) {
 	}
 }
 
-func TestRemoveIsolatedHallucinations_RepeatedPhrase(t *testing.T) {
+func TestRemoveIsolatedHallucinationsIndexed_RepeatedPhrase(t *testing.T) {
 	// 4 consecutive "thank you" cues with >10s gaps between each.
 	cues := []srtutil.Cue{
 		{Index: 1, Start: 10, End: 12, Text: "Thank you"},
@@ -75,33 +86,33 @@ func TestRemoveIsolatedHallucinations_RepeatedPhrase(t *testing.T) {
 		{Index: 3, Start: 40, End: 42, Text: "Thank you"},
 		{Index: 4, Start: 55, End: 57, Text: "Thank you"},
 	}
-	result := removeIsolatedHallucinations(cues)
+	result := removeIsolatedHallucinationsIndexed(indexedCuesFrom(cues))
 	if len(result) != 0 {
 		t.Errorf("expected all repeated hallucinations removed, got %d cues", len(result))
 	}
 }
 
-func TestRemoveIsolatedHallucinations_PreservesCloseRepeats(t *testing.T) {
+func TestRemoveIsolatedHallucinationsIndexed_PreservesCloseRepeats(t *testing.T) {
 	// Repeated text but gaps <= 10s: should be preserved.
 	cues := []srtutil.Cue{
 		{Index: 1, Start: 10, End: 12, Text: "Thank you"},
 		{Index: 2, Start: 15, End: 17, Text: "Thank you"},
 		{Index: 3, Start: 20, End: 22, Text: "Thank you"},
 	}
-	result := removeIsolatedHallucinations(cues)
+	result := removeIsolatedHallucinationsIndexed(indexedCuesFrom(cues))
 	if len(result) != 3 {
 		t.Errorf("expected 3 cues preserved (close together), got %d", len(result))
 	}
 }
 
-func TestRemoveIsolatedHallucinations_KnownPhrase(t *testing.T) {
+func TestRemoveIsolatedHallucinationsIndexed_KnownPhrase(t *testing.T) {
 	// Isolated known phrase with >= 30s gaps on both sides.
 	cues := []srtutil.Cue{
 		{Index: 1, Start: 10, End: 12, Text: "Normal dialogue"},
 		{Index: 2, Start: 50, End: 52, Text: "Thank you"},
 		{Index: 3, Start: 90, End: 92, Text: "More dialogue"},
 	}
-	result := removeIsolatedHallucinations(cues)
+	result := removeIsolatedHallucinationsIndexed(indexedCuesFrom(cues))
 	if len(result) != 2 {
 		t.Errorf("expected isolated hallucination removed, got %d cues", len(result))
 	}
@@ -110,57 +121,57 @@ func TestRemoveIsolatedHallucinations_KnownPhrase(t *testing.T) {
 	}
 }
 
-func TestRemoveIsolatedHallucinations_PreservesNonIsolated(t *testing.T) {
+func TestRemoveIsolatedHallucinationsIndexed_PreservesNonIsolated(t *testing.T) {
 	// Known phrase but gaps < 30s: should be preserved.
 	cues := []srtutil.Cue{
 		{Index: 1, Start: 10, End: 12, Text: "Normal"},
 		{Index: 2, Start: 20, End: 22, Text: "Thank you"},
 		{Index: 3, Start: 30, End: 32, Text: "More"},
 	}
-	result := removeIsolatedHallucinations(cues)
+	result := removeIsolatedHallucinationsIndexed(indexedCuesFrom(cues))
 	if len(result) != 3 {
 		t.Errorf("expected all cues preserved (not isolated), got %d", len(result))
 	}
 }
 
-func TestRemoveIsolatedHallucinations_MusicPattern(t *testing.T) {
+func TestRemoveIsolatedHallucinationsIndexed_MusicPattern(t *testing.T) {
 	// Isolated music symbol cue.
 	cues := []srtutil.Cue{
 		{Index: 1, Start: 10, End: 12, Text: "Normal"},
-		{Index: 2, Start: 50, End: 52, Text: "\u266A \u266B"},
+		{Index: 2, Start: 50, End: 52, Text: "♪ ♫"},
 		{Index: 3, Start: 90, End: 92, Text: "More"},
 	}
-	result := removeIsolatedHallucinations(cues)
+	result := removeIsolatedHallucinationsIndexed(indexedCuesFrom(cues))
 	if len(result) != 2 {
 		t.Errorf("expected isolated music cue removed, got %d cues", len(result))
 	}
 }
 
-func TestSweepTrailingHallucinations_RemovesInLast300s(t *testing.T) {
+func TestSweepTrailingHallucinationsIndexed_RemovesInLast300s(t *testing.T) {
 	cues := []srtutil.Cue{
 		{Index: 1, Start: 100, End: 102, Text: "Dialogue"},
 		{Index: 2, Start: 500, End: 502, Text: "More dialogue"},
 		{Index: 3, Start: 550, End: 552, Text: "Thank you"},
-		{Index: 4, Start: 580, End: 582, Text: "\u266A"},
+		{Index: 4, Start: 580, End: 582, Text: "♪"},
 	}
 	// Video is 600s, threshold = 300s.
-	result := sweepTrailingHallucinations(cues, 600)
+	result := sweepTrailingHallucinationsIndexed(indexedCuesFrom(cues), 600)
 	if len(result) != 2 {
 		t.Errorf("expected trailing hallucinations removed, got %d cues", len(result))
 	}
 }
 
-func TestSweepTrailingHallucinations_ShortVideoSkipped(t *testing.T) {
+func TestSweepTrailingHallucinationsIndexed_ShortVideoSkipped(t *testing.T) {
 	cues := []srtutil.Cue{
 		{Index: 1, Start: 10, End: 12, Text: "Thank you"},
 	}
-	result := sweepTrailingHallucinations(cues, 300)
+	result := sweepTrailingHallucinationsIndexed(indexedCuesFrom(cues), 300)
 	if len(result) != 1 {
 		t.Errorf("expected no filtering for short video, got %d cues", len(result))
 	}
 }
 
-func TestFilterWhisperXOutput_FullPipeline(t *testing.T) {
+func TestFilterIndexedHallucinations_FullPipeline(t *testing.T) {
 	srt := `1
 00:00:01,000 --> 00:00:03,000
 Hello world
@@ -178,23 +189,23 @@ Thank you
 Goodbye
 `
 	// Video is 1200s. Cue 3 is isolated (gaps > 30s) and known phrase.
-	result, err := filterWhisperXOutput(srt, 1200)
+	cues := srtutil.Parse(srt)
+	result, err := filterIndexedHallucinations(indexedCuesFrom(cues), 1200)
 	if err != nil {
-		t.Fatalf("filterWhisperXOutput: %v", err)
+		t.Fatalf("filterIndexedHallucinations: %v", err)
 	}
-
-	cues := srtutil.Parse(result)
-	if len(cues) != 3 {
-		t.Fatalf("expected 3 cues after filtering, got %d", len(cues))
+	if len(result) != 3 {
+		t.Fatalf("expected 3 cues after filtering, got %d", len(result))
 	}
-
-	// Verify renumbering.
-	if cues[0].Index != 1 || cues[1].Index != 2 || cues[2].Index != 3 {
-		t.Error("cues not renumbered correctly")
+	want := []string{"Hello world", "How are you", "Goodbye"}
+	for i, w := range want {
+		if result[i].Text != w {
+			t.Errorf("cue %d text = %q, want %q", i, result[i].Text, w)
+		}
 	}
 }
 
-func TestFilterWhisperXOutput_AllRemoved(t *testing.T) {
+func TestFilterIndexedHallucinations_AllRemoved(t *testing.T) {
 	srt := `1
 00:00:01,000 --> 00:00:02,000
 Thank you
@@ -207,7 +218,8 @@ Thank you
 00:02:00,000 --> 00:02:01,000
 Thank you
 `
-	_, err := filterWhisperXOutput(srt, 300)
+	cues := srtutil.Parse(srt)
+	_, err := filterIndexedHallucinations(indexedCuesFrom(cues), 300)
 	if err == nil {
 		t.Fatal("expected error when all cues removed")
 	}
@@ -216,14 +228,14 @@ Thank you
 	}
 }
 
-func TestFilterWhisperXOutput_EmptyInput(t *testing.T) {
-	_, err := filterWhisperXOutput("", 100)
+func TestFilterIndexedHallucinations_EmptyInput(t *testing.T) {
+	_, err := filterIndexedHallucinations(nil, 100)
 	if err == nil {
 		t.Fatal("expected error on empty input")
 	}
 }
 
-func TestRemoveIsolatedHallucinations_Boundaries(t *testing.T) {
+func TestRemoveIsolatedHallucinationsIndexed_Boundaries(t *testing.T) {
 	tests := []struct {
 		name     string
 		cues     []srtutil.Cue
@@ -254,7 +266,7 @@ func TestRemoveIsolatedHallucinations_Boundaries(t *testing.T) {
 			cues: []srtutil.Cue{
 				{Index: 1, Start: 10, End: 12, Text: "Normal"},
 				{Index: 2, Start: 42, End: 44, Text: "Thank you"}, // gap before = 30.0
-				{Index: 3, Start: 74, End: 76, Text: "More"},       // gap after = 30.0
+				{Index: 3, Start: 74, End: 76, Text: "More"},      // gap after = 30.0
 			},
 			wantLen:  2,
 			wantText: []string{"Normal", "More"},
@@ -273,8 +285,8 @@ func TestRemoveIsolatedHallucinations_Boundaries(t *testing.T) {
 			name: "rule3_music_gap_exactly_30s_removed",
 			cues: []srtutil.Cue{
 				{Index: 1, Start: 10, End: 12, Text: "Normal"},
-				{Index: 2, Start: 42, End: 44, Text: "\u266A"},  // gap before = 30.0
-				{Index: 3, Start: 74, End: 76, Text: "More"},    // gap after = 30.0
+				{Index: 2, Start: 42, End: 44, Text: "♪"},    // gap before = 30.0
+				{Index: 3, Start: 74, End: 76, Text: "More"}, // gap after = 30.0
 			},
 			wantLen:  2,
 			wantText: []string{"Normal", "More"},
@@ -283,7 +295,7 @@ func TestRemoveIsolatedHallucinations_Boundaries(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := removeIsolatedHallucinations(tt.cues)
+			result := removeIsolatedHallucinationsIndexed(indexedCuesFrom(tt.cues))
 			if len(result) != tt.wantLen {
 				t.Fatalf("got %d cues, want %d", len(result), tt.wantLen)
 			}
@@ -296,20 +308,20 @@ func TestRemoveIsolatedHallucinations_Boundaries(t *testing.T) {
 	}
 }
 
-func TestRemoveIsolatedHallucinations_RuleInteraction(t *testing.T) {
+func TestRemoveIsolatedHallucinationsIndexed_RuleInteraction(t *testing.T) {
 	// Rule 1 removes repeated "thank you" cues, compaction changes gaps,
 	// then Rule 2 removes "bye" which is now isolated by >= 30s.
 	cues := []srtutil.Cue{
 		{Index: 1, Start: 0, End: 2, Text: "Dialogue one"},
-		{Index: 2, Start: 15, End: 17, Text: "Thank you"},  // repeated run start
-		{Index: 3, Start: 30, End: 32, Text: "Thank you"},  // gap = 13
-		{Index: 4, Start: 45, End: 47, Text: "Thank you"},  // gap = 13
+		{Index: 2, Start: 15, End: 17, Text: "Thank you"}, // repeated run start
+		{Index: 3, Start: 30, End: 32, Text: "Thank you"}, // gap = 13
+		{Index: 4, Start: 45, End: 47, Text: "Thank you"}, // gap = 13
 		{Index: 5, Start: 100, End: 102, Text: "Dialogue two"},
-		{Index: 6, Start: 140, End: 142, Text: "Bye"},      // gap before = 38, after = 58
+		{Index: 6, Start: 140, End: 142, Text: "Bye"}, // gap before = 38, after = 58
 		{Index: 7, Start: 200, End: 202, Text: "Dialogue three"},
 	}
 
-	result := removeIsolatedHallucinations(cues)
+	result := removeIsolatedHallucinationsIndexed(indexedCuesFrom(cues))
 
 	// Rule 1 removes cues 2-4 (3 identical, gaps > 10s).
 	// After compaction: [Dialogue one@0, Dialogue two@100, Bye@140, Dialogue three@200]
@@ -325,7 +337,7 @@ func TestRemoveIsolatedHallucinations_RuleInteraction(t *testing.T) {
 	}
 }
 
-func TestRemoveIsolatedHallucinations_MultiLineCue(t *testing.T) {
+func TestRemoveIsolatedHallucinationsIndexed_MultiLineCue(t *testing.T) {
 	tests := []struct {
 		name     string
 		cues     []srtutil.Cue
@@ -369,7 +381,7 @@ func TestRemoveIsolatedHallucinations_MultiLineCue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := removeIsolatedHallucinations(tt.cues)
+			result := removeIsolatedHallucinationsIndexed(indexedCuesFrom(tt.cues))
 			if len(result) != tt.wantLen {
 				t.Fatalf("got %d cues, want %d", len(result), tt.wantLen)
 			}
@@ -381,4 +393,3 @@ func TestRemoveIsolatedHallucinations_MultiLineCue(t *testing.T) {
 		})
 	}
 }
-

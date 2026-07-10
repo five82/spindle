@@ -297,7 +297,7 @@ func newGensubtitleCmd() *cobra.Command {
 					formatStart = time.Now()
 				},
 				OnFormattingComplete: func(formatted subtitle.FormatResult) {
-					fmt.Printf("%s (%d -> %d segments, split %d, wrapped %d, retimed %d, %s)\n", successStyle("done"), formatted.OriginalSegments, formatted.FilteredSegments, formatted.SplitCues, formatted.WrappedCues, formatted.RetimedCues, formatPhaseDuration(time.Since(formatStart)))
+					fmt.Printf("%s (%d -> %d segments, split %d, merged %d, wrapped %d, retimed %d, %s)\n", successStyle("done"), formatted.OriginalSegments, formatted.FilteredSegments, formatted.SplitCues, formatted.MergedCues, formatted.WrappedCues, formatted.RetimedCues, formatPhaseDuration(time.Since(formatStart)))
 				},
 			})
 			if err != nil {

@@ -11,22 +11,19 @@ import (
 )
 
 const (
-	preferredSubtitleReadingSpeed = 20.0
-	preferredSubtitleCueDuration  = 1.0
-	preferredWrapCharsPerLine     = 41
-	preferredDisplayMaxCueChars   = 80
-	preferredDisplayMaxCueWords   = 16
-	preferredDisplayMaxCueDur     = 8.5
-	displayCueGapPadding          = 0.04
-	maxDisplayExtensionPerSide    = 2.0
-	longCueTrimReadingSpeed       = 18.0
-	longCueTrimMinDuration        = 2.0
-	longCueTrimMaxWords           = 12
-	longCueTrimMaxCPS             = 12.0
+	// targetMinCueDuration is the extension target for short cues; it sits
+	// above minSubtitleCueDuration so millisecond rounding cannot dip a
+	// retimed cue back under the validator's floor.
+	targetMinCueDuration       = 1.0
+	maxDisplayExtensionPerSide = 2.0
+	// mergeMaxCueGap bounds the silence between two cues that may be merged
+	// into one; larger gaps mean separate utterances.
+	mergeMaxCueGap = 0.5
 )
 
 type displayPostProcessStats struct {
 	SplitCues   int
+	MergedCues  int
 	WrappedCues int
 	RetimedCues int
 }
@@ -50,38 +47,35 @@ func postProcessDisplaySRT(path string, videoSeconds float64) (displayPostProces
 }
 
 func postProcessDisplayCues(cues []srtutil.Cue, videoSeconds float64) ([]srtutil.Cue, displayPostProcessStats) {
-	processed, splitCount := splitDisplayCues(cues)
-	stats := displayPostProcessStats{SplitCues: splitCount}
-	for i := range processed {
-		wrapped, changed := wrapDisplayCueText(processed[i].Text)
+	split, splitCount := splitDisplayCues(cues)
+	merged, mergeCount := mergeDisplayCues(split)
+	stats := displayPostProcessStats{SplitCues: splitCount, MergedCues: mergeCount}
+	for i := range merged {
+		wrapped, changed := wrapDisplayCueText(merged[i].Text)
 		if changed {
-			processed[i].Text = wrapped
+			merged[i].Text = wrapped
 			stats.WrappedCues++
 		}
 	}
-	stats.RetimedCues = retimeDisplayCues(processed, videoSeconds)
-	return processed, stats
+	stats.RetimedCues = retimeDisplayCues(merged, videoSeconds)
+	return merged, stats
 }
 
 func wrapDisplayCueText(text string) (string, bool) {
 	normalized := normalizeCueWhitespace(text)
 	if normalized == "" {
-		return "", strings.TrimSpace(text) != ""
+		return "", text != ""
 	}
-	if !strings.Contains(normalized, "\n") && utf8.RuneCountInString(normalized) <= maxSubtitleCharsPerLine {
-		return normalized, normalized != strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	result := normalized
+	if utf8.RuneCountInString(normalized) > maxSubtitleCharsPerLine {
+		words := strings.Fields(normalized)
+		if len(words) >= 2 {
+			if breakAt, ok := bestTwoLineBreak(words, maxSubtitleCharsPerLine); ok {
+				result = strings.Join(words[:breakAt], " ") + "\n" + strings.Join(words[breakAt:], " ")
+			}
+		}
 	}
-
-	words := strings.Fields(normalized)
-	if len(words) < 2 {
-		return normalized, normalized != strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
-	}
-	breakAt, ok := bestTwoLineBreak(words, preferredWrapCharsPerLine)
-	if !ok {
-		return normalized, normalized != strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
-	}
-	wrapped := strings.Join(words[:breakAt], " ") + "\n" + strings.Join(words[breakAt:], " ")
-	return wrapped, wrapped != strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	return result, result != text
 }
 
 func normalizeCueWhitespace(text string) string {
@@ -89,7 +83,37 @@ func normalizeCueWhitespace(text string) string {
 	if trimmed == "" {
 		return ""
 	}
-	return strings.Join(strings.Fields(strings.ReplaceAll(trimmed, "\n", " ")), " ")
+	collapsed := strings.Join(strings.Fields(strings.ReplaceAll(trimmed, "\n", " ")), " ")
+	return insertMissingPunctuationSpaces(collapsed)
+}
+
+// insertMissingPunctuationSpaces repairs words the transcription glued
+// together across punctuation ("Ow!which", "shh.Ah!"). A space is inserted
+// after ",", "!", or "?" between two letters, and after "." only between a
+// lowercase and an uppercase letter so abbreviations ("U.S.A.", "a.m.") and
+// numbers ("3.5", "1,000") stay intact.
+func insertMissingPunctuationSpaces(text string) string {
+	runes := []rune(text)
+	var b strings.Builder
+	b.Grow(len(text))
+	for i, r := range runes {
+		b.WriteRune(r)
+		if i == 0 || i == len(runes)-1 {
+			continue
+		}
+		prev, next := runes[i-1], runes[i+1]
+		switch r {
+		case ',', '!', '?':
+			if unicode.IsLetter(prev) && unicode.IsLetter(next) {
+				b.WriteRune(' ')
+			}
+		case '.':
+			if unicode.IsLower(prev) && unicode.IsUpper(next) {
+				b.WriteRune(' ')
+			}
+		}
+	}
+	return b.String()
 }
 
 func bestTwoLineBreak(words []string, maxChars int) (int, bool) {
@@ -231,31 +255,24 @@ func splitDisplayCues(cues []srtutil.Cue) ([]srtutil.Cue, int) {
 	return processed, splitCount
 }
 
+// splitDisplayCue splits a cue whose text cannot wrap cleanly into two
+// 42-char lines. Duration-based splitting is not done here: the Python
+// stable-ts stage owns duration splits because it has word timings, so by
+// the time cues reach this pass only line-length overflow remains to fix.
 func splitDisplayCue(cue srtutil.Cue) []srtutil.Cue {
 	text := normalizeCueWhitespace(cue.Text)
 	if text == "" {
 		cue.Text = ""
 		return []srtutil.Cue{cue}
 	}
+	// Unsplit cues keep their original text; the wrap pass normalizes and
+	// counts the change, so WrappedCues stays an honest stat.
 	words := strings.Fields(text)
-	if len(words) < 2 {
-		cue.Text = text
+	if len(words) < 2 || cueWrapsCleanly(text) {
 		return []srtutil.Cue{cue}
 	}
-	duration := cue.End - cue.Start
-	if !shouldSplitDisplayCue(text, duration, len(words)) {
-		cue.Text = text
-		return []srtutil.Cue{cue}
-	}
-	chunkMaxChars := preferredDisplayMaxCueChars
-	chunkMaxWords := preferredDisplayMaxCueWords
-	if !cueWrapsCleanly(text) {
-		chunkMaxChars = 70
-		chunkMaxWords = 14
-	}
-	chunks := splitWordsIntoCueChunks(words, chunkMaxChars, chunkMaxWords)
+	chunks := splitWordsIntoCueChunks(words)
 	if len(chunks) < 2 {
-		cue.Text = text
 		return []srtutil.Cue{cue}
 	}
 	parts := make([]srtutil.Cue, 0, len(chunks))
@@ -263,6 +280,7 @@ func splitDisplayCue(cue srtutil.Cue) []srtutil.Cue {
 	for _, chunk := range chunks {
 		totalRunes += utf8.RuneCountInString(chunk)
 	}
+	duration := cue.End - cue.Start
 	start := cue.Start
 	remainingDuration := duration
 	remainingRunes := totalRunes
@@ -304,53 +322,34 @@ func cueWrapsCleanly(text string) bool {
 	return len(lines) > 0 && len(lines) <= maxSubtitleLinesPerCue && !hasOverlongLine(lines)
 }
 
-func shouldSplitDisplayCue(text string, duration float64, wordCount int) bool {
-	textRunes := utf8.RuneCountInString(text)
-	wrapsCleanly := cueWrapsCleanly(text)
-	if wrapsCleanly {
-		cps := 0.0
-		if duration > 0 {
-			cps = float64(textRunes) / duration
-		}
-		if duration <= preferredDisplayMaxCueDur && cps <= preferredSubtitleReadingSpeed && wordCount <= preferredDisplayMaxCueWords+2 {
-			return false
-		}
-		if duration <= maxSubtitleCueDuration+1.0 && cps <= 18.0 && wordCount <= preferredDisplayMaxCueWords+2 {
-			return false
-		}
-	}
-	return textRunes > preferredDisplayMaxCueChars || wordCount > preferredDisplayMaxCueWords || duration > preferredDisplayMaxCueDur || !wrapsCleanly
-}
-
-func splitWordsIntoCueChunks(words []string, maxChars, maxWords int) []string {
+// splitWordsIntoCueChunks greedily grows a chunk word by word while it still
+// wraps cleanly into maxSubtitleLinesPerCue lines. When the next word would
+// break that, it cuts at the last preferred punctuation boundary inside the
+// chunk if one exists past the chunk start, else right before the
+// overflowing word. Every chunk has at least one word.
+func splitWordsIntoCueChunks(words []string) []string {
 	if len(words) == 0 {
 		return nil
 	}
 	chunks := make([]string, 0, len(words))
 	for start := 0; start < len(words); {
-		end := start
-		charCount := 0
+		end := start + 1
 		lastPreferredBreak := 0
+		if cueBreakPreferred(words[start]) {
+			lastPreferredBreak = end
+		}
 		for end < len(words) {
-			wordLen := utf8.RuneCountInString(words[end])
-			if end > start {
-				wordLen++
-			}
-			prospectiveWords := end - start + 1
-			if end > start && ((maxWords > 0 && prospectiveWords > maxWords) || (maxChars > 0 && charCount+wordLen > maxChars)) {
-				if lastPreferredBreak > start {
-					end = lastPreferredBreak
-				}
+			candidate := strings.Join(words[start:end+1], " ")
+			if !cueWrapsCleanly(candidate) {
 				break
 			}
-			charCount += wordLen
 			end++
 			if cueBreakPreferred(words[end-1]) {
 				lastPreferredBreak = end
 			}
 		}
-		if end == start {
-			end++
+		if end < len(words) && lastPreferredBreak > start {
+			end = lastPreferredBreak
 		}
 		chunks = append(chunks, strings.Join(words[start:end], " "))
 		start = end
@@ -362,6 +361,62 @@ func cueBreakPreferred(word string) bool {
 	return strings.HasSuffix(word, ".") || strings.HasSuffix(word, ",") || strings.HasSuffix(word, "?") || strings.HasSuffix(word, "!") || strings.HasSuffix(word, ";") || strings.HasSuffix(word, ":")
 }
 
+// mergeDisplayCues joins a cue with its successor when either is too short
+// or too fast to read and the pair plays as one utterance. Merging absorbs
+// the inter-cue gap, which is the only way to fix reading speed without
+// dropping text.
+func mergeDisplayCues(cues []srtutil.Cue) ([]srtutil.Cue, int) {
+	if len(cues) == 0 {
+		return cues, 0
+	}
+	result := make([]srtutil.Cue, 0, len(cues))
+	result = append(result, cues[0])
+	var merged int
+	for i := 1; i < len(cues); i++ {
+		next := cues[i]
+		cur := result[len(result)-1]
+		if mergedCue, ok := tryMergeDisplayCues(cur, next); ok {
+			result[len(result)-1] = mergedCue
+			merged++
+			continue
+		}
+		result = append(result, next)
+	}
+	return result, merged
+}
+
+func tryMergeDisplayCues(cur, next srtutil.Cue) (srtutil.Cue, bool) {
+	curText := normalizeCueWhitespace(cur.Text)
+	nextText := normalizeCueWhitespace(next.Text)
+	if curText == "" || nextText == "" {
+		return srtutil.Cue{}, false
+	}
+	if !cueIsDeficient(cur, curText) && !cueIsDeficient(next, nextText) {
+		return srtutil.Cue{}, false
+	}
+	if gap := next.Start - cur.End; gap > mergeMaxCueGap {
+		return srtutil.Cue{}, false
+	}
+	if next.End-cur.Start > maxSubtitleCueDuration {
+		return srtutil.Cue{}, false
+	}
+	mergedText := normalizeCueWhitespace(curText + " " + nextText)
+	if !cueWrapsCleanly(mergedText) {
+		return srtutil.Cue{}, false
+	}
+	return srtutil.Cue{Index: cur.Index, Start: cur.Start, End: next.End, Text: mergedText}, true
+}
+
+// cueIsDeficient reports whether a cue is too short to comfortably display
+// or too fast to comfortably read.
+func cueIsDeficient(cue srtutil.Cue, normalizedText string) bool {
+	duration := cue.End - cue.Start
+	if duration < minSubtitleCueDuration {
+		return true
+	}
+	return float64(utf8.RuneCountInString(normalizedText))/duration > maxSubtitleReadingSpeed
+}
+
 func retimeDisplayCues(cues []srtutil.Cue, videoSeconds float64) int {
 	if len(cues) == 0 {
 		return 0
@@ -370,7 +425,20 @@ func retimeDisplayCues(cues []srtutil.Cue, videoSeconds float64) int {
 		videoSeconds = cues[len(cues)-1].End
 	}
 
-	changed := trimLongDisplayCues(cues)
+	var changed int
+
+	// Hard cap: after split+merge every cue text fits maxSubtitleCueChars,
+	// which needs at most 4.2s at maxSubtitleReadingSpeed, so a 7s cap never
+	// harms readability.
+	for i := range cues {
+		if normalizeCueWhitespace(cues[i].Text) == "" {
+			continue
+		}
+		if duration := cues[i].End - cues[i].Start; duration > maxSubtitleCueDuration {
+			cues[i].End = cues[i].Start + maxSubtitleCueDuration
+			changed++
+		}
+	}
 
 	for i := range cues {
 		text := normalizeCueWhitespace(cues[i].Text)
@@ -378,11 +446,11 @@ func retimeDisplayCues(cues []srtutil.Cue, videoSeconds float64) int {
 			continue
 		}
 		duration := cues[i].End - cues[i].Start
-		if duration <= 0 || duration > maxSubtitleCueDuration {
+		if duration <= 0 {
 			continue
 		}
 		chars := utf8.RuneCountInString(text)
-		target := max(duration, preferredSubtitleCueDuration, float64(chars)/preferredSubtitleReadingSpeed)
+		target := max(duration, targetMinCueDuration, float64(chars)/maxSubtitleReadingSpeed)
 		target = min(target, maxSubtitleCueDuration)
 		need := target - duration
 		if need < 0.10 {
@@ -391,11 +459,11 @@ func retimeDisplayCues(cues []srtutil.Cue, videoSeconds float64) int {
 
 		prevEnd := 0.0
 		if i > 0 {
-			prevEnd = cues[i-1].End + displayCueGapPadding
+			prevEnd = cues[i-1].End + minSubtitleCueGap
 		}
 		nextStart := videoSeconds
 		if i < len(cues)-1 {
-			nextStart = cues[i+1].Start - displayCueGapPadding
+			nextStart = cues[i+1].Start - minSubtitleCueGap
 		}
 		beforeBudget := min(maxDisplayExtensionPerSide, max(0, cues[i].Start-prevEnd))
 		afterBudget := min(maxDisplayExtensionPerSide, max(0, nextStart-cues[i].End))
@@ -431,48 +499,11 @@ func retimeDisplayCues(cues []srtutil.Cue, videoSeconds float64) int {
 		if cues[i].End < cues[i].Start {
 			cues[i].End = cues[i].Start
 		}
-	}
-	return changed
-}
-
-func trimLongDisplayCues(cues []srtutil.Cue) int {
-	var changed int
-	for i := range cues {
-		text := normalizeCueWhitespace(cues[i].Text)
-		if text == "" {
-			continue
-		}
-		duration := cues[i].End - cues[i].Start
-		if !shouldTrimLongDisplayCue(text, duration) {
-			continue
-		}
-		target := longDisplayCueTargetDuration(text)
-		if target < duration-0.10 {
-			cues[i].End = cues[i].Start + target
-			changed++
+		if i < len(cues)-1 && cues[i].End > cues[i+1].Start-minSubtitleCueGap {
+			cues[i].End = max(cues[i].Start, cues[i+1].Start-minSubtitleCueGap)
 		}
 	}
 	return changed
-}
-
-func shouldTrimLongDisplayCue(text string, duration float64) bool {
-	if duration <= maxSubtitleCueDuration {
-		return false
-	}
-	words := lexicalWordCount(text)
-	if words == 0 || words > longCueTrimMaxWords {
-		return false
-	}
-	chars := utf8.RuneCountInString(text)
-	if chars == 0 {
-		return false
-	}
-	return float64(chars)/duration <= longCueTrimMaxCPS
-}
-
-func longDisplayCueTargetDuration(text string) float64 {
-	chars := utf8.RuneCountInString(text)
-	return min(maxSubtitleCueDuration, max(longCueTrimMinDuration, float64(chars)/longCueTrimReadingSpeed))
 }
 
 func absInt(v int) int {

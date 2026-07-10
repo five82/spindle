@@ -9,12 +9,18 @@ import (
 	"github.com/five82/spindle/internal/srtutil"
 )
 
+// Formatting targets from the Netflix English Timed Text Style Guide.
+// Shared by the formatter (display_postprocess.go, stable_ts_formatter.py
+// mirrors them) and the validator; the validator flags anything the
+// formatter failed to enforce.
 const (
 	maxSubtitleLinesPerCue  = 2
 	maxSubtitleCharsPerLine = 42
+	maxSubtitleCueChars     = maxSubtitleLinesPerCue * maxSubtitleCharsPerLine
 	maxSubtitleReadingSpeed = 20.0
 	minSubtitleCueDuration  = 5.0 / 6.0
 	maxSubtitleCueDuration  = 7.0
+	minSubtitleCueGap       = 2.0 / 24.0 // two frames at 24 fps
 	unbalancedLineDelta     = 16
 )
 

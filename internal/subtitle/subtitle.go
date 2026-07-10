@@ -95,8 +95,6 @@ type GenerateDisplaySubtitleResult struct {
 	VideoSeconds   float64
 	DurationSource string
 	Audit          AuditStats
-
-	formatting formatResult
 }
 
 // GenerateDisplaySubtitle selects primary audio, creates canonical WhisperX
@@ -173,25 +171,16 @@ func GenerateDisplaySubtitle(ctx context.Context, req GenerateDisplaySubtitleReq
 		EpisodeKey:   req.EpisodeKey,
 	})
 
-	publicFormatting := FormatResult{
-		DisplayPath:      formatting.DisplayPath,
-		OriginalSegments: formatting.OriginalSegments,
-		FilteredSegments: formatting.FilteredSegments,
-		SplitCues:        formatting.SplitCues,
-		WrappedCues:      formatting.WrappedCues,
-		RetimedCues:      formatting.RetimedCues,
-	}
 	if req.OnFormattingComplete != nil {
-		req.OnFormattingComplete(publicFormatting)
+		req.OnFormattingComplete(formatting)
 	}
 
 	return &GenerateDisplaySubtitleResult{
 		SelectedAudio:  selectedAudio,
-		Formatting:     publicFormatting,
+		Formatting:     formatting,
 		VideoSeconds:   videoSeconds,
 		DurationSource: durationSource,
 		Audit:          audit,
-		formatting:     formatting,
 	}, nil
 }
 
@@ -463,7 +452,7 @@ func transcriptArtifact(sess *stage.Session, key string) *transcription.Transcri
 func (h *Handler) createDisplaySubtitleRecord(sess *stage.Session, job stage.AssetJob, result *GenerateDisplaySubtitleResult) (ripspec.SubtitleGenRecord, error) {
 	logger := sess.Logger
 	key := job.Key
-	formatting := result.formatting
+	formatting := result.Formatting
 
 	h.logSubtitleFormatting(logger, key, formatting)
 
@@ -498,11 +487,11 @@ func (h *Handler) createDisplaySubtitleRecord(sess *stage.Session, job stage.Ass
 	return record, nil
 }
 
-func (h *Handler) logSubtitleFormatting(logger *slog.Logger, key string, formatting formatResult) {
+func (h *Handler) logSubtitleFormatting(logger *slog.Logger, key string, formatting FormatResult) {
 	logger.Info("subtitle formatting complete",
 		"decision_type", logs.DecisionSubtitleFormatting,
-		"decision_result", formatting.FormatterDecision,
-		"decision_reason", fmt.Sprintf("original_segments=%d filtered_segments=%d text_rules_removed=%d heuristic_removed=%d split_cues=%d wrapped_cues=%d retimed_cues=%d", formatting.OriginalSegments, formatting.FilteredSegments, formatting.RemovedByTextRules, formatting.RemovedBySegmentHeuristics, formatting.SplitCues, formatting.WrappedCues, formatting.RetimedCues),
+		"decision_result", "formatted",
+		"decision_reason", fmt.Sprintf("original_segments=%d filtered_segments=%d text_rules_removed=%d heuristic_removed=%d split_cues=%d merged_cues=%d wrapped_cues=%d retimed_cues=%d", formatting.OriginalSegments, formatting.FilteredSegments, formatting.RemovedByTextRules, formatting.RemovedBySegmentHeuristics, formatting.SplitCues, formatting.MergedCues, formatting.WrappedCues, formatting.RetimedCues),
 		"episode_key", key,
 		"subtitle_file", formatting.DisplayPath,
 	)
@@ -514,12 +503,12 @@ func (h *Handler) logSubtitleFormatting(logger *slog.Logger, key string, formatt
 	)
 }
 
-func (h *Handler) logSubtitleValidation(logger *slog.Logger, key string, validation validationResult, formatting formatResult) {
+func (h *Handler) logSubtitleValidation(logger *slog.Logger, key string, validation validationResult, formatting FormatResult) {
 	stats := validation.Stats
 	logger.Info("SRT validation QC summary",
 		"decision_type", logs.DecisionSRTValidation,
 		"decision_result", "qc_summary",
-		"decision_reason", fmt.Sprintf("cue_count=%d max_cps=%.2f p95_cps=%.2f high_cps_cues=%d short_duration_cues=%d long_duration_cues=%d overlong_line_cues=%d unbalanced_line_break_cues=%d split_cues=%d wrapped_cues=%d retimed_cues=%d", stats.CueCount, stats.MaxCPS, stats.P95CPS, stats.HighCPSCues, stats.ShortDurationCues, stats.LongDurationCues, stats.OverlongLineCues, stats.UnbalancedLineBreakCues, formatting.SplitCues, formatting.WrappedCues, formatting.RetimedCues),
+		"decision_reason", fmt.Sprintf("cue_count=%d max_cps=%.2f p95_cps=%.2f high_cps_cues=%d short_duration_cues=%d long_duration_cues=%d overlong_line_cues=%d unbalanced_line_break_cues=%d split_cues=%d merged_cues=%d wrapped_cues=%d retimed_cues=%d", stats.CueCount, stats.MaxCPS, stats.P95CPS, stats.HighCPSCues, stats.ShortDurationCues, stats.LongDurationCues, stats.OverlongLineCues, stats.UnbalancedLineBreakCues, formatting.SplitCues, formatting.MergedCues, formatting.WrappedCues, formatting.RetimedCues),
 		"episode_key", key,
 		"cue_count", stats.CueCount,
 		"max_cps", stats.MaxCPS,
@@ -531,6 +520,7 @@ func (h *Handler) logSubtitleValidation(logger *slog.Logger, key string, validat
 		"unbalanced_line_break_cues", stats.UnbalancedLineBreakCues,
 		"too_many_line_cues", stats.TooManyLineCues,
 		"split_cues", formatting.SplitCues,
+		"merged_cues", formatting.MergedCues,
 		"wrapped_cues", formatting.WrappedCues,
 		"retimed_cues", formatting.RetimedCues,
 	)

@@ -136,14 +136,17 @@ def main() -> None:
             if getattr(result_wrapper, "has_words", False):
                 result_wrapper.clamp_max(medium_factor=2.5, max_dur=1.5)
                 result_wrapper.regroup(True)
+                # These values mirror the Go constants in
+                # internal/subtitle/validate.go: max_dur 7.0 =
+                # maxSubtitleCueDuration; max_chars 84 = 2 lines x 42 chars
+                # (maxSubtitleCueChars).
                 result_wrapper.split_by_duration(
-                    max_dur=6.5,
+                    max_dur=7.0,
                     even_split=False,
                     ignore_special_periods=True,
                 )
                 result_wrapper.split_by_length(
-                    max_chars=68,
-                    max_words=13,
+                    max_chars=84,
                     even_split=False,
                     ignore_special_periods=True,
                 )

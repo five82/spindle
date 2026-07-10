@@ -5,8 +5,6 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
-
-	"github.com/five82/spindle/internal/srtutil"
 )
 
 // knownHallucinationPhrases contains normalized text commonly hallucinated
@@ -34,30 +32,6 @@ type indexedTimedCue struct {
 	Text  string
 }
 
-// filterWhisperXOutput applies hallucination filtering to SRT content.
-// Returns filtered SRT content or an error if zero cues survive.
-func filterWhisperXOutput(srtContent string, videoSeconds float64) (string, error) {
-	cues := srtutil.Parse(srtContent)
-	if len(cues) == 0 {
-		return "", fmt.Errorf("no cues found in SRT content")
-	}
-	indexed := make([]indexedTimedCue, 0, len(cues))
-	for i, cue := range cues {
-		indexed = append(indexed, indexedTimedCue{Orig: i, Start: cue.Start, End: cue.End, Text: cue.Text})
-	}
-	filtered, err := filterIndexedHallucinations(indexed, videoSeconds)
-	if err != nil {
-		return "", err
-	}
-	result := make([]srtutil.Cue, 0, len(filtered))
-	for i, cue := range filtered {
-		out := cues[cue.Orig]
-		out.Index = i + 1
-		result = append(result, out)
-	}
-	return srtutil.Format(result), nil
-}
-
 func filterIndexedHallucinations(cues []indexedTimedCue, videoSeconds float64) ([]indexedTimedCue, error) {
 	if len(cues) == 0 {
 		return nil, fmt.Errorf("no cues found in SRT content")
@@ -70,24 +44,11 @@ func filterIndexedHallucinations(cues []indexedTimedCue, videoSeconds float64) (
 	return cues, nil
 }
 
-// removeIsolatedHallucinations removes:
+// removeIsolatedHallucinationsIndexed removes:
 //  1. Runs of 3+ consecutive cues with identical normalized text where each
 //     inter-cue gap exceeds 10 seconds.
 //  2. Cues with known hallucination phrases isolated by >= 30s gaps on both sides.
 //  3. Cues matching music patterns isolated by >= 30s gaps on both sides.
-func removeIsolatedHallucinations(cues []srtutil.Cue) []srtutil.Cue {
-	indexed := make([]indexedTimedCue, 0, len(cues))
-	for i, cue := range cues {
-		indexed = append(indexed, indexedTimedCue{Orig: i, Start: cue.Start, End: cue.End, Text: cue.Text})
-	}
-	filtered := removeIsolatedHallucinationsIndexed(indexed)
-	result := make([]srtutil.Cue, 0, len(filtered))
-	for _, cue := range filtered {
-		result = append(result, cues[cue.Orig])
-	}
-	return result
-}
-
 func removeIsolatedHallucinationsIndexed(cues []indexedTimedCue) []indexedTimedCue {
 	if len(cues) == 0 {
 		return cues
@@ -145,21 +106,9 @@ func removeIsolatedHallucinationsIndexed(cues []indexedTimedCue) []indexedTimedC
 	return compactIndexedCues(cues, remove)
 }
 
-// sweepTrailingHallucinations removes known phrase and music pattern cues in
-// the last 300 seconds of a video. Only applies when videoSeconds >= 600.
-func sweepTrailingHallucinations(cues []srtutil.Cue, videoSeconds float64) []srtutil.Cue {
-	indexed := make([]indexedTimedCue, 0, len(cues))
-	for i, cue := range cues {
-		indexed = append(indexed, indexedTimedCue{Orig: i, Start: cue.Start, End: cue.End, Text: cue.Text})
-	}
-	filtered := sweepTrailingHallucinationsIndexed(indexed, videoSeconds)
-	result := make([]srtutil.Cue, 0, len(filtered))
-	for _, cue := range filtered {
-		result = append(result, cues[cue.Orig])
-	}
-	return result
-}
-
+// sweepTrailingHallucinationsIndexed removes known phrase and music pattern
+// cues in the last 300 seconds of a video. Only applies when
+// videoSeconds >= 600.
 func sweepTrailingHallucinationsIndexed(cues []indexedTimedCue, videoSeconds float64) []indexedTimedCue {
 	if videoSeconds < 600 || len(cues) == 0 {
 		return cues
