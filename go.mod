@@ -3,7 +3,7 @@ module github.com/five82/spindle
 go 1.26.5
 
 require (
-	codeberg.org/five82/reel v0.0.0-20260708012555-f64a7cf3db4a
+	codeberg.org/five82/reel v0.0.0-20260711041401-2fcaa0e346e9
 	github.com/fatih/color v1.19.0
 	github.com/gofrs/flock v0.13.0
 	github.com/pelletier/go-toml/v2 v2.4.2
