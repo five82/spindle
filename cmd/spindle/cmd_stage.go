@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/five82/spindle/internal/apply"
 	"github.com/five82/spindle/internal/discidcache"
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/fingerprint"
@@ -307,7 +308,7 @@ func newGensubtitleCmd() *cobra.Command {
 
 			displayPath := result.Formatting.DisplayPath
 			if sidecarMode {
-				finalSidecarPath := subtitle.DisplaySubtitlePath(filepath.Join(output, filepath.Base(file)), selectedLanguage)
+				finalSidecarPath := apply.DisplaySubtitlePath(filepath.Join(output, filepath.Base(file)), selectedLanguage)
 				data, err := os.ReadFile(displayPath)
 				if err != nil {
 					return fmt.Errorf("read formatted srt: %w", err)
@@ -319,13 +320,13 @@ func newGensubtitleCmd() *cobra.Command {
 				return nil
 			}
 
-			if subtitle.MKVHasSubtitleTrack(ctx, file) {
+			if apply.MKVHasSubtitleTrack(ctx, file) {
 				fmt.Print("Replacing existing subtitle tracks...")
 			} else {
 				fmt.Print("Muxing subtitle into MKV...")
 			}
-			track := subtitle.MuxTrack{Path: displayPath, Language: selectedLanguage}
-			if _, err := subtitle.MuxSubtitleTrack(ctx, subtitle.MuxRequest{VideoPath: file, OutputPath: file, Track: track, ReplaceExisting: true}); err != nil {
+			track := apply.MuxTrack{Path: displayPath, Language: selectedLanguage}
+			if _, err := apply.MuxSubtitleTrack(ctx, apply.MuxRequest{VideoPath: file, OutputPath: file, Track: track, ReplaceExisting: true}); err != nil {
 				return err
 			}
 			fmt.Println(successStyle("done"))

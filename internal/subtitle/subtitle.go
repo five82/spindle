@@ -1,8 +1,6 @@
-// Package subtitle implements the subtitle generation stage (Layer 4).
-//
-// Subtitle generation: canonical WhisperX transcription reuse, hallucination
-// filtering, Stable-TS display formatting, SRT validation, MKV muxing, and
-// resume support.
+// Package subtitle generates, audits, formats, and validates Jellyfin display
+// SRTs. It never rewrites encoded media; the apply stage owns placement and
+// optional MKV muxing after the pipeline branches join.
 package subtitle
 
 import (
@@ -718,46 +716,4 @@ func auditMediaContext(meta ripspec.Metadata, episodeKey string) string {
 		show = meta.Title
 	}
 	return fmt.Sprintf("the TV episode %s %s", show, episodeKey)
-}
-
-// MuxDisplaySubtitle runs mkvmerge to add an SRT subtitle track to the MKV
-// file. It writes to a temp file and renames on success.
-func MuxDisplaySubtitle(
-	ctx context.Context,
-	logger *slog.Logger,
-	videoPath string,
-	srtPath string,
-	key string,
-	subtitleLanguage string,
-) (string, error) {
-	dir := filepath.Dir(videoPath)
-	ext := filepath.Ext(videoPath)
-	base := strings.TrimSuffix(filepath.Base(videoPath), ext)
-	outPath := filepath.Join(dir, base+".subtitled"+ext)
-
-	logger.Info("subtitle mux started",
-		"event_type", "mux_start",
-		"episode_key", key,
-		"video_path", videoPath,
-		"subtitle_path", srtPath,
-		"output_path", outPath,
-	)
-	muxStart := time.Now()
-	muxedPath, err := MuxSubtitleTrack(ctx, MuxRequest{
-		VideoPath:  videoPath,
-		OutputPath: outPath,
-		Track:      MuxTrack{Path: srtPath, Language: subtitleLanguage},
-	})
-	if err != nil {
-		return "", fmt.Errorf("mux subtitles %s: %w", key, err)
-	}
-
-	logger.Info("subtitles muxed into MKV",
-		"event_type", "mux_complete",
-		"episode_key", key,
-		"output_path", muxedPath,
-		"duration_ms", time.Since(muxStart).Milliseconds(),
-	)
-
-	return muxedPath, nil
 }

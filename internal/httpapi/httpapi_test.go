@@ -232,10 +232,8 @@ func newProjectionEnvelope(t *testing.T) string {
 	return data
 }
 
-// TestQueueResponsesProjectTasksAndEnvelope covers the Phase A response
-// contract: list responses carry tasks (with per-task progress and active
-// asset keys feeding episode Active flags) and the completed episode
-// projection but NO raw ripSpec; single-item GETs include ripSpec.
+// List responses carry task and episode projections but omit the raw RipSpec;
+// single-item responses include it for diagnostics.
 func TestQueueResponsesProjectTasksAndEnvelope(t *testing.T) {
 	store := testStore(t)
 	item, err := store.NewCachedRip("Show S01", "fp1", newProjectionEnvelope(t), "")

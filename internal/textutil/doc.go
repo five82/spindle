@@ -1,2 +1,2 @@
-// Package textutil is part of the Spindle system.
+// Package textutil provides normalized fingerprints and safe path/text helpers.
 package textutil

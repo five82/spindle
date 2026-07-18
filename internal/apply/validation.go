@@ -1,4 +1,4 @@
-package audioanalysis
+package apply
 
 import (
 	"context"
@@ -50,8 +50,8 @@ func validateAudioDurations(label string, result *ffprobe.Result) error {
 		if diff <= audioDurationToleranceSeconds {
 			continue
 		}
-		// Commentary tracks (disposition set in apply Phase 1, before this
-		// runs) often end before the credits on the source disc, so shorter
+		// Commentary disposition is set before validation. Commentary often
+		// ends before the source disc's credits, so a shorter duration
 		// than video is a source characteristic, not pipeline truncation.
 		// Under half the video still reads as truncation.
 		if stream.Disposition["comment"] == 1 && audioDuration < videoDuration && audioDuration >= videoDuration/2 {

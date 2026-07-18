@@ -1,2 +1,2 @@
-// Package encodingstate is part of the Spindle system.
+// Package encodingstate stores recoverable Reel progress and crop telemetry.
 package encodingstate

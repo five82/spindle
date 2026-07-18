@@ -19,6 +19,7 @@ func TestLoadNoConfigReturnsDefaults(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
 
 	// Set TMDB_API_KEY so validation passes.
 	t.Setenv("TMDB_API_KEY", "test-key")
@@ -54,6 +55,33 @@ func TestLoadNoConfigReturnsDefaults(t *testing.T) {
 	}
 	if cfg.ContentID.ClearMatchMargin != 0.05 {
 		t.Errorf("expected clear_match_margin default 0.05, got %f", cfg.ContentID.ClearMatchMargin)
+	}
+}
+
+func TestLoadUsesXDGConfigHome(t *testing.T) {
+	workDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	configHome := filepath.Join(t.TempDir(), "config")
+	configPath := filepath.Join(configHome, "spindle", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("[tmdb]\napi_key = \"from-xdg\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	cfg, err := Load("", nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SourcePath != configPath || cfg.TMDB.APIKey != "from-xdg" {
+		t.Fatalf("loaded source=%q key=%q, want %q and from-xdg", cfg.SourcePath, cfg.TMDB.APIKey, configPath)
 	}
 }
 
@@ -307,6 +335,7 @@ func TestEnvironmentVariableOverrides(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
 
 	t.Setenv("TMDB_API_KEY", "tmdb-from-env")
 	t.Setenv("JELLYFIN_API_KEY", "jf-from-env")
@@ -352,6 +381,7 @@ func TestHFTokenFallback(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
 
 	t.Setenv("TMDB_API_KEY", "test-key")
 	t.Setenv("HUGGING_FACE_HUB_TOKEN", "")
@@ -534,6 +564,7 @@ func TestSourcePathEmptyForDefaults(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
 	t.Setenv("TMDB_API_KEY", "test-key")
 
 	cfg, err := Load("", nil)

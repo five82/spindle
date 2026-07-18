@@ -4,7 +4,7 @@ package config
 // showing all sections and their default values.
 func SampleConfig() string {
 	return `# Spindle configuration file
-# See documentation for details on each section.
+# Omitted values use the defaults shown in comments.
 
 [paths]
 # Working directory for in-progress items
@@ -138,6 +138,8 @@ api_key = ""
 # Encoding uses Reel target-quality mode with Reel defaults.
 
 [llm]
+# OpenRouter is used for ambiguous episode verification, commentary detection,
+# and best-effort subtitle audit. An empty key disables those LLM operations.
 # OpenRouter API key (or set OPENROUTER_API_KEY env var)
 # api_key = ""
 

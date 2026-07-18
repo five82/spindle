@@ -17,14 +17,10 @@ import (
 	"codeberg.org/five82/reel"
 )
 
-// Wire protocol for the encode worker subprocess (task-graph plan, Phase 5).
-// The worker re-executes the spindle binary (`spindle encode-worker`), runs
-// reel in-process THERE, and forwards each reporter callback as one JSON
-// line on stdout; the daemon replays the events into its spindleReporter,
-// so snapshot persistence, throttling, and logging behave exactly as
-// before. A reel/cgo crash kills only the worker process, and per-encode
-// processes are the isolation regime reel's vship MITIGATE_MALLOC_ASYNC
-// workaround expects -- the prerequisite for cross-title pairing.
+// The encode worker re-executes this binary, runs Reel in the child, and
+// forwards reporter callbacks as JSON lines. The daemon replays the events
+// into spindleReporter so persistence and logging stay daemon-owned, while a
+// Reel/cgo crash kills only the file's worker process.
 
 type wireEvent struct {
 	Event   string          `json:"event"`

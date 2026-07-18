@@ -1,12 +1,14 @@
-package subtitle
+package apply
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/five82/spindle/internal/language"
 )
@@ -23,8 +25,17 @@ type MuxRequest struct {
 	ReplaceExisting       bool
 }
 
-// BuildSubtitleMuxArgs builds mkvmerge arguments for adding one display subtitle track.
-func BuildSubtitleMuxArgs(outputPath, videoPath string, track MuxTrack, replaceExisting bool) []string {
+// DisplaySubtitlePath returns the standard sidecar path for a video.
+func DisplaySubtitlePath(videoPath, subtitleLanguage string) string {
+	base := strings.TrimSuffix(videoPath, filepath.Ext(videoPath))
+	lang := language.ToISO2(subtitleLanguage)
+	if lang == "" {
+		lang = "en"
+	}
+	return base + "." + lang + ".srt"
+}
+
+func buildSubtitleMuxArgs(outputPath, videoPath string, track MuxTrack, replaceExisting bool) []string {
 	args := []string{"-o", outputPath}
 	if replaceExisting {
 		args = append(args, "--no-subtitles")
@@ -59,7 +70,7 @@ func MuxSubtitleTrack(ctx context.Context, req MuxRequest) (string, error) {
 
 	ext := filepath.Ext(outputPath)
 	tmpPath := strings.TrimSuffix(outputPath, ext) + ".tmp" + ext
-	cmd := exec.CommandContext(ctx, "mkvmerge", BuildSubtitleMuxArgs(tmpPath, req.VideoPath, req.Track, req.ReplaceExisting)...)
+	cmd := exec.CommandContext(ctx, "mkvmerge", buildSubtitleMuxArgs(tmpPath, req.VideoPath, req.Track, req.ReplaceExisting)...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("mkvmerge: %w: %s", err, output)
@@ -83,4 +94,45 @@ func MKVHasSubtitleTrack(ctx context.Context, path string) bool {
 		}
 	}
 	return false
+}
+
+// muxDisplaySubtitle writes a separate output before the caller records it as
+// the subtitled asset; the encoded source remains available if muxing fails.
+func muxDisplaySubtitle(
+	ctx context.Context,
+	logger *slog.Logger,
+	videoPath string,
+	srtPath string,
+	key string,
+	subtitleLanguage string,
+) (string, error) {
+	dir := filepath.Dir(videoPath)
+	ext := filepath.Ext(videoPath)
+	base := strings.TrimSuffix(filepath.Base(videoPath), ext)
+	outPath := filepath.Join(dir, base+".subtitled"+ext)
+
+	logger.Info("subtitle mux started",
+		"event_type", "mux_start",
+		"episode_key", key,
+		"video_path", videoPath,
+		"subtitle_path", srtPath,
+		"output_path", outPath,
+	)
+	muxStart := time.Now()
+	muxedPath, err := MuxSubtitleTrack(ctx, MuxRequest{
+		VideoPath:  videoPath,
+		OutputPath: outPath,
+		Track:      MuxTrack{Path: srtPath, Language: subtitleLanguage},
+	})
+	if err != nil {
+		return "", fmt.Errorf("mux subtitles %s: %w", key, err)
+	}
+
+	logger.Info("subtitles muxed into MKV",
+		"event_type", "mux_complete",
+		"episode_key", key,
+		"output_path", muxedPath,
+		"duration_ms", time.Since(muxStart).Milliseconds(),
+	)
+	return muxedPath, nil
 }

@@ -13,8 +13,8 @@ import (
 )
 
 // Load reads, normalizes, and validates config from the search path.
-// Search order: 1) explicit path, 2) ~/.config/spindle/config.toml,
-// 3) ./spindle.toml, 4) all defaults (no error).
+// Search order: 1) explicit path, 2) the user config directory's
+// spindle/config.toml, 3) ./spindle.toml, 4) all defaults (no error).
 func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 	logger = logs.Default(logger)
 	cfg := defaultConfig()
@@ -73,12 +73,11 @@ func findAndRead(explicitPath string) ([]byte, string, string, error) {
 		return data, "explicit_path", abs, nil
 	}
 
-	// Search order: ~/.config/spindle/config.toml, then ./spindle.toml
+	// Use the same XDG-aware user config directory as `config init`, then
+	// fall back to a project-local override.
 	candidates := []string{}
-
-	home, err := os.UserHomeDir()
-	if err == nil {
-		candidates = append(candidates, filepath.Join(home, ".config", "spindle", "config.toml"))
+	if configDir, err := os.UserConfigDir(); err == nil {
+		candidates = append(candidates, filepath.Join(configDir, "spindle", "config.toml"))
 	}
 	candidates = append(candidates, "spindle.toml")
 

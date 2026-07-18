@@ -1,17 +1,23 @@
 # spindle
 
-Workflow for turning optical discs into a Jellyfin ready library. Insert a disc and the daemon handles identification (TMDB), ripping (MakeMKV), encoding to AV1 (Reel target-quality mode), optional subtitles (WhisperX transcription), organization, Jellyfin refreshes, and notifications.
+Spindle turns optical discs into a Jellyfin-ready library. Insert a disc and
+the daemon handles identification with TMDB, ripping with MakeMKV, AV1 encoding
+with Reel, optional WhisperX subtitles and commentary detection, organization,
+Jellyfin refreshes, and notifications.
 
-Single Go binary drives both the CLI and daemon.
+A single Go binary provides both the operator CLI and daemon.
 
 ## Expectations
 
-This repository is shared as is. Spindle is a personal tool I built for my own encoding workflow, hardware, and preferences. I've open sourced it because I believe in sharing but I'm not an active maintainer.
+This repository is shared as is. Spindle is a personal tool built for one
+encoding workflow, hardware setup, and set of preferences. It is open source in
+the spirit of sharing, but it is not actively maintained as a general-purpose
+product.
 
-- Personal-first: Things will change and break as I iterate.
-- Best-effort only: This is a part-time hobby project and I work on it when I'm able to. I may be slow to respond to questions or may not respond at all.
-- PRs: Pull requests are welcome if they align with the project's goals but I may be slow to review them or may not accept changes that don't fit my own use case.
-- “Vibe coded”: I’m not a Go developer and this project started as (and remains) a vibe-coding experiment. Expect rough edges.
+- Personal-first: behavior may change as the workflow evolves.
+- Best-effort only: questions and issues may receive a slow response or none.
+- Pull requests are welcome when they fit the project's goals and use case.
+- "Vibe coded": this began as, and remains, a vibe-coding experiment.
 
 ## Install
 
@@ -19,16 +25,30 @@ This repository is shared as is. Spindle is a personal tool I built for my own e
 go install github.com/five82/spindle/cmd/spindle@latest
 ```
 
-Prerequisites: Go 1.26+, MakeMKV, ffmpeg, ffprobe, and Reel's native encoding libraries (SVT-AV1, FFmpeg libraries, libopusenc, and libvship for target-quality mode). Spindle still uses the ffmpeg/ffprobe binaries for inspection, transcription prep, remuxes, and diagnostics; Reel uses the native libraries for encoding. `spindle status` checks those plus mkvmerge, which is needed for default subtitle muxing. Optional feature tools include uvx (for WhisperX subtitles/commentary/episode ID) and bd_info (for improved Blu-ray identification).
+Requirements:
+
+- Go 1.26.5+
+- MakeMKV (`makemkvcon`)
+- FFmpeg and ffprobe
+- mkvmerge for the default subtitle muxing behavior
+- Reel's native libraries: SVT-AV1, FFmpeg libraries, libopusenc, and libvship
+- A TMDB API key
+
+Optional tools and services include `uvx`/WhisperX, `bd_info`, OpenSubtitles,
+OpenRouter, Jellyfin, and ntfy. `spindle status` reports the
+locally required command and library checks.
 
 ## Configure
 
+Generate the complete commented configuration:
+
 ```bash
 spindle config init
-nano ~/.config/spindle/config.toml
+# Edit the path printed by config init.
+spindle config validate
 ```
 
-Minimal config:
+A minimal override is:
 
 ```toml
 [paths]
@@ -39,24 +59,118 @@ staging_dir = "~/Media/Staging"
 api_key = "your-tmdb-key"
 ```
 
-Run `spindle config init --path ./spindle.toml` to generate a fully commented sample config with all options (Jellyfin, subtitles, notifications, rip cache, etc.).
+The generated sample shows every option, environment override, and default.
+Use `--config /path/to/config.toml` for a non-default location.
+
+To expose the daemon API to the read-only Flyer monitor, configure a TCP
+listener and, for anything beyond trusted localhost access, a bearer token:
+
+```toml
+[api]
+bind = "127.0.0.1:7487"
+token = "choose-a-token"
+```
+
+The daemon always also listens on its local Unix socket.
 
 ## Run
 
 ```bash
-spindle config validate   # check config
-spindle start             # launch daemon
-spindle status            # check daemon; running daemon reports dependencies and queue
-spindle logs --follow     # tail logs
+spindle start
+spindle status
+spindle logs --follow
 ```
 
-Once ripping completes and the drive-available notification appears, eject the disc manually; encoding and organization continue in the background.
+Insert a disc after the daemon starts. When the rip-complete notification says
+the drive is available, eject the disc manually; encoding, analysis, and
+organization continue in the background.
 
-## Documentation
+Useful inspection commands:
 
-- [docs/README.md](docs/README.md) - documentation map and source-of-truth policy
-- [docs/user/workflow.md](docs/user/workflow.md) - stage-by-stage lifecycle and recovery
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - system architecture overview
-- [docs/API.md](docs/API.md) - HTTP API and stable CLI workflows
-- `spindle config init` - generate all config options with comments
-- `spindle --help` - command reference
+```bash
+spindle status
+spindle queue list
+spindle queue show <id>
+spindle logs --follow --item <id>
+```
+
+Use `spindle --help` and `spindle <command> --help` for the current command and
+flag reference.
+
+## Pipeline and review
+
+Queue items run identification, ripping, episode-identification, encoding,
+analysis, subtitling, apply, and organizing tasks before reaching a completed
+or failed terminal state. This is a task graph rather than a strict sequence:
+encoding can consume titles while ripping continues, and analysis can overlap
+encoding. `queue show` reports the live per-task state.
+
+A failed item stopped before completion. Fix the reported cause and retry it.
+An item that needs review can still complete, but questionable output is routed
+to the configured review area instead of being silently accepted. Clean TV
+episodes may reach the library while only unresolved episodes go to review.
+
+Final Jellyfin-facing display subtitles are SRT. They are muxed into the MKV by
+default or kept as sidecars when muxing is disabled or fails.
+
+## Recovery
+
+Retry a failed item or every failed item:
+
+```bash
+spindle queue retry <id>
+spindle queue retry
+```
+
+Retry only one failed TV episode:
+
+```bash
+spindle queue retry <id> --episode s01e05
+```
+
+Stop an item and later resume it with retry:
+
+```bash
+spindle queue cancel <id>
+spindle queue retry <id>
+```
+
+If the daemon crashed, restart it. Running task state is reset on startup so
+work can be resumed safely:
+
+```bash
+spindle start
+```
+
+The queue database is transient. If it must be discarded while the daemon is
+stopped:
+
+```bash
+spindle queue clear --all
+```
+
+This deletes only `queue.db` and its WAL/SHM files. It does not delete staging,
+cache, library, or review media. Other queue reads and mutations require the
+running daemon.
+
+Inspect or clean leftover working directories with:
+
+```bash
+spindle staging list
+spindle staging clean
+```
+
+## Files
+
+Locations come from the generated configuration:
+
+- `staging_dir`: per-item ripped, encoded, transcript, and subtitle artifacts
+- `library_dir`: clean movie and TV outputs using Jellyfin-style names
+- `review_dir`: outputs requiring operator inspection, grouped by reason
+- `state_dir`: timestamped JSON daemon logs and the transient queue database
+- XDG cache: rip cache, disc-ID cache, and OpenSubtitles cache
+- XDG runtime directory, with `/tmp` fallback: daemon socket and lock
+
+Successful organization cleans that item's staging directory. Cleanup failures
+are warnings so completed media is not discarded merely because temporary
+files could not be removed.

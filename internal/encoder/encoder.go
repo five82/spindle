@@ -62,10 +62,9 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		"decision_reason", fmt.Sprintf("media_type=%s; encode ripped assets as they land, ripping owns item progress while active", env.Metadata.MediaType),
 	)
 
-	// Rip-to-encode streaming (task-graph plan, Phase 4d): this stage starts
-	// alongside ripping and consumes completed ripped assets as the ripper's
-	// merge-based per-title saves land, waiting when none are pending and
-	// finishing once the ripping task is terminal. attemptedKeys preserves
+	// This stage starts alongside ripping and consumes each completed asset
+	// as the ripper's merge save lands. It waits when none are pending and
+	// finishes once the ripping task is terminal. attemptedKeys preserves
 	// run-once semantics per asset: a failed encode must not retry every
 	// poll (PendingKeyedAssetJobs treats failed outputs as pending).
 	var summary encodeSummary

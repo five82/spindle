@@ -110,11 +110,6 @@ type FormatResult struct {
 	RetimedCues                int
 }
 
-// DisplaySubtitlePath returns the standard sidecar subtitle path for a video.
-func DisplaySubtitlePath(videoPath, subtitleLanguage string) string {
-	return displaySubtitlePath(videoPath, subtitleLanguage)
-}
-
 func runStableTSFormatter(ctx context.Context, jsonPath, outputPath, subtitleLanguage string) error {
 	if strings.TrimSpace(jsonPath) == "" {
 		return fmt.Errorf("stable-ts formatter missing json path")

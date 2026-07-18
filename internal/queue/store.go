@@ -11,6 +11,9 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
+// The queue is transient execution state, not durable library data. Schema
+// changes replace these create statements and require clearing queue.db; do
+// not add migrations or compatibility paths.
 const createTableSQL = `
 CREATE TABLE IF NOT EXISTS queue_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

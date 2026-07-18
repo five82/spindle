@@ -101,12 +101,10 @@ type TaskSpec struct {
 // Items whose stage is not in specs (failed, completed) compile with all
 // tasks done or are skipped by callers via eligibility filters.
 //
-// NOTE: the position rule ("everything listed before the item's stage is
-// done") is exact for linear templates. A DAG template (Phase 4b+) must
-// revisit recompilation semantics: an item's single display stage cannot
-// name which parallel branch tasks completed. Until then, DAG recompiles
-// after retry conservatively re-pend both branches (topological position
-// still marks strictly-earlier tasks done).
+// The item's coarse stage cannot encode which parallel branch finished.
+// Recompilation therefore marks only topologically earlier tasks done and
+// conservatively re-pends both branches at and after the stage. Handlers make
+// this safe and inexpensive by recognizing completed artifacts on retry.
 func (s *Store) EnsureTasks(item *Item, specs []TaskSpec) error {
 	var count int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE item_id = ?`, item.ID).Scan(&count); err != nil {

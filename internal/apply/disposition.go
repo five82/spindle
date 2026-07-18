@@ -1,4 +1,4 @@
-package audioanalysis
+package apply
 
 import (
 	"context"
@@ -29,20 +29,18 @@ func commentaryLabel(original string) string {
 	return title + " (Commentary)"
 }
 
-// CommentaryTarget pairs an audio-relative index with its current title.
-type CommentaryTarget struct {
+type commentaryTarget struct {
 	Index int
 	Title string
 }
 
-// ApplyCommentaryDisposition sets the "comment" disposition and updates the
-// title metadata on the specified audio tracks in an MKV file using FFmpeg
+// applyCommentaryDisposition labels commentary tracks with an FFmpeg
 // copy-mode remux.
-func ApplyCommentaryDisposition(
+func applyCommentaryDisposition(
 	ctx context.Context,
 	logger *slog.Logger,
 	path string,
-	targets []CommentaryTarget,
+	targets []commentaryTarget,
 ) error {
 	if len(targets) == 0 {
 		return nil
@@ -94,9 +92,8 @@ func ApplyCommentaryDisposition(
 	return nil
 }
 
-// ValidateCommentaryLabeling verifies that the specified audio tracks have
-// both the "comment" disposition set and a title containing "Commentary".
-func ValidateCommentaryLabeling(
+// validateCommentaryLabeling verifies both the disposition and title label.
+func validateCommentaryLabeling(
 	ctx context.Context,
 	logger *slog.Logger,
 	path string,
@@ -144,9 +141,8 @@ func ValidateCommentaryLabeling(
 	return nil
 }
 
-// RemapCommentaryIndices maps original commentary track indices to their new
-// positions within the kept indices after audio refinement.
-func RemapCommentaryIndices(
+// remapCommentaryIndices maps original indices after audio refinement.
+func remapCommentaryIndices(
 	logger *slog.Logger,
 	original []ripspec.CommentaryTrackRef,
 	keptIndices []int,

@@ -16,12 +16,9 @@ import (
 	"github.com/five82/spindle/internal/stage"
 )
 
-// PipelineStage describes a single stage in the pipeline.
-// Stage identifies which queue stage this handler owns: the handler picks up
-// items whose item.Stage equals this value, and on success advances the item
-// to the next handler's Stage (or StageCompleted for the last handler).
-// Claims declare the resources the stage consumes while running; the
-// scheduler admits a task only when every claimed resource has capacity.
+// PipelineStage binds one task type to its handler, dependencies, and resource
+// claims. Item stage is only a coarse display/retry position; task rows decide
+// readiness and the scheduler derives item stage after an overlap window ends.
 type PipelineStage struct {
 	Handler stage.Handler
 	Stage   queue.Stage
@@ -30,8 +27,8 @@ type PipelineStage struct {
 	// dispatch reserves.
 	Claims map[string]int
 	// ClaimsFunc, when set, picks the per-item subset of Claims to reserve
-	// at dispatch time (e.g. the encode tier slot matching the item's
-	// resolution). It must return claims whose resources appear in Claims.
+	// at dispatch time, such as skipping the GPU claim for movies during
+	// episode identification. Returned resources must appear in Claims.
 	ClaimsFunc func(*queue.Item) map[string]int
 	// DependsOn names the stages whose tasks must complete before this
 	// stage's task is ready. Empty means: depend on the previously
@@ -65,12 +62,9 @@ type Manager struct {
 	budgetUsed    map[string]int
 	budgetHolders map[string][]httpapi.ResourceHolder
 
-	// running tracks the cancel function of each item's active workers,
-	// keyed by item then task. It guards against dispatching work for an
-	// item whose previous worker has not exited (StopItems clears
-	// in_progress while the worker is still alive), and lets the scheduler
-	// cancel workers of user-stopped items. Until Phase 4b's DAG templates,
-	// dispatch policy allows at most one live worker per item.
+	// running tracks each active worker by item and task. Parallel branches
+	// may coexist, but a canceled worker from deleted task rows must drain
+	// before retry dispatches replacements that could touch the same files.
 	runningMu sync.Mutex
 	running   map[int64]map[int64]context.CancelFunc
 
@@ -144,9 +138,9 @@ func (m *Manager) ConfigureStages(stages []PipelineStage) {
 		p.specs[i] = spec
 	}
 
-	// Budget capacities replicate today's exclusivity: every claimed
-	// resource has capacity 1. Raising a capacity is a Phase 4/5 change
-	// gated by the GPU coexistence validation (see the plan doc).
+	// Every resource is intentionally exclusive: there is one optical drive,
+	// and concurrent GPU/encode processes have exceeded available VRAM.
+	// Raise a capacity only after measuring real-disc peak memory use.
 	m.budgetCap = make(map[string]int)
 	m.budgetUsed = make(map[string]int)
 	m.budgetHolders = make(map[string][]httpapi.ResourceHolder)
@@ -626,12 +620,11 @@ func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue
 	m.maybeStartQueueCycle(ctx, itemLogger)
 
 	res, err := stage.ExecuteWorkflowStage(ctx, item, stage.WorkflowOptions{
-		Store:     m.store,
-		Handler:   ps.Handler,
-		Logger:    p.logger,
-		Stage:     ps.Stage,
-		NoAdvance: true,
-		Task:      task,
+		Store:   m.store,
+		Handler: ps.Handler,
+		Logger:  p.logger,
+		Stage:   ps.Stage,
+		Task:    task,
 	})
 	if res.Canceled {
 		if err != nil && !errors.Is(err, context.Canceled) {

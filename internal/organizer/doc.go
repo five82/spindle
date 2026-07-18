@@ -1,2 +1,3 @@
-// Package organizer is part of the Spindle system.
+// Package organizer routes final assets to the library or review area and
+// performs completion cleanup and notifications.
 package organizer

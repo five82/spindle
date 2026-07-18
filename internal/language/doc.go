@@ -1,2 +1,2 @@
-// Package language is part of the Spindle system.
+// Package language normalizes inconsistent media language tags and names.
 package language

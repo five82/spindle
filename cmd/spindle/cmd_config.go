@@ -33,13 +33,11 @@ func newConfigInitCmd() *cobra.Command {
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if path == "" {
-				// Default config path.
-				configHome := os.Getenv("XDG_CONFIG_HOME")
-				if configHome == "" {
-					home, _ := os.UserHomeDir()
-					configHome = home + "/.config"
+				configHome, err := os.UserConfigDir()
+				if err != nil {
+					return fmt.Errorf("resolve user config directory: %w", err)
 				}
-				path = configHome + "/spindle/config.toml"
+				path = filepath.Join(configHome, "spindle", "config.toml")
 			}
 
 			if !overwrite {

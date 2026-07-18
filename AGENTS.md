@@ -53,8 +53,9 @@ or simplified.
 - The queue DB is transient: no migrations, no schema versioning. Schema
   changes mean clear the database.
 - `queue` must not import `ripspec` (RipSpec is opaque text to the store);
-  stage handlers must not import each other; `config` must not import client
-  packages. Full package layering: docs/ARCHITECTURE.md.
+  stage-handler packages must not import one another; `config` must not import
+  client packages. The `apply` stage owns all encoded-file rewrites after the
+  encoding and analysis branches join.
 
 ## Reel dependency
 
@@ -63,7 +64,10 @@ Local dev uses a gitignored `go.work` referencing `../reel`; CI uses the
 runner). After pushing reel changes:
 `go get codeberg.org/five82/reel@latest && go mod tidy`.
 
-## Docs
+## Documentation
 
-Doc policy and source-of-truth order live in docs/README.md. Major decisions
-get a short ADR in docs/adr/.
+`README.md` is the operator guide. Cobra help and the generated config sample
+own command and option reference. Code and tests own implementation and HTTP
+behavior. Keep non-obvious rationale beside the constrained code; use git
+history for superseded plans and decisions. Do not add implementation docs,
+ADRs, or proposals unless the user explicitly asks for them.

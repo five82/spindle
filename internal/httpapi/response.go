@@ -198,9 +198,9 @@ type DependencyResponse struct {
 	Detail      string `json:"detail,omitempty"`
 }
 
-// WorkflowStatus aggregates queue stats. QueueStats counts item stages,
-// which lag running tasks during overlap windows; task-level truth is on
-// each item's Tasks.
+// WorkflowStatus aggregates queue stats. QueueStats groups terminal items by
+// terminal stage, active items by their earliest running task, and idle items
+// by coarse stage; each item's Tasks remain the detailed source of truth.
 type WorkflowStatus struct {
 	Running    bool           `json:"running"`
 	QueueStats map[string]int `json:"queueStats"`

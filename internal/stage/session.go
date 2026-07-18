@@ -65,10 +65,9 @@ func (s *Session) SetEnvelope(env *ripspec.Envelope) {
 	s.Env = env
 }
 
-// itemLocks serializes envelope read-modify-write cycles per item so stages
-// running concurrently for the same item (Phase 4 parallel branches) cannot
-// lose each other's writes: plain Save persists the whole envelope,
-// last-writer-wins.
+// itemLocks serializes envelope read-modify-write cycles so concurrent
+// branches cannot lose each other's changes. Plain Save persists the whole
+// envelope and is therefore last-writer-wins.
 var (
 	itemLocksMu sync.Mutex
 	itemLocks   = make(map[int64]*sync.Mutex)

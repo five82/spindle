@@ -1,4 +1,4 @@
-package audioanalysis
+package apply
 
 import (
 	"context"
@@ -15,25 +15,22 @@ import (
 	"github.com/five82/spindle/internal/media/ffprobe"
 )
 
-// AudioRefinementResult holds the result of audio track refinement.
-type AudioRefinementResult struct {
+type audioRefinementResult struct {
 	PrimaryAudioDescription string
 	KeptIndices             []int
 }
 
-// RefineAudioTargets selects and keeps only the desired audio tracks in MKV
-// files. Each unique path is probed and, when needed, remuxed so the selected
-// primary track becomes the first audio stream and the only default audio
-// stream. Additional keep indices (e.g. commentary) are preserved when valid
-// for a given file.
-func RefineAudioTargets(
+// refineAudioTargets keeps only the selected audio tracks and makes the
+// primary track first and default. Commentary indices are preserved when
+// valid for the file.
+func refineAudioTargets(
 	ctx context.Context,
 	logger *slog.Logger,
 	paths []string,
 	additionalKeep []int,
-) (*AudioRefinementResult, error) {
+) (*audioRefinementResult, error) {
 	if len(paths) == 0 {
-		return &AudioRefinementResult{}, nil
+		return &audioRefinementResult{}, nil
 	}
 
 	// Deduplicate paths.
@@ -46,7 +43,7 @@ func RefineAudioTargets(
 		}
 	}
 
-	var out AudioRefinementResult
+	var out audioRefinementResult
 	for i, path := range unique {
 		result, err := ffprobe.Inspect(ctx, "", path)
 		if err != nil {
@@ -63,7 +60,7 @@ func RefineAudioTargets(
 				"path", path,
 			)
 			if i == 0 {
-				out = AudioRefinementResult{}
+				out = audioRefinementResult{}
 			}
 			continue
 		}
@@ -93,7 +90,7 @@ func RefineAudioTargets(
 		}
 
 		if i == 0 {
-			out = AudioRefinementResult{
+			out = audioRefinementResult{
 				PrimaryAudioDescription: sel.PrimaryLabel(),
 				KeptIndices:             keptIndices,
 			}

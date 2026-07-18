@@ -36,6 +36,7 @@ import (
 	"github.com/five82/spindle/internal/workflow"
 
 	// Stage handlers
+	"github.com/five82/spindle/internal/apply"
 	"github.com/five82/spindle/internal/audioanalysis"
 	"github.com/five82/spindle/internal/contentid"
 	"github.com/five82/spindle/internal/encoder"
@@ -182,7 +183,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	encoderHandler := encoder.New(cfg, notifier)
 	analysisHandler := audioanalysis.New(cfg, llmClient, transcriber)
 	subtitleHandler := subtitle.New(cfg, transcriber, llmClient)
-	applyHandler := audioanalysis.NewApply(cfg)
+	applyHandler := apply.New(cfg)
 	organizerHandler := organizer.New(cfg, jfClient, notifier)
 
 	// Check dependencies and create status tracker.
@@ -216,19 +217,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// Create workflow manager and configure stages.
 	manager := workflow.New(store, notifier, statusTracker, logger)
-	// The per-item template is a DAG (task-graph plan, Phase 4b/4d):
-	// encoding starts right after identification and STREAMS ripped assets
-	// as the ripper lands them (episode 1 encodes while episode 2 rips);
-	// the analysis branch (commentary detection, subtitle generation --
-	// both from RIPPED sources) runs after episode identification,
-	// concurrently with encoding; apply joins the branches and performs
-	// every write to the encoded files. Stable keys make this safe: episode
-	// matching no longer renames asset keys, so it runs off the encode
-	// critical path. Budgets stay at capacity 1 per resource (drive,
-	// gpu, encode) -- the same exclusivity as before; the overlap is
-	// between the gpu and encode lanes, which were already concurrent
-	// across items. Registration order is the display priority: during
-	// overlap the item shows the encoding stage (encoding owns progress).
+	// Encoding streams completed rips while the analysis branch reads the
+	// same immutable ripped assets. Apply joins both branches and is the only
+	// stage allowed to rewrite encoded files. Permanent rip-time asset keys
+	// let episode matching proceed without renaming files under the encoder.
 	manager.ConfigureStages([]workflow.PipelineStage{
 		{Stage: queue.StageIdentification, Handler: identifyHandler, Claims: map[string]int{"drive": 1}},
 		{Stage: queue.StageRipping, Handler: ripperHandler, Claims: map[string]int{"drive": 1}, DependsOn: []queue.Stage{queue.StageIdentification}},

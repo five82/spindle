@@ -1,2 +1,2 @@
-// Package fileutil is part of the Spindle system.
+// Package fileutil provides verified file copies with progress reporting.
 package fileutil

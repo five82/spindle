@@ -10,22 +10,15 @@ import (
 	"github.com/five82/spindle/internal/queue"
 )
 
-// WorkflowOptions configures workflow execution of a handler. Normal workflow
-// callers mark the item in progress before execution and advance on success.
-// OneShot handles standalone CLI execution by starting the stage here and
-// clearing in_progress without advancing or failing the queue item.
+// WorkflowOptions configures a scheduled or standalone handler invocation.
+// The scheduler owns task state and derives item stage after sibling tasks
+// finish. OneShot starts and clears the item here without changing its stage.
 type WorkflowOptions struct {
-	Store     *queue.Store
-	Handler   Handler
-	Logger    *slog.Logger
-	Stage     queue.Stage
-	NextStage queue.Stage
-	OneShot   bool
-	// NoAdvance leaves success persistence (stage advancement, in_progress)
-	// to the caller: the task scheduler derives the item's display stage
-	// from task states, since with DAG templates a single completing stage
-	// no longer determines the next one.
-	NoAdvance bool
+	Store   *queue.Store
+	Handler Handler
+	Logger  *slog.Logger
+	Stage   queue.Stage
+	OneShot bool
 	// Task is the scheduler task this execution runs; the session reports
 	// progress against its row. Nil (OneShot) means in-memory progress only.
 	Task *queue.Task
@@ -51,11 +44,10 @@ type PersistenceError struct {
 func (e *PersistenceError) Error() string { return fmt.Sprintf("%s: %v", e.Op, e.Err) }
 func (e *PersistenceError) Unwrap() error { return e.Err }
 
-// ExecuteWorkflowStage runs a handler and persists the stage lifecycle outcome:
-// success advances, degraded success advances with a warning result, failure
-// marks the item failed, cancellation clears in_progress, and persistence
-// failures are returned. In OneShot mode, success and failure only clear
-// in_progress so the caller can route the temporary item explicitly.
+// ExecuteWorkflowStage runs a handler and persists its item-level outcome.
+// Scheduled success leaves advancement to the task scheduler; failure marks
+// the item failed, and cancellation clears in_progress. In OneShot mode every
+// outcome only clears in_progress so the caller can route the temporary item.
 func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOptions) (res ExecuteResult, err error) {
 	stageName := opts.Stage
 	if stageName == "" {
@@ -131,26 +123,17 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 		}
 	}
 
-	if opts.NoAdvance {
-		// Refresh so a user stop that raced the handler is seen (the
-		// advancing path got this via CompleteStage's refresh); a broken
-		// store surfaces as a persistence failure exactly as before.
-		if refreshErr := opts.Store.Refresh(item); refreshErr != nil {
-			return res, &PersistenceError{Op: "refresh after stage completion", Err: refreshErr}
-		}
-		if item.UserStopped() {
-			res.UserStopped = true
+	if opts.OneShot {
+		if updateErr := opts.Store.ClearInProgress(item); updateErr != nil {
+			logOneShotPersistenceFailure(logger, "clear in_progress after stage completion", updateErr)
 		}
 		return res, nil
 	}
 
-	advance := !opts.OneShot
-	if updateErr := opts.Store.CompleteStage(item, opts.NextStage, advance); updateErr != nil {
-		if opts.OneShot {
-			logOneShotPersistenceFailure(logger, "persist stage completion", updateErr)
-			return res, nil
-		}
-		return res, &PersistenceError{Op: "persist stage completion", Err: updateErr}
+	// A user stop can race the handler. Refresh before the scheduler records
+	// task completion so the stop state wins over successful finalization.
+	if refreshErr := opts.Store.Refresh(item); refreshErr != nil {
+		return res, &PersistenceError{Op: "refresh after stage completion", Err: refreshErr}
 	}
 	if item.UserStopped() {
 		res.UserStopped = true

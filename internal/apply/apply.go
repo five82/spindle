@@ -1,4 +1,6 @@
-package audioanalysis
+// Package apply owns all encoded-file rewrites after the pipeline branches
+// join, preventing audio and subtitle remux operations from racing.
+package apply
 
 import (
 	"context"
@@ -11,25 +13,23 @@ import (
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
-	"github.com/five82/spindle/internal/subtitle"
 )
 
-// ApplyHandler implements stage.Handler for the apply stage: every writer of
-// the encoded MKVs, run after BOTH the encoding and analysis branches join.
-// Audio refinement, commentary disposition, duration validation, and
-// subtitle placement/muxing are serialized here by design -- never
-// parallelize two writers of one file.
-type ApplyHandler struct {
+// Handler owns the apply stage. It serializes audio refinement, commentary
+// disposition, duration validation, and subtitle muxing after the encoding
+// and analysis branches join. Keeping every encoded-file writer here prevents
+// concurrent in-place rewrites of the same MKV.
+type Handler struct {
 	cfg *config.Config
 }
 
-// NewApply creates an apply-stage handler.
-func NewApply(cfg *config.Config) *ApplyHandler {
-	return &ApplyHandler{cfg: cfg}
+// New creates an apply-stage handler.
+func New(cfg *config.Config) *Handler {
+	return &Handler{cfg: cfg}
 }
 
 // Run executes the apply stage.
-func (h *ApplyHandler) Run(ctx context.Context, sess *stage.Session) error {
+func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	logger := sess.Logger
 	logger.Info("apply stage started", "event_type", "stage_start", "stage", "apply")
 	env := sess.Env
@@ -78,7 +78,7 @@ func (h *ApplyHandler) Run(ctx context.Context, sess *stage.Session) error {
 			keep = append(keep, c.Index)
 		}
 
-		refinement, refErr := RefineAudioTargets(ctx, logger, []string{in.path}, keep)
+		refinement, refErr := refineAudioTargets(ctx, logger, []string{in.path}, keep)
 		if refErr != nil {
 			logger.Warn("audio refinement failed",
 				"event_type", "audio_refinement_error",
@@ -174,7 +174,7 @@ func (h *ApplyHandler) Run(ctx context.Context, sess *stage.Session) error {
 // missing or severe-issue generation record means the episode has no
 // subtitle: the generation stage already flagged it for review, so apply
 // just skips it.
-func (h *ApplyHandler) applySubtitles(ctx context.Context, sess *stage.Session, key, encodedPath string) error {
+func (h *Handler) applySubtitles(ctx context.Context, sess *stage.Session, key, encodedPath string) error {
 	logger := sess.Logger
 	record := findSubtitleGenRecord(sess.Env, key)
 	if record == nil || len(record.SevereIssues) > 0 || strings.TrimSpace(record.SubtitlePath) == "" {
@@ -198,7 +198,7 @@ func (h *ApplyHandler) applySubtitles(ctx context.Context, sess *stage.Session, 
 
 	// Place the sidecar next to the encoded file so the organizer's sidecar
 	// glob finds it (and Jellyfin when muxing is disabled).
-	sidecarPath := subtitle.DisplaySubtitlePath(encodedPath, record.Language)
+	sidecarPath := DisplaySubtitlePath(encodedPath, record.Language)
 	if err := fileutil.CopyFile(record.SubtitlePath, sidecarPath); err != nil {
 		return fmt.Errorf("place subtitle sidecar %s: %w", key, err)
 	}
@@ -206,7 +206,7 @@ func (h *ApplyHandler) applySubtitles(ctx context.Context, sess *stage.Session, 
 	subtitledPath := encodedPath
 	subtitlesMuxed := false
 	if h.cfg.Subtitles.MuxIntoMKV {
-		muxedPath, err := subtitle.MuxDisplaySubtitle(ctx, logger, encodedPath, sidecarPath, key, record.Language)
+		muxedPath, err := muxDisplaySubtitle(ctx, logger, encodedPath, sidecarPath, key, record.Language)
 		if err != nil {
 			logger.Warn("subtitle mux failed",
 				"event_type", "mux_error",

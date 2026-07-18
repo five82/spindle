@@ -113,7 +113,7 @@ type LogEntry = httpapi.LogEntry
 
 // LogsQuery mirrors the /api/logs query parameters.
 type LogsQuery struct {
-	Since      uint64 // seq cursor: return entries with seq > Since
+	Since      uint64 // seq cursor: return entries with seq >= Since
 	Limit      int
 	Tail       bool // seed from the tail on the initial window (Since == 0)
 	ItemID     int64

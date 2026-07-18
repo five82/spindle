@@ -9,10 +9,9 @@ import (
 	"github.com/five82/spindle/internal/encoder"
 )
 
-// newEncodeWorkerCmd is the internal per-file encode worker the daemon
-// spawns (task-graph plan, Phase 5): it runs reel in THIS process and
-// streams reporter events to stdout as JSON lines. Hidden: not part of the
-// operator CLI surface, and its stdout is a machine protocol.
+// newEncodeWorkerCmd runs one Reel encode in an isolated child process and
+// streams reporter events to the daemon as JSON lines. It is hidden because
+// stdout is a machine protocol, not an operator interface.
 func newEncodeWorkerCmd() *cobra.Command {
 	var input string
 	var outputDir string
