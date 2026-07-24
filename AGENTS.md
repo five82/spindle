@@ -25,9 +25,9 @@ Related repos: `../reel` (AV1 encoder used as a library),
 
 | Repo | Path | Role |
 |------|------|------|
-| flyer | `~/projects/flyer/` | Read-only TUI for Spindle (this repo) |
-| spindle | `~/projects/spindle/` | Daemon + CLI; Flyer polls its `[api].bind` endpoint |
-| reel | `~/projects/reel/` | Encoder invoked by Spindle; Flyer does not call directly |
+| flyer | `~/projects/flyer/` | Read-only TUI for Spindle |
+| spindle | `~/projects/spindle/` | Daemon + CLI (this repo) |
+| reel | `~/projects/reel/` | Encoder invoked by Spindle |
 
 GitHub: [flyer](https://github.com/five82/flyer) | [spindle](https://github.com/five82/spindle) | [reel](https://github.com/five82/reel)
 
