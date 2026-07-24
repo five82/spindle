@@ -21,6 +21,16 @@ exception is `queue clear --all` (deletes the transient queue DB files).
 Related repos: `../reel` (AV1 encoder used as a library),
 `../flyer` (read-only TUI, the HTTP API's one consumer).
 
+## Related Repos
+
+| Repo | Path | Role |
+|------|------|------|
+| flyer | `~/projects/flyer/` | Read-only TUI for Spindle (this repo) |
+| spindle | `~/projects/spindle/` | Daemon + CLI; Flyer polls its `[api].bind` endpoint |
+| reel | `~/projects/reel/` | Encoder invoked by Spindle; Flyer does not call directly |
+
+GitHub: [flyer](https://github.com/five82/flyer) | [spindle](https://github.com/five82/spindle) | [reel](https://github.com/five82/reel)
+
 ## Complexity budget
 
 YAGNI and KISS: build only what the current task requires; when two
