@@ -68,7 +68,7 @@ print_step "Verifying build without go.work (pinned Reel dependency)"
 if GOWORK=off go build ./...; then
     print_success "Pinned-dependency build passed"
 else
-    print_error "Build fails without go.work — update go.mod deps (e.g. go get codeberg.org/five82/reel@latest)"
+    print_error "Build fails without go.work — update go.mod deps (e.g. go get github.com/five82/reel@latest)"
     exit 1
 fi
 

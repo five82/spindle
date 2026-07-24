@@ -62,7 +62,7 @@ or simplified.
 Local dev uses a gitignored `go.work` referencing `../reel`; CI uses the
 `go.mod` pin and builds reel with `-tags no_vship` (no libvship on the
 runner). After pushing reel changes:
-`go get codeberg.org/five82/reel@latest && go mod tidy`.
+`go get github.com/five82/reel@latest && go mod tidy`.
 
 ## Documentation
 

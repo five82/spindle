@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"codeberg.org/five82/reel"
+	"github.com/five82/reel"
 
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/queue"
