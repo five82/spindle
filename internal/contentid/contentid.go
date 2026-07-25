@@ -90,7 +90,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	if h.transcriber == nil || h.osClient == nil || h.tmdbClient == nil {
 		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, 0, 0)
 		sess.AddReviewReason("Episode ID: content matcher unavailable")
-		if err := sess.Save(); err != nil {
+		if err := persistContentIDResults(sess); err != nil {
 			return err
 		}
 		return &stage.ErrDegraded{Msg: "content matcher unavailable"}
@@ -112,7 +112,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	if season == nil || len(season.Episodes) == 0 {
 		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, 0, 0)
 		sess.AddReviewReason("Episode ID: TMDB season contains no episodes")
-		if err := sess.Save(); err != nil {
+		if err := persistContentIDResults(sess); err != nil {
 			return err
 		}
 		return &stage.ErrDegraded{Msg: "tmdb season contains no episodes"}
@@ -157,7 +157,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		)
 		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, 0, 0)
 		sess.AddReviewReason("Episode ID: no valid transcriptions")
-		if err := sess.Save(); err != nil {
+		if err := persistContentIDResults(sess); err != nil {
 			return err
 		}
 		return &stage.ErrDegraded{Msg: "no valid transcriptions"}
@@ -173,7 +173,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	if len(refs) == 0 {
 		env.Attributes.ContentID = newDegradedContentIDSummary(h.policy, len(ripPrints), 0)
 		sess.AddReviewReason("Episode ID: no reference subtitles found")
-		if err := sess.Save(); err != nil {
+		if err := persistContentIDResults(sess); err != nil {
 			return err
 		}
 		return &stage.ErrDegraded{Msg: "no reference subtitles found"}
@@ -314,10 +314,34 @@ func (h *Handler) matchEpisodes(
 
 	env.Attributes.ContentID = buildContentIDSummary(env, matches, len(ripPrints), len(refs), h.policy.LowConfidenceReviewThreshold)
 
-	if err := sess.Save(); err != nil {
+	if err := persistContentIDResults(sess); err != nil {
 		return nil, nil, err
 	}
 	return matches, refs, nil
+}
+
+// persistContentIDResults merges the episode-identification-owned fields.
+// Encoding runs concurrently and owns encoded assets, which must survive.
+func persistContentIDResults(sess *stage.Session) error {
+	episodes := append([]ripspec.Episode(nil), sess.Env.Episodes...)
+	var summary *ripspec.ContentIDSummary
+	if sess.Env.Attributes.ContentID != nil {
+		copy := *sess.Env.Attributes.ContentID
+		summary = &copy
+	}
+	if err := sess.MergeSave(func(env *ripspec.Envelope) error {
+		env.Episodes = append([]ripspec.Episode(nil), episodes...)
+		env.Attributes.ContentID = summary
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, reason := range sess.Item.ReviewReasons() {
+		if err := sess.MergeAddReviewReason(reason); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *Handler) generateEpisodeFingerprints(ctx context.Context, sess *stage.Session, env *ripspec.Envelope) ([]ripFingerprint, error) {

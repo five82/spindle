@@ -92,7 +92,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	if err := h.mapAndValidateAssets(ctx, logger, sess, rippedDir, nil); err != nil {
 		return err
 	}
-	if err := sess.Save(); err != nil {
+	if err := persistRipResults(sess); err != nil {
 		return err
 	}
 
@@ -194,7 +194,7 @@ func (h *Handler) restoreFromRipCache(ctx context.Context, sess *stage.Session, 
 		return true, err
 	}
 	h.restoreTitlesFromCachedEnvelope(logger, env, meta.RipSpecData)
-	if err := sess.Save(); err != nil {
+	if err := persistRipResults(sess); err != nil {
 		return true, err
 	}
 	return true, nil
@@ -654,7 +654,9 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 			for _, key := range result.Missing {
 				sess.AddEpisodeReviewReason(key, "Rip asset missing")
 			}
-			sess.AddReviewReason(reason)
+			if err := sess.MergeAddReviewReason(reason); err != nil {
+				return err
+			}
 			logger.Warn("partial episode asset mapping",
 				"event_type", "episode_files_missing",
 				"error_hint", "check MakeMKV output for failed titles",
@@ -716,7 +718,9 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 			}
 		}
 		reason := fmt.Sprintf("%d episode(s) failed rip validation", validationErrors)
-		sess.AddReviewReason(reason)
+		if err := sess.MergeAddReviewReason(reason); err != nil {
+			return err
+		}
 		logger.Warn("partial rip validation",
 			"event_type", "rip_validation_partial",
 			"error_hint", "some episodes failed ffprobe validation",
@@ -725,6 +729,40 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 	}
 
 	return nil
+}
+
+// persistRipResults merges the ripper-owned envelope fields. Ripping overlaps
+// encoding, so replacing the whole envelope here would discard encoded assets
+// completed while the remaining titles were still being ripped.
+func persistRipResults(sess *stage.Session) error {
+	titles := append([]ripspec.Title(nil), sess.Env.Titles...)
+	ripped := append([]ripspec.Asset(nil), sess.Env.Assets.Ripped...)
+	type episodeReview struct {
+		key    string
+		reason string
+	}
+	var reviews []episodeReview
+	for _, ep := range sess.Env.Episodes {
+		if ep.NeedsReview {
+			reviews = append(reviews, episodeReview{key: ep.Key, reason: ep.ReviewReason})
+		}
+	}
+
+	return sess.MergeSave(func(env *ripspec.Envelope) error {
+		if len(env.Titles) == 0 && len(titles) > 0 {
+			env.Titles = append([]ripspec.Title(nil), titles...)
+		}
+		for _, asset := range ripped {
+			env.Assets.AddAsset(ripspec.AssetKindRipped, asset)
+		}
+		for _, review := range reviews {
+			if ep := env.EpisodeByKey(review.key); ep != nil {
+				ep.NeedsReview = true
+				ep.ReviewReason = review.reason
+			}
+		}
+		return nil
+	})
 }
 
 // cacheProgressFunc returns a throttled progress callback for cache operations.

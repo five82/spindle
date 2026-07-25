@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/fileutil"
 	"github.com/five82/spindle/internal/mediameta"
 	"github.com/five82/spindle/internal/notify"
@@ -140,7 +141,26 @@ func TestOverallBytePercent(t *testing.T) {
 	}
 }
 
-func TestTotalCompletedStageBytes(t *testing.T) {
+func TestOrganizationInputForKeyPrefersSubtitledPerEpisode(t *testing.T) {
+	env := &ripspec.Envelope{Assets: ripspec.Assets{
+		Encoded: []ripspec.Asset{
+			{EpisodeKey: "s01e01", Path: "one-encoded.mkv"},
+			{EpisodeKey: "s01e02", Path: "two-encoded.mkv"},
+		},
+		Subtitled: []ripspec.Asset{{EpisodeKey: "s01e02", Path: "two-subtitled.mkv"}},
+	}}
+
+	first, ok := organizationInputForKey(env, "s01e01")
+	if !ok || first.stage != ripspec.AssetKindEncoded || first.asset.Path != "one-encoded.mkv" {
+		t.Fatalf("first input = %#v, found=%v", first, ok)
+	}
+	second, ok := organizationInputForKey(env, "s01e02")
+	if !ok || second.stage != ripspec.AssetKindSubtitled || second.asset.Path != "two-subtitled.mkv" {
+		t.Fatalf("second input = %#v, found=%v", second, ok)
+	}
+}
+
+func TestTotalOrganizationBytes(t *testing.T) {
 	dir := t.TempDir()
 	file1 := filepath.Join(dir, "one.mkv")
 	file2 := filepath.Join(dir, "two.mkv")
@@ -150,15 +170,42 @@ func TestTotalCompletedStageBytes(t *testing.T) {
 	if err := os.WriteFile(file2, []byte("123456"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	env := &ripspec.Envelope{Assets: ripspec.Assets{Encoded: []ripspec.Asset{
-		{EpisodeKey: "s01e01", Path: file1, Status: ripspec.AssetStatusCompleted},
-		{EpisodeKey: "s01e02", Path: file2, Status: ripspec.AssetStatusCompleted},
-		{EpisodeKey: "s01e03", Path: filepath.Join(dir, "missing.mkv"), Status: ripspec.AssetStatusCompleted},
-		{EpisodeKey: "s01e04", Path: "", Status: ripspec.AssetStatusFailed},
-	}}}
-	got := totalCompletedStageBytes(env, ripspec.AssetKindEncoded, []string{"s01e01", "s01e02", "s01e03", "s01e04"})
-	if got != 10 {
-		t.Fatalf("totalCompletedStageBytes() = %d, want 10", got)
+	inputs := []organizationInput{
+		{key: "s01e01", asset: ripspec.Asset{Path: file1}},
+		{key: "s01e02", asset: ripspec.Asset{Path: file2}},
+		{key: "s01e03", asset: ripspec.Asset{Path: filepath.Join(dir, "missing.mkv")}},
+	}
+	if got := totalOrganizationBytes(inputs); got != 10 {
+		t.Fatalf("totalOrganizationBytes() = %d, want 10", got)
+	}
+}
+
+func TestCopyAssetsToDirRejectsMissingAssetBeforeCopy(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	item, err := store.NewDisc("Test", "fingerprint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := stage.NewSession(context.Background(), store, item, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.SetEnvelope(&ripspec.Envelope{
+		Metadata: ripspec.Metadata{MediaType: "tv"},
+		Episodes: []ripspec.Episode{{Key: "s01e01", Season: 1, Episode: 1}},
+	})
+	dest := filepath.Join(t.TempDir(), "library")
+	h := &Handler{cfg: &config.Config{}}
+	_, _, err = h.copyAssetsToDir(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)), sess, &mediameta.Metadata{}, dest, []string{"s01e01"}, "library")
+	if err == nil || !strings.Contains(err.Error(), "no completed subtitled or encoded asset") {
+		t.Fatalf("copyAssetsToDir error = %v", err)
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Fatalf("destination created before asset preflight: %v", statErr)
 	}
 }
 

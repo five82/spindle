@@ -50,12 +50,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	meta := mediameta.FromJSON(item.MetadataJSON, item.DiscTitle)
 	keys := env.AssetKeys()
-	sourceStage, hasSubtitled := resolveSourceStage(env, keys)
-	logger.Info("organization source stage selected",
-		"decision_type", logs.DecisionSourceStageSelection,
-		"decision_result", sourceStage,
-		"decision_reason", fmt.Sprintf("subtitled_available=%v", hasSubtitled),
-	)
 
 	logger.Info("organization plan",
 		"event_type", "organization_plan",
@@ -74,7 +68,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 				"decision_result", "review",
 				"decision_reason", "needs_review flag set with no clean resolved tv episodes",
 			)
-			if err := h.routeToReview(ctx, logger, sess, &meta, sourceStage, keys); err != nil {
+			if err := h.routeToReview(ctx, logger, sess, &meta, keys); err != nil {
 				return err
 			}
 			reviewCount = len(keys)
@@ -95,7 +89,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 				"decision_result", "review",
 				"decision_reason", "all resolved episodes flagged for review",
 			)
-			if err := h.routeToReview(ctx, logger, sess, &meta, sourceStage, reviewKeys); err != nil {
+			if err := h.routeToReview(ctx, logger, sess, &meta, reviewKeys); err != nil {
 				return err
 			}
 			reviewCount = len(reviewKeys)
@@ -114,11 +108,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			"decision_reason", fmt.Sprintf("clean_episodes=%d review_episodes=%d", len(libraryKeys), len(reviewKeys)),
 		)
 
-		if _, err := h.placeInLibrary(ctx, logger, sess, &meta, sourceStage, libraryKeys); err != nil {
+		if _, err := h.placeInLibrary(ctx, logger, sess, &meta, libraryKeys); err != nil {
 			return err
 		}
 		if len(reviewKeys) > 0 {
-			if _, _, err := h.copyAssetsToDir(ctx, logger, sess, &meta, sourceStage, reviewPathForItem(h.cfg.Paths.ReviewDir, item), reviewKeys, "review"); err != nil {
+			if _, _, err := h.copyAssetsToDir(ctx, logger, sess, &meta, reviewPathForItem(h.cfg.Paths.ReviewDir, item), reviewKeys, "review"); err != nil {
 				return err
 			}
 		}
@@ -129,7 +123,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		reviewCount = len(reviewKeys)
 		_ = sess.Progress(100, fmt.Sprintf("Available in library (%d episodes, %d to review)", libraryCount, reviewCount))
 	} else {
-		copied, err := h.placeInLibrary(ctx, logger, sess, &meta, sourceStage, keys)
+		copied, err := h.placeInLibrary(ctx, logger, sess, &meta, keys)
 		if err != nil {
 			return err
 		}
@@ -150,7 +144,6 @@ func (h *Handler) placeInLibrary(
 	logger *slog.Logger,
 	sess *stage.Session,
 	meta *mediameta.Metadata,
-	sourceStage string,
 	keys []string,
 ) (int, error) {
 	libraryPath, err := meta.LibraryPath(
@@ -164,7 +157,7 @@ func (h *Handler) placeInLibrary(
 	if err := os.MkdirAll(libraryPath, 0o755); err != nil {
 		return 0, fmt.Errorf("create library dir: %w", err)
 	}
-	_, copied, err := h.copyAssetsToDir(ctx, logger, sess, meta, sourceStage, libraryPath, keys, "library")
+	_, copied, err := h.copyAssetsToDir(ctx, logger, sess, meta, libraryPath, keys, "library")
 	if err != nil {
 		return 0, err
 	}
@@ -196,18 +189,6 @@ func (h *Handler) finalize(ctx context.Context, logger *slog.Logger, sess *stage
 		"review_count", reviewCount,
 	)
 	return nil
-}
-
-func resolveSourceStage(env *ripspec.Envelope, keys []string) (string, bool) {
-	sourceStage := ripspec.AssetKindSubtitled
-	hasSubtitled := true
-	if len(keys) == 0 {
-		return sourceStage, hasSubtitled
-	}
-	if _, ok := env.Assets.FindAsset(ripspec.AssetKindSubtitled, keys[0]); !ok {
-		return ripspec.AssetKindEncoded, false
-	}
-	return sourceStage, hasSubtitled
 }
 
 func partitionTVOrganizationKeys(env *ripspec.Envelope) (libraryKeys, reviewKeys []string) {
@@ -317,34 +298,70 @@ func moveOrCopyWithProgress(src, dst string, progress fileutil.ProgressFunc) err
 	return nil
 }
 
-func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess *stage.Session, meta *mediameta.Metadata, sourceStage, destDir string, keys []string, target string) (string, int, error) {
+type organizationInput struct {
+	key   string
+	stage string
+	asset ripspec.Asset
+}
+
+func organizationInputForKey(env *ripspec.Envelope, key string) (organizationInput, bool) {
+	if env == nil {
+		return organizationInput{}, false
+	}
+	if asset, ok := env.Assets.FindAsset(ripspec.AssetKindSubtitled, key); ok && asset.IsCompleted() {
+		return organizationInput{key: key, stage: ripspec.AssetKindSubtitled, asset: asset}, true
+	}
+	if asset, ok := env.Assets.FindAsset(ripspec.AssetKindEncoded, key); ok && asset.IsCompleted() {
+		return organizationInput{key: key, stage: ripspec.AssetKindEncoded, asset: asset}, true
+	}
+	return organizationInput{}, false
+}
+
+func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess *stage.Session, meta *mediameta.Metadata, destDir string, keys []string, target string) (string, int, error) {
 	env := sess.Env
 	if len(keys) == 0 {
 		return "", 0, nil
 	}
+
+	inputs := make([]organizationInput, 0, len(keys))
+	for _, key := range keys {
+		input, ok := organizationInputForKey(env, key)
+		if !ok {
+			err := fmt.Errorf("no completed subtitled or encoded asset for %s", key)
+			logger.Error("missing or incomplete asset",
+				"event_type", "organize_missing_asset",
+				"error_hint", "pipeline output is incomplete; retry the failed item",
+				"error", err,
+			)
+			return "", 0, err
+		}
+		reason := "completed subtitled asset available"
+		if input.stage == ripspec.AssetKindEncoded {
+			reason = "no completed subtitled asset; using encoded"
+		}
+		logger.Info("organization source stage selected",
+			"decision_type", logs.DecisionSourceStageSelection,
+			"decision_result", input.stage,
+			"decision_reason", fmt.Sprintf("%s for episode_key=%s", reason, key),
+		)
+		inputs = append(inputs, input)
+	}
+
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", 0, fmt.Errorf("create %s dir: %w", target, err)
 	}
 
-	totalBytes := totalCompletedStageBytes(env, sourceStage, keys)
+	totalBytes := totalOrganizationBytes(inputs)
 	var completedBytes int64
 	copied := 0
 	lastPath := ""
 	pushProgress := throttledProgressUpdater(sess, 250*time.Millisecond)
-	for i, key := range keys {
+	for i, input := range inputs {
 		if ctx.Err() != nil {
 			return "", copied, ctx.Err()
 		}
-
-		asset, ok := env.Assets.FindAsset(sourceStage, key)
-		if !ok || !asset.IsCompleted() {
-			logger.Warn("missing or incomplete asset",
-				"event_type", "organize_missing_asset",
-				"error_hint", fmt.Sprintf("no completed %s asset for %s", sourceStage, key),
-				"impact", fmt.Sprintf("episode will not be copied to %s", target),
-			)
-			continue
-		}
+		key := input.key
+		asset := input.asset
 
 		var season, episode, episodeEnd int
 		if ep := env.EpisodeByKey(key); ep != nil {
@@ -446,7 +463,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 
 // routeToReview copies assets to the review directory for manual inspection.
 // Directory structure: review_dir/{reason}_{fingerprint_prefix}/
-func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, sess *stage.Session, meta *mediameta.Metadata, sourceStage string, keys []string) error {
+func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, sess *stage.Session, meta *mediameta.Metadata, keys []string) error {
 	item := sess.Item
 	logger.Info("routing to review",
 		"decision_type", logs.DecisionOrganizeRoute,
@@ -455,7 +472,7 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, sess *
 	)
 
 	reviewPath := reviewPathForItem(h.cfg.Paths.ReviewDir, item)
-	if _, _, err := h.copyAssetsToDir(ctx, logger, sess, meta, sourceStage, reviewPath, keys, "review"); err != nil {
+	if _, _, err := h.copyAssetsToDir(ctx, logger, sess, meta, reviewPath, keys, "review"); err != nil {
 		return err
 	}
 	if err := sess.Save(); err != nil {
@@ -536,17 +553,10 @@ func (h *Handler) sendTerminalNotification(ctx context.Context, logger *slog.Log
 	)
 }
 
-func totalCompletedStageBytes(env *ripspec.Envelope, stage string, keys []string) int64 {
-	if env == nil {
-		return 0
-	}
+func totalOrganizationBytes(inputs []organizationInput) int64 {
 	var total int64
-	for _, key := range keys {
-		asset, ok := env.Assets.FindAsset(stage, key)
-		if !ok || !asset.IsCompleted() {
-			continue
-		}
-		if info, err := os.Stat(asset.Path); err == nil {
+	for _, input := range inputs {
+		if info, err := os.Stat(input.asset.Path); err == nil {
 			total += info.Size()
 		}
 	}

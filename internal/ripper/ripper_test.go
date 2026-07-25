@@ -1,6 +1,7 @@
 package ripper
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -11,12 +12,78 @@ import (
 	"testing"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/stage"
 )
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestPersistRipResultsPreservesConcurrentEncodedAsset(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	item, err := store.NewDisc("Test", "fingerprint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := ripspec.Envelope{
+		Version:  ripspec.CurrentVersion,
+		Metadata: ripspec.Metadata{MediaType: "tv"},
+		Episodes: []ripspec.Episode{{Key: "s01e01", TitleID: 1}},
+		Titles:   []ripspec.Title{{ID: 1, Duration: 1800}},
+	}
+	item.RipSpecData, err = env.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateWorkState(item); err != nil {
+		t.Fatal(err)
+	}
+
+	ripSession, err := stage.NewSession(context.Background(), store, item, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodeItem, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodeSession, err := stage.NewSession(context.Background(), store, encodeItem, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ripSession.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{EpisodeKey: "s01e01", Path: "ripped.mkv"})
+	if err := encodeSession.SaveAssetSuccess(ripspec.AssetKindEncoded, ripspec.Asset{EpisodeKey: "s01e01", Path: "encoded.mkv"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := persistRipResults(ripSession); err != nil {
+		t.Fatal(err)
+	}
+
+	fresh, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ripspec.Parse(fresh.RipSpecData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asset, ok := got.Assets.FindAsset(ripspec.AssetKindRipped, "s01e01"); !ok || asset.Path != "ripped.mkv" {
+		t.Fatalf("ripped asset = %#v, found=%v", asset, ok)
+	}
+	if asset, ok := got.Assets.FindAsset(ripspec.AssetKindEncoded, "s01e01"); !ok || asset.Path != "encoded.mkv" {
+		t.Fatalf("encoded asset = %#v, found=%v", asset, ok)
+	}
+	if ripSession.Item.RipSpecData != fresh.RipSpecData {
+		t.Fatal("session item did not adopt merged persisted envelope")
+	}
 }
 
 func TestSelectRipTargets_Movie(t *testing.T) {

@@ -23,6 +23,74 @@ import (
 	"github.com/five82/spindle/internal/tmdb"
 )
 
+func TestPersistContentIDResultsPreservesConcurrentEncodedAsset(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	item, err := store.NewDisc("Test", "fingerprint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := ripspec.Envelope{
+		Version:  ripspec.CurrentVersion,
+		Metadata: ripspec.Metadata{MediaType: "tv"},
+		Episodes: []ripspec.Episode{{Key: "s01_001", TitleID: 1}},
+	}
+	item.RipSpecData, err = env.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateWorkState(item); err != nil {
+		t.Fatal(err)
+	}
+
+	contentSession, err := stage.NewSession(context.Background(), store, item, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodeItem, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodeSession, err := stage.NewSession(context.Background(), store, encodeItem, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	contentSession.Env.Episodes[0].Episode = 5
+	contentSession.Env.Attributes.ContentID = &ripspec.ContentIDSummary{Completed: true, MatchedEpisodes: 1}
+	contentSession.AddReviewReason("content ID review")
+	if err := encodeSession.SaveAssetSuccess(ripspec.AssetKindEncoded, ripspec.Asset{EpisodeKey: "s01_001", Path: "encoded.mkv"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := persistContentIDResults(contentSession); err != nil {
+		t.Fatal(err)
+	}
+	if err := persistContentIDResults(contentSession); err != nil {
+		t.Fatal(err)
+	}
+
+	fresh, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ripspec.Parse(fresh.RipSpecData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asset, ok := got.Assets.FindAsset(ripspec.AssetKindEncoded, "s01_001"); !ok || asset.Path != "encoded.mkv" {
+		t.Fatalf("encoded asset = %#v, found=%v", asset, ok)
+	}
+	if got.Episodes[0].Episode != 5 || got.Attributes.ContentID == nil || !got.Attributes.ContentID.Completed {
+		t.Fatalf("content ID result not persisted: %#v", got)
+	}
+	if reasons := fresh.ReviewReasons(); len(reasons) != 1 || reasons[0] != "content ID review" {
+		t.Fatalf("review reasons = %#v", reasons)
+	}
+}
+
 func TestReadSRTText(t *testing.T) {
 	content := `1
 00:00:01,000 --> 00:00:03,000

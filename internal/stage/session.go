@@ -133,6 +133,7 @@ func (s *Session) MergeSave(mutate func(*ripspec.Envelope) error) error {
 	if err := s.Store.UpdateWorkState(fresh); err != nil {
 		return err
 	}
+	s.Item.RipSpecData = data
 
 	// Apply the same mutation to the session's own envelope so its view
 	// stays consistent WITHOUT adopting unrelated fresh state: handlers
@@ -192,11 +193,21 @@ func (s *Session) MergeAddReviewReason(reason string) error {
 	if fresh == nil {
 		return fmt.Errorf("merge review: item %d no longer exists", s.Item.ID)
 	}
-	fresh.AppendReviewReason(reason)
-	if err := s.Store.UpdateWorkState(fresh); err != nil {
-		return err
+	found := false
+	for _, existing := range fresh.ReviewReasons() {
+		if existing == reason {
+			found = true
+			break
+		}
 	}
-	s.Item.AppendReviewReason(reason)
+	if !found {
+		fresh.AppendReviewReason(reason)
+		if err := s.Store.UpdateWorkState(fresh); err != nil {
+			return err
+		}
+	}
+	s.Item.NeedsReview = fresh.NeedsReview
+	s.Item.ReviewReason = fresh.ReviewReason
 	return nil
 }
 
