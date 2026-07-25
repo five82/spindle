@@ -160,6 +160,31 @@ func TestOrganizationInputForKeyPrefersSubtitledPerEpisode(t *testing.T) {
 	}
 }
 
+func TestRemoveMuxedSubtitleSidecarRemovesOnlyMatchingLanguage(t *testing.T) {
+	dir := t.TempDir()
+	video := filepath.Join(dir, "Episode.mkv")
+	english := filepath.Join(dir, "Episode.en.srt")
+	french := filepath.Join(dir, "Episode.fr.srt")
+	for _, path := range []string{english, french} {
+		if err := os.WriteFile(path, []byte("subtitle"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := &ripspec.Envelope{Attributes: ripspec.EnvelopeAttributes{
+		SubtitleGenerationResults: []ripspec.SubtitleGenRecord{{EpisodeKey: "s01_001", Language: "eng"}},
+	}}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := removeMuxedSubtitleSidecar(logger, env, "s01_001", video); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(english); !os.IsNotExist(err) {
+		t.Fatalf("matching sidecar still exists: %v", err)
+	}
+	if _, err := os.Stat(french); err != nil {
+		t.Fatalf("other-language sidecar removed: %v", err)
+	}
+}
+
 func TestTotalOrganizationBytes(t *testing.T) {
 	dir := t.TempDir()
 	file1 := filepath.Join(dir, "one.mkv")

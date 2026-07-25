@@ -16,6 +16,7 @@ import (
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/fileutil"
 	"github.com/five82/spindle/internal/jellyfin"
+	"github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/mediameta"
 	"github.com/five82/spindle/internal/notify"
@@ -447,7 +448,13 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 			"organize_target", target,
 			"duration_ms", time.Since(copyStart).Milliseconds(),
 		)
-		copySidecarSubtitle(logger, asset.Path, destPath)
+		if asset.SubtitlesMuxed {
+			if err := removeMuxedSubtitleSidecar(logger, env, key, destPath); err != nil {
+				return "", copied, err
+			}
+		} else {
+			copySidecarSubtitle(logger, asset.Path, destPath)
+		}
 		if err := sess.SaveAssetSuccess(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath}); err != nil {
 			return "", copied, err
 		}
@@ -574,6 +581,35 @@ func overallBytePercent(copiedBytes, totalBytes int64) float64 {
 		copiedBytes = totalBytes
 	}
 	return float64(copiedBytes) / float64(totalBytes) * 100
+}
+
+// removeMuxedSubtitleSidecar removes a prior external copy of the subtitle
+// now embedded in destVideo. Other-language sidecars are left untouched.
+func removeMuxedSubtitleSidecar(logger *slog.Logger, env *ripspec.Envelope, key, destVideo string) error {
+	lang := "en"
+	for _, record := range env.Attributes.SubtitleGenerationResults {
+		if strings.EqualFold(record.EpisodeKey, key) {
+			if normalized := language.ToISO2(record.Language); normalized != "" {
+				lang = normalized
+			}
+			break
+		}
+	}
+	destBase := strings.TrimSuffix(destVideo, filepath.Ext(destVideo))
+	sidecarPath := destBase + "." + lang + ".srt"
+	if err := os.Remove(sidecarPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("remove obsolete subtitle sidecar %s: %w", sidecarPath, err)
+	}
+	logger.Info("obsolete subtitle sidecar removed",
+		"decision_type", logs.DecisionSidecarSubtitleCopy,
+		"decision_result", "removed",
+		"decision_reason", "matching subtitle is embedded in replacement video",
+		"path", sidecarPath,
+	)
+	return nil
 }
 
 // copySidecarSubtitle copies sidecar SRT files that share the source video's

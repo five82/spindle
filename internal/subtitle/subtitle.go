@@ -331,10 +331,11 @@ func (h *Handler) startSubtitleJob(sess *stage.Session, job stage.AssetJob) {
 	logger := sess.Logger
 	key := job.Key
 
-	logger.Info("encoded asset selected for transcription",
+	logger.Info("ripped asset selected as subtitle input",
 		"decision_type", logs.DecisionTranscriptionAsset,
-		"decision_result", job.Input.Path,
+		"decision_result", ripspec.AssetKindRipped,
 		"decision_reason", fmt.Sprintf("episode_key=%s", key),
+		"path", job.Input.Path,
 	)
 
 	logger.Info(job.PhaseMessage("Generating subtitles ("+key+")"),

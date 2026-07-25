@@ -1,6 +1,7 @@
 package subtitle
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,8 +13,31 @@ import (
 
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/transcription"
 )
+
+func TestStartSubtitleJobLogsRippedInput(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	h := &Handler{}
+	h.startSubtitleJob(&stage.Session{Logger: logger}, stage.AssetJob{
+		Key:           "s01_001",
+		Input:         ripspec.Asset{Path: "/staging/ripped/episode.mkv"},
+		ProgressTotal: 1,
+	})
+
+	var entry map[string]any
+	if err := json.Unmarshal(bytes.Split(output.Bytes(), []byte("\n"))[0], &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry["msg"] != "ripped asset selected as subtitle input" || entry["decision_result"] != ripspec.AssetKindRipped {
+		t.Fatalf("source decision = %#v", entry)
+	}
+	if entry["path"] != "/staging/ripped/episode.mkv" {
+		t.Fatalf("source path = %v", entry["path"])
+	}
+}
 
 func TestSubtitlePhasePercent(t *testing.T) {
 	if got := subtitlePhasePercent(transcription.PhaseExtract, 0); got != 10 {
