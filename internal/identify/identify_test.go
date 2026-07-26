@@ -178,6 +178,11 @@ func TestCleanQueryTitle(t *testing.T) {
 			want:  "STAR TREK TNG",
 		},
 		{
+			name:  "strips underscore-delimited metadata",
+			input: "SIMPSONS_SEASON6_DISC1",
+			want:  "SIMPSONS",
+		},
+		{
 			name:  "falls back to original if result would be empty",
 			input: "Season 1",
 			want:  "Season 1",

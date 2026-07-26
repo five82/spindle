@@ -129,7 +129,8 @@ func (h *Handler) Identify(ctx context.Context, item *queue.Item, logger *slog.L
 func (h *Handler) scanDisc(ctx context.Context, item *queue.Item, logger *slog.Logger) (*IdentifyResult, error) {
 	result := &IdentifyResult{}
 
-	// Step 1: Probe disc source type (lightweight lsblk, always needed).
+	// Step 1: Probe and mount the disc so its structure, rather than ambiguous
+	// filesystem type, determines whether it is DVD or Blu-ray.
 	result.DiscSource = "unknown"
 	if ev, err := discmonitor.ProbeDisc(ctx, h.cfg.MakeMKV.OpticalDrive); err != nil {
 		logger.Warn("disc probe failed, defaulting to unknown",
@@ -139,10 +140,25 @@ func (h *Handler) scanDisc(ctx context.Context, item *queue.Item, logger *slog.L
 		)
 	} else {
 		result.DiscSource = mapDiscSource(ev.DiscType)
+		sourceReason := "filesystem type"
+		mountPoint, cleanup, mountErr := discmonitor.ResolveMountPoint(ctx, ev.Device, ev.MountPath, logger)
+		if mountErr != nil {
+			logger.Warn("disc structure probe failed",
+				"event_type", "disc_source_probe_error",
+				"error_hint", mountErr.Error(),
+				"impact", "disc source inferred from filesystem type",
+			)
+		} else {
+			if structuralType := discmonitor.ClassifyDiscStructure(mountPoint); structuralType != "Unknown" {
+				result.DiscSource = mapDiscSource(structuralType)
+				sourceReason = "mounted disc structure"
+			}
+			cleanup()
+		}
 		logger.Info("disc source determined",
 			"decision_type", logs.DecisionBDInfoAvailability,
 			"decision_result", result.DiscSource,
-			"decision_reason", fmt.Sprintf("disc_type=%s", ev.DiscType),
+			"decision_reason", sourceReason,
 		)
 	}
 
@@ -520,7 +536,8 @@ func splitTitleYear(value string) (string, int) {
 // resolved title to produce a cleaner TMDB search query.
 // Example: "Batman TV Series - Season 2: Disc 6" → "Batman"
 func CleanQueryTitle(title string) string {
-	cleaned := discMetadataPattern.ReplaceAllString(title, "")
+	cleaned := strings.ReplaceAll(title, "_", " ")
+	cleaned = discMetadataPattern.ReplaceAllString(cleaned, "")
 	cleaned = formatBrandingPattern.ReplaceAllString(cleaned, "")
 	cleaned = trailingPunctPattern.ReplaceAllString(cleaned, "")
 	cleaned = strings.TrimSpace(cleaned)

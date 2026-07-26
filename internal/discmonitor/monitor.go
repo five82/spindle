@@ -247,6 +247,15 @@ func (m *Monitor) enqueuePipeline(ctx context.Context, event *DiscEvent) (*Enque
 	}
 	defer cleanup()
 
+	if structuralType := ClassifyDiscStructure(mountPoint); structuralType != "Unknown" && structuralType != event.DiscType {
+		m.logger.Info("disc source refined",
+			"decision_type", logs.DecisionBDInfoAvailability,
+			"decision_result", structuralType,
+			"decision_reason", "mounted disc structure overrides filesystem type",
+		)
+		event.DiscType = structuralType
+	}
+
 	fp, err := fingerprint.Generate(mountPoint, m.logger)
 	if err != nil {
 		m.logger.Error("fingerprint computation failed",

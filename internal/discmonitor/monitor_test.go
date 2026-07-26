@@ -3,6 +3,8 @@
 package discmonitor
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -80,6 +82,30 @@ func TestClassifyDisc(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("classifyDisc(%q) = %q, want %q", tt.fstype, got, tt.want)
 		}
+	}
+}
+
+func TestClassifyDiscStructure(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		dir  string
+		want string
+	}{
+		{name: "Blu-ray", dir: "BDMV", want: "Blu-ray"},
+		{name: "DVD", dir: "VIDEO_TS", want: "DVD"},
+		{name: "unknown", want: "Unknown"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			if tt.dir != "" {
+				if err := os.Mkdir(filepath.Join(root, tt.dir), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := ClassifyDiscStructure(root); got != tt.want {
+				t.Errorf("ClassifyDiscStructure() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

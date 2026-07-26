@@ -120,15 +120,20 @@ func findInProcMounts(device string) (string, error) {
 	return "", nil
 }
 
-// hasDiscStructure returns true if the path contains BDMV/ or VIDEO_TS/.
-func hasDiscStructure(path string) bool {
+// ClassifyDiscStructure identifies optical media by its mounted directory layout.
+func ClassifyDiscStructure(path string) string {
 	if info, err := os.Stat(filepath.Join(path, "BDMV")); err == nil && info.IsDir() {
-		return true
+		return "Blu-ray"
 	}
 	if info, err := os.Stat(filepath.Join(path, "VIDEO_TS")); err == nil && info.IsDir() {
-		return true
+		return "DVD"
 	}
-	return false
+	return "Unknown"
+}
+
+// hasDiscStructure returns true if the path contains BDMV/ or VIDEO_TS/.
+func hasDiscStructure(path string) bool {
+	return ClassifyDiscStructure(path) != "Unknown"
 }
 
 // autoMount runs `mount <device>` and determines the mount point from
