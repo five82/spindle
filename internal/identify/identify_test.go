@@ -777,6 +777,37 @@ func TestCreateEpisodePlaceholders_SegmentMapTakesPriorityOverTitleHash(t *testi
 	}
 }
 
+func TestSelectTVEpisodeTitles_DVDDoesNotDeduplicateLocalSegmentMaps(t *testing.T) {
+	titles := []ripspec.Title{
+		{ID: 0, Duration: 1372, SegmentMap: "1-10,11", TitleHash: "a"},
+		{ID: 1, Duration: 1379, SegmentMap: "1-6,7", TitleHash: "b"},
+		{ID: 2, Duration: 1361, SegmentMap: "1-6,7", TitleHash: "c"},
+		{ID: 3, Duration: 1365, SegmentMap: "1-11,12", TitleHash: "d"},
+		{ID: 4, Duration: 1352, SegmentMap: "1-3,4-8,9", TitleHash: "e"},
+		{ID: 5, Duration: 1369, SegmentMap: "1-10,11", TitleHash: "f"},
+		{ID: 6, Duration: 1345, SegmentMap: "1-6,7", TitleHash: "g"},
+		{ID: 7, Duration: 129, SegmentMap: "1,2", TitleHash: "h"},
+		{ID: 8, Duration: 565, SegmentMap: "1,2", TitleHash: "i"},
+	}
+	expected := make([]tmdb.Episode, 25)
+	for i := range expected {
+		expected[i] = tmdb.Episode{EpisodeNumber: i + 1, Runtime: 23}
+	}
+
+	got := selectTVEpisodeTitles(titles, 120, expected, "dvd")
+	var gotIDs []int
+	for _, title := range got.SelectedTitles {
+		gotIDs = append(gotIDs, title.ID)
+	}
+	wantIDs := []int{0, 1, 2, 3, 4, 5, 6}
+	if !reflect.DeepEqual(gotIDs, wantIDs) {
+		t.Fatalf("SelectedTitles IDs = %v, want %v", gotIDs, wantIDs)
+	}
+	if got.DuplicateCount != 0 {
+		t.Fatalf("DuplicateCount = %d, want 0", got.DuplicateCount)
+	}
+}
+
 func TestSelectTVEpisodeTitles(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -1088,7 +1119,7 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := selectTVEpisodeTitles(tt.titles, tt.minTitleLength, tt.expected)
+			got := selectTVEpisodeTitles(tt.titles, tt.minTitleLength, tt.expected, "")
 			if got.Ambiguous != tt.wantAmbiguous {
 				t.Fatalf("Ambiguous = %v, want %v (reasons=%v)", got.Ambiguous, tt.wantAmbiguous, got.AmbiguityReasons)
 			}

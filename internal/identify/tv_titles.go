@@ -71,14 +71,14 @@ type compositeTitle struct {
 	components []tvTitleCandidate
 }
 
-func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int, expected []tmdb.Episode) tvTitleSelectionResult {
+func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int, expected []tmdb.Episode, discSource string) tvTitleSelectionResult {
 	result := tvTitleSelectionResult{Decisions: make([]tvTitleDecision, 0, len(titles))}
 	candidates := make([]tvTitleCandidate, 0, len(titles))
 	seen := make(map[string]int)
 
 	for _, title := range titles {
 		decision := tvTitleDecision{Title: title}
-		key := dedupKey(title)
+		key := dedupKey(title, discSource)
 		switch {
 		case title.Duration < minTitleLength:
 			decision.Reason = "below_min_title_length"
@@ -108,7 +108,11 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int, expected 
 		result.Ambiguous = true
 		result.AmbiguityReasons = append(result.AmbiguityReasons, "single_episode_length_candidate")
 	}
-	alive = resolveComposites(alive, &result)
+	// DVD segment maps are title-local PGC cell numbers, so equal maps do not
+	// prove duplicate content and unions do not prove play-all composites.
+	if discSource != "dvd" {
+		alive = resolveComposites(alive, &result)
+	}
 	alive = excludeRuntimeMismatches(alive, expected, &result)
 	alive = capToExpectedCount(alive, expected, &result)
 
@@ -509,10 +513,11 @@ func longestCandidate(candidates []tvTitleCandidate) tvTitleCandidate {
 	return best
 }
 
-func dedupKey(title ripspec.Title) string {
-	key := strings.TrimSpace(title.SegmentMap)
-	if key != "" {
-		return key
+func dedupKey(title ripspec.Title, discSource string) string {
+	if discSource != "dvd" {
+		if key := strings.TrimSpace(title.SegmentMap); key != "" {
+			return key
+		}
 	}
 	return strings.TrimSpace(title.TitleHash)
 }

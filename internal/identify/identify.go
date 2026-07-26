@@ -700,7 +700,7 @@ func (h *Handler) createEpisodePlaceholders(ctx context.Context, logger *slog.Lo
 	}
 
 	expected := h.fetchExpectedEpisodes(ctx, logger, env.Metadata.ID, season)
-	selection := selectTVEpisodeTitles(env.Titles, h.cfg.MakeMKV.MinTitleLength, expected)
+	selection := selectTVEpisodeTitles(env.Titles, h.cfg.MakeMKV.MinTitleLength, expected, env.Metadata.DiscSource)
 	for _, decision := range selection.Decisions {
 		switch {
 		case decision.Selected:
