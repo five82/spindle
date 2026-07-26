@@ -6,12 +6,12 @@ require (
 	github.com/fatih/color v1.19.0
 	github.com/five82/reel v0.0.0-20260724005418-6a0c5aea48c4
 	github.com/gofrs/flock v0.13.0
-	github.com/pelletier/go-toml/v2 v2.4.2
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pilebones/go-udev v0.9.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.47.0
-	golang.org/x/term v0.44.0
-	modernc.org/sqlite v1.53.0
+	golang.org/x/term v0.45.0
+	modernc.org/sqlite v1.54.0
 )
 
 require (
@@ -26,7 +26,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/schollz/progressbar/v3 v3.19.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	modernc.org/libc v1.73.4 // indirect
+	modernc.org/libc v1.74.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
