@@ -17,7 +17,7 @@ product.
 - Personal-first: behavior may change as the workflow evolves.
 - Best-effort only: questions and issues may receive a slow response or none.
 - Pull requests are welcome when they fit the project's goals and use case.
-- "Vibe coded": this began as, and remains, a vibe-coding experiment.
+- The project began as and remains an experiment. Expect rough edges.
 
 ## Install
 
