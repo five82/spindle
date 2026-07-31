@@ -348,19 +348,56 @@ func parseCacheEntryNumber(arg string) (int, error) {
 	return num, nil
 }
 
+func cacheEntryForProcessing(selector string) (ripcache.EntryMetadata, error) {
+	store := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
+	entries, err := store.List()
+	if err != nil {
+		return ripcache.EntryMetadata{}, err
+	}
+	return selectCacheEntry(entries, selector)
+}
+
+func selectCacheEntry(entries []ripcache.EntryMetadata, selector string) (ripcache.EntryMetadata, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return ripcache.EntryMetadata{}, fmt.Errorf("cache entry selector is required")
+	}
+	num, parseErr := strconv.Atoi(selector)
+	if parseErr == nil && num >= 1 && num <= len(entries) {
+		return entries[num-1], nil
+	}
+
+	var matches []ripcache.EntryMetadata
+	selector = strings.ToLower(selector)
+	for _, entry := range entries {
+		if strings.HasPrefix(strings.ToLower(entry.Fingerprint), selector) {
+			matches = append(matches, entry)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		if parseErr == nil {
+			if num < 1 {
+				return ripcache.EntryMetadata{}, fmt.Errorf("invalid entry number: %s", selector)
+			}
+			return ripcache.EntryMetadata{}, fmt.Errorf("entry %d not found (have %d entries)", num, len(entries))
+		}
+		return ripcache.EntryMetadata{}, fmt.Errorf("cache fingerprint not found: %s", selector)
+	case 1:
+		return matches[0], nil
+	default:
+		return ripcache.EntryMetadata{}, fmt.Errorf("cache fingerprint is ambiguous: %s", selector)
+	}
+}
+
 func newCacheProcessCmd() *cobra.Command {
 	var allowDuplicate bool
 	cmd := &cobra.Command{
-		Use:   "process <number>",
+		Use:   "process <number-or-fingerprint>",
 		Short: "Queue a cached rip for processing",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			num, err := parseCacheEntryNumber(args[0])
-			if err != nil {
-				return err
-			}
-
-			entry, err := cacheEntryByNumber(num)
+			entry, err := cacheEntryForProcessing(args[0])
 			if err != nil {
 				return err
 			}
