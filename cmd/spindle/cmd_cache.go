@@ -309,14 +309,18 @@ func newCacheListCmd() *cobra.Command {
 					titleWord = "title"
 				}
 				if flagVerbose {
-					fmt.Printf("  %d. %s (%d %s, %s, cached %s)\n",
+					fmt.Printf("  %2d. %s (%d %s, %s, cached %s)\n",
 						i+1, e.DiscTitle, e.TitleCount, titleWord,
 						formatBytes(e.TotalBytes), e.CachedAt.Format(time.RFC3339))
-					fmt.Printf("     Fingerprint: %s\n", e.Fingerprint)
+					fmt.Printf("      Fingerprint: %s\n", e.Fingerprint)
 				} else {
 					age := time.Since(e.CachedAt).Truncate(time.Minute)
-					fmt.Printf("  %d. %s (%d %s, %s, %s ago)\n",
-						i+1, e.DiscTitle, e.TitleCount, titleWord,
+					fingerprint := e.Fingerprint
+					if len(fingerprint) > 12 {
+						fingerprint = fingerprint[:12]
+					}
+					fmt.Printf("  %2d. %s  %s (%d %s, %s, %s ago)\n",
+						i+1, fingerprint, e.DiscTitle, e.TitleCount, titleWord,
 						formatBytes(e.TotalBytes), age)
 				}
 			}
