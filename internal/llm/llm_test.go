@@ -82,6 +82,13 @@ func TestCompleteJSONSuccess(t *testing.T) {
 		if r.Header.Get("Content-Type") != "application/json" {
 			t.Errorf("unexpected content type: %s", r.Header.Get("Content-Type"))
 		}
+		var req chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Reasoning == nil || req.Reasoning.Effort != "medium" {
+			t.Errorf("reasoning = %#v, want medium effort", req.Reasoning)
+		}
 
 		resp := map[string]any{
 			"choices": []map[string]any{
@@ -97,7 +104,7 @@ func TestCompleteJSONSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(config.LLMConfig{APIKey: "test-key", BaseURL: srv.URL, Model: "test-model", Referer: "http://example.com", Title: "TestApp", TimeoutSeconds: 10}, nil)
+	c := New(config.LLMConfig{APIKey: "test-key", BaseURL: srv.URL, Model: defaultModel, Referer: "http://example.com", Title: "TestApp", TimeoutSeconds: 10}, nil)
 
 	var result struct {
 		Answer string `json:"answer"`
@@ -116,6 +123,13 @@ func TestCompleteJSONRetryOn429(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := calls.Add(1)
+		var req chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Reasoning != nil {
+			t.Errorf("reasoning = %#v for custom model, want nil", req.Reasoning)
+		}
 		if n == 1 {
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte("rate limited"))

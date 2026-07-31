@@ -15,6 +15,8 @@ import (
 	"github.com/five82/spindle/internal/logs"
 )
 
+const defaultModel = "openai/gpt-5.6-luna"
+
 // Client sends chat completion requests to an OpenRouter-compatible API.
 type Client struct {
 	apiKey  string
@@ -39,7 +41,7 @@ func New(cfg config.LLMConfig, logger *slog.Logger) *Client {
 	}
 	model := cfg.Model
 	if model == "" {
-		model = "openai/gpt-5.6-luna"
+		model = defaultModel
 	}
 	logger = logs.Default(logger)
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
@@ -60,10 +62,15 @@ func New(cfg config.LLMConfig, logger *slog.Logger) *Client {
 
 // chatRequest is the OpenAI-compatible chat completion request body.
 type chatRequest struct {
-	Model          string          `json:"model"`
-	Messages       []chatMessage   `json:"messages"`
-	Temperature    float64         `json:"temperature"`
-	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+	Model          string           `json:"model"`
+	Messages       []chatMessage    `json:"messages"`
+	Temperature    float64          `json:"temperature"`
+	ResponseFormat *responseFormat  `json:"response_format,omitempty"`
+	Reasoning      *reasoningConfig `json:"reasoning,omitempty"`
+}
+
+type reasoningConfig struct {
+	Effort string `json:"effort"`
 }
 
 // responseFormat constrains the LLM response to a specific format.
@@ -102,6 +109,9 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 		},
 		Temperature:    0,
 		ResponseFormat: &responseFormat{Type: "json_object"},
+	}
+	if c.model == defaultModel {
+		reqBody.Reasoning = &reasoningConfig{Effort: "medium"}
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
