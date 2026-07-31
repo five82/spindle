@@ -18,6 +18,13 @@ func TestNewEmptyAPIKey(t *testing.T) {
 	}
 }
 
+func TestNewDefaultModel(t *testing.T) {
+	c := New(config.LLMConfig{APIKey: "test"}, nil)
+	if c.model != "openai/gpt-5.6-luna" {
+		t.Fatalf("default model = %q, want openai/gpt-5.6-luna", c.model)
+	}
+}
+
 func TestCompleteJSONNilClient(t *testing.T) {
 	var c *Client
 	err := c.CompleteJSON(context.Background(), "sys", "user", nil)

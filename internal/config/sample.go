@@ -147,7 +147,7 @@ api_key = ""
 # base_url = "https://openrouter.ai/api/v1/chat/completions"
 
 # LLM model identifier
-# model = "google/gemini-3-flash-preview"
+# model = "openai/gpt-5.6-luna"
 
 # HTTP-Referer header for OpenRouter
 # referer = "https://github.com/five82/spindle"

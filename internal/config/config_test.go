@@ -50,6 +50,9 @@ func TestLoadNoConfigReturnsDefaults(t *testing.T) {
 	if cfg.Logging.RetentionDays != 60 {
 		t.Errorf("expected default retention days 60, got %d", cfg.Logging.RetentionDays)
 	}
+	if cfg.LLM.Model != "openai/gpt-5.6-luna" {
+		t.Errorf("expected default LLM model openai/gpt-5.6-luna, got %q", cfg.LLM.Model)
+	}
 	if cfg.Commentary.SimilarityThreshold != 0.92 {
 		t.Errorf("expected default similarity threshold 0.92, got %f", cfg.Commentary.SimilarityThreshold)
 	}

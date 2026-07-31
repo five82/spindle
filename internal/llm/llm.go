@@ -39,7 +39,7 @@ func New(cfg config.LLMConfig, logger *slog.Logger) *Client {
 	}
 	model := cfg.Model
 	if model == "" {
-		model = "google/gemini-3-flash-preview"
+		model = "openai/gpt-5.6-luna"
 	}
 	logger = logs.Default(logger)
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
