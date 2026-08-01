@@ -31,8 +31,15 @@ import (
 
 func newCacheCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "cache",
-		Short:   "Manage the rip cache",
+		Use:   "cache",
+		Short: "Manage the rip cache",
+		Long: `Manage rips saved in the rip cache.
+
+Commands that select one entry accept its list number or a unique fingerprint
+prefix. Run 'spindle cache list' to see the available selectors.`,
+		Example: `  spindle cache list
+  spindle cache process 2
+  spindle cache remove a1b2c3d4e5f6`,
 		GroupID: groupDisc,
 	}
 	cmd.AddCommand(
@@ -348,15 +355,7 @@ func cacheEntryByNumber(num int) (ripcache.EntryMetadata, error) {
 	return entries[num-1], nil
 }
 
-func parseCacheEntryNumber(arg string) (int, error) {
-	num, err := strconv.Atoi(arg)
-	if err != nil || num < 1 {
-		return 0, fmt.Errorf("invalid entry number: %s", arg)
-	}
-	return num, nil
-}
-
-func cacheEntryForProcessing(selector string) (ripcache.EntryMetadata, error) {
+func cacheEntryBySelector(selector string) (ripcache.EntryMetadata, error) {
 	store := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
 	entries, err := store.List()
 	if err != nil {
@@ -405,7 +404,7 @@ func newCacheProcessCmd() *cobra.Command {
 		Short: "Queue a cached rip for processing",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			entry, err := cacheEntryForProcessing(args[0])
+			entry, err := cacheEntryBySelector(args[0])
 			if err != nil {
 				return err
 			}
@@ -451,16 +450,15 @@ func newCacheProcessCmd() *cobra.Command {
 
 func newCacheRemoveCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "remove <number>",
+		Use:   "remove <number-or-fingerprint>",
 		Short: "Remove a specific cache entry",
-		Args:  cobra.ExactArgs(1),
+		Long: `Remove a specific cache entry by its list number or by a unique
+fingerprint prefix. Run 'spindle cache list' to see the available entries.`,
+		Example: `  spindle cache remove 2
+  spindle cache remove a1b2c3d4e5f6`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			num, err := parseCacheEntryNumber(args[0])
-			if err != nil {
-				return err
-			}
-
-			entry, err := cacheEntryByNumber(num)
+			entry, err := cacheEntryBySelector(args[0])
 			if err != nil {
 				return err
 			}

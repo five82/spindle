@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -42,5 +43,21 @@ func TestSelectCacheEntryRejectsUnknownFingerprint(t *testing.T) {
 	_, err := selectCacheEntry([]ripcache.EntryMetadata{{Fingerprint: "abcdef"}}, "fedcba")
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("select unknown error = %v", err)
+	}
+}
+
+func TestCacheRemoveHelpDocumentsSelectors(t *testing.T) {
+	cmd := newCacheRemoveCmd()
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	if err := cmd.Help(); err != nil {
+		t.Fatal(err)
+	}
+
+	help := output.String()
+	for _, want := range []string{"<number-or-fingerprint>", "unique", "fingerprint prefix"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("help does not contain %q:\n%s", want, help)
+		}
 	}
 }
