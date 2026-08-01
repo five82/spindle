@@ -2,7 +2,6 @@
 
 ## Ground rules
 
-- Do not run `git commit` or `git push` unless explicitly asked.
 - Go toolchain only (`go build`, `go test`, `golangci-lint`); no alternate build systems.
 - Before handing work back, run `./check-ci.sh` (tests, race, CGO, lint, govulncheck) or explain why you couldn't.
 - Finish the work you start; ask before dropping scope or leaving TODOs.
