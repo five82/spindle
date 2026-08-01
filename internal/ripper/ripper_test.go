@@ -86,6 +86,50 @@ func TestPersistRipResultsPreservesConcurrentEncodedAsset(t *testing.T) {
 	}
 }
 
+func TestCacheFreshRipRecordsDiscNumber(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	item, err := store.NewDisc("Show Season 1", "fingerprint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := ripspec.Envelope{
+		Version:  ripspec.CurrentVersion,
+		Metadata: ripspec.Metadata{MediaType: "tv", SeasonNumber: 1, DiscNumber: 2},
+	}
+	item.RipSpecData, err = env.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateWorkState(item); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := stage.NewSession(context.Background(), store, item, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rippedDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(rippedDir, "title.mkv"), []byte("video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := ripcache.New(t.TempDir(), 10)
+	h := &Handler{cache: cache}
+	h.cacheFreshRip(testLogger(), sess, rippedDir, 1)
+
+	meta, err := cache.GetMetadata(item.DiscFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.DiscNumber != 2 {
+		t.Fatalf("DiscNumber = %d, want 2", meta.DiscNumber)
+	}
+}
+
 func TestSelectRipTargets_Movie(t *testing.T) {
 	h := &Handler{cfg: &config.Config{}, titleOverride: -1}
 	h.cfg.MakeMKV.MinTitleLength = 120

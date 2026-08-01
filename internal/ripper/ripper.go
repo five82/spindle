@@ -402,6 +402,7 @@ func (h *Handler) cacheFreshRip(logger *slog.Logger, sess *stage.Session, ripped
 		Version:      1,
 		Fingerprint:  item.DiscFingerprint,
 		DiscTitle:    item.DiscTitle,
+		DiscNumber:   sess.Env.Metadata.DiscNumber,
 		CachedAt:     time.Now(),
 		TitleCount:   rippedCount,
 		TotalBytes:   totalBytes,

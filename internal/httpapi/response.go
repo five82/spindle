@@ -18,6 +18,7 @@ type ItemResponse struct {
 	ID                      int64              `json:"id"`
 	DiscTitle               string             `json:"discTitle"`
 	DisplayTitle            string             `json:"displayTitle"`
+	DiscNumber              int                `json:"discNumber,omitempty"`
 	Stage                   string             `json:"stage"`
 	InProgress              bool               `json:"inProgress"`
 	FailedAtStage           string             `json:"failedAtStage,omitempty"`
@@ -293,6 +294,7 @@ func toItemResponse(item *queue.Item, tasks []*queue.Task, includeRipSpec bool) 
 		}
 		env, err := ripspec.Parse(item.RipSpecData)
 		if err == nil {
+			resp.DiscNumber = env.Metadata.DiscNumber
 			populateRipSpecDerived(&resp, &env, activeAssetKeys(tasks))
 		}
 	}

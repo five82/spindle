@@ -195,6 +195,7 @@ func TestGetMetadata(t *testing.T) {
 	meta := EntryMetadata{
 		Fingerprint: "meta01",
 		DiscTitle:   "Metadata Test",
+		DiscNumber:  3,
 		CachedAt:    now,
 		TitleCount:  3,
 		TotalBytes:  4,
@@ -213,6 +214,9 @@ func TestGetMetadata(t *testing.T) {
 	}
 	if got.TitleCount != 3 {
 		t.Fatalf("TitleCount: got %d, want 3", got.TitleCount)
+	}
+	if got.DiscNumber != 3 {
+		t.Fatalf("DiscNumber: got %d, want 3", got.DiscNumber)
 	}
 	if !got.CachedAt.Equal(now) {
 		t.Fatalf("CachedAt: got %v, want %v", got.CachedAt, now)

@@ -25,6 +25,7 @@ type EntryMetadata struct {
 	Version      int       `json:"version"`
 	Fingerprint  string    `json:"fingerprint"`
 	DiscTitle    string    `json:"disc_title"`
+	DiscNumber   int       `json:"disc_number,omitempty"`
 	CachedAt     time.Time `json:"cached_at"`
 	TitleCount   int       `json:"title_count"`
 	TotalBytes   int64     `json:"total_bytes"`

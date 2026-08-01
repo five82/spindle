@@ -11,6 +11,15 @@ import (
 	"github.com/five82/spindle/internal/queue"
 )
 
+func TestDiscNumberText(t *testing.T) {
+	if got := discNumberText(2); got != "2" {
+		t.Fatalf("discNumberText(2) = %q, want 2", got)
+	}
+	if got := discNumberText(0); got != "-" {
+		t.Fatalf("discNumberText(0) = %q, want -", got)
+	}
+}
+
 func TestClearQueueDBFilesRemovesOnlyQueueFiles(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "queue.db")

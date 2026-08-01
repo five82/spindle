@@ -53,6 +53,13 @@ func newQueueCmd() *cobra.Command {
 	return cmd
 }
 
+func discNumberText(number int) string {
+	if number <= 0 {
+		return "-"
+	}
+	return strconv.Itoa(number)
+}
+
 func parseQueueID(arg string) (int64, error) {
 	id, err := strconv.ParseInt(arg, 10, 64)
 	if err != nil {
@@ -104,12 +111,13 @@ func newQueueListCmd() *cobra.Command {
 			}
 
 			if flagVerbose {
-				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-40s %-24s %-30s %-30s %s", "ID", "Title", "Stage", "Created", "Updated", "Fingerprint")))
-				fmt.Println(dimStyle(strings.Repeat("-", 160)))
+				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-40s %-6s %-24s %-30s %-30s %s", "ID", "Title", "Disc", "Stage", "Created", "Updated", "Fingerprint")))
+				fmt.Println(dimStyle(strings.Repeat("-", 168)))
 				for _, item := range items {
-					fmt.Printf("%-6d %-40s %-24s %-30s %-30s %s\n",
+					fmt.Printf("%-6d %-40s %-6s %-24s %-30s %-30s %s\n",
 						item.ID,
 						item.DiscTitle,
+						discNumberText(item.DiscNumber),
 						item.Stage,
 						item.CreatedAt,
 						item.UpdatedAt,
@@ -121,12 +129,13 @@ func newQueueListCmd() *cobra.Command {
 					}
 				}
 			} else {
-				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-30s %-24s %-16s %-14s", "ID", "Title", "Stage", "Created", "Fingerprint")))
-				fmt.Println(dimStyle(strings.Repeat("-", 92)))
+				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-30s %-6s %-24s %-16s %-14s", "ID", "Title", "Disc", "Stage", "Created", "Fingerprint")))
+				fmt.Println(dimStyle(strings.Repeat("-", 100)))
 				for _, item := range items {
-					fmt.Printf("%-6d %-30s %-24s %-16s %-14s\n",
+					fmt.Printf("%-6d %-30s %-6s %-24s %-16s %-14s\n",
 						item.ID,
 						truncate(item.DiscTitle, 28),
+						discNumberText(item.DiscNumber),
 						item.Stage,
 						relativeAge(item.CreatedAt),
 						shortFP(item.DiscFingerprint),
@@ -171,6 +180,9 @@ func newQueueShowCmd() *cobra.Command {
 
 			fmt.Printf("%s %d\n", labelStyle("ID:         "), item.ID)
 			fmt.Printf("%s %s\n", labelStyle("Title:      "), item.DiscTitle)
+			if item.DiscNumber > 0 {
+				fmt.Printf("%s %d\n", labelStyle("Disc:       "), item.DiscNumber)
+			}
 			fmt.Printf("%s %s\n", labelStyle("Stage:      "), item.Stage)
 			if flagVerbose && item.FailedAtStage != "" {
 				fmt.Printf("%s %s\n", labelStyle("FailedAt:   "), item.FailedAtStage)

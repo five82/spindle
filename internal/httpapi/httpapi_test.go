@@ -194,6 +194,7 @@ func newProjectionEnvelope(t *testing.T) string {
 	env := ripspec.Envelope{
 		Version:     ripspec.CurrentVersion,
 		Fingerprint: "fp1",
+		Metadata:    ripspec.Metadata{MediaType: "tv", SeasonNumber: 1, DiscNumber: 2},
 		Episodes: []ripspec.Episode{
 			{Key: "s01_001", TitleID: 1, Season: 1, Episode: 1, EpisodeTitle: "Pilot"},
 		},
@@ -285,6 +286,9 @@ func TestQueueResponsesProjectTasksAndEnvelope(t *testing.T) {
 	}
 	if got.DisplayTitle == "" {
 		t.Fatal("displayTitle missing")
+	}
+	if got.DiscNumber != 2 {
+		t.Fatalf("discNumber = %d, want 2", got.DiscNumber)
 	}
 	if len(got.Tasks) != 2 {
 		t.Fatalf("expected 2 tasks, got %d", len(got.Tasks))
