@@ -35,8 +35,8 @@ func newCacheCmd() *cobra.Command {
 		Short: "Manage the rip cache",
 		Long: `Manage rips saved in the rip cache.
 
-Commands that select one entry accept its list number or a unique fingerprint
-prefix. Run 'spindle cache list' to see the available selectors.`,
+Entry selectors accept a list number or a unique fingerprint prefix. Run
+'spindle cache list' to see the available selectors.`,
 		Example: `  spindle cache list
   spindle cache process 2
   spindle cache remove a1b2c3d4e5f6`,
@@ -364,6 +364,22 @@ func cacheEntryBySelector(selector string) (ripcache.EntryMetadata, error) {
 	return selectCacheEntry(entries, selector)
 }
 
+func selectCacheEntries(entries []ripcache.EntryMetadata, selectors []string) ([]ripcache.EntryMetadata, error) {
+	selected := make([]ripcache.EntryMetadata, 0, len(selectors))
+	seen := make(map[string]bool, len(selectors))
+	for _, selector := range selectors {
+		entry, err := selectCacheEntry(entries, selector)
+		if err != nil {
+			return nil, err
+		}
+		if !seen[entry.Fingerprint] {
+			selected = append(selected, entry)
+			seen[entry.Fingerprint] = true
+		}
+	}
+	return selected, nil
+}
+
 func selectCacheEntry(entries []ripcache.EntryMetadata, selector string) (ripcache.EntryMetadata, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
@@ -450,24 +466,32 @@ func newCacheProcessCmd() *cobra.Command {
 
 func newCacheRemoveCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "remove <number-or-fingerprint>",
-		Short: "Remove a specific cache entry",
-		Long: `Remove a specific cache entry by its list number or by a unique
-fingerprint prefix. Run 'spindle cache list' to see the available entries.`,
+		Use:   "remove <number-or-fingerprint>...",
+		Short: "Remove one or more cache entries",
+		Long: `Remove one or more cache entries. Each selector may be a list number or a
+unique fingerprint prefix. List numbers are resolved before any entries are
+removed. Run 'spindle cache list' to see the available entries.`,
 		Example: `  spindle cache remove 2
-  spindle cache remove a1b2c3d4e5f6`,
-		Args: cobra.ExactArgs(1),
+  spindle cache remove 2 4 5
+  spindle cache remove a1b2c3d4e5f6 9f8e7d6c5b4a`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			entry, err := cacheEntryBySelector(args[0])
+			store := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
+			entries, err := store.List()
+			if err != nil {
+				return err
+			}
+			selected, err := selectCacheEntries(entries, args)
 			if err != nil {
 				return err
 			}
 
-			store := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
-			if err := store.Remove(entry.Fingerprint); err != nil {
-				return err
+			for _, entry := range selected {
+				if err := store.Remove(entry.Fingerprint); err != nil {
+					return err
+				}
+				fmt.Println(successStyle(fmt.Sprintf("Removed cache entry: %s", entry.DiscTitle)))
 			}
-			fmt.Println(successStyle(fmt.Sprintf("Removed cache entry: %s", entry.DiscTitle)))
 			return nil
 		},
 	}

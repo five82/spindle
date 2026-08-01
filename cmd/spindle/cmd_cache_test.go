@@ -28,6 +28,27 @@ func TestSelectCacheEntryByNumberOrFingerprint(t *testing.T) {
 	}
 }
 
+func TestSelectCacheEntriesByMixedSelectors(t *testing.T) {
+	entries := []ripcache.EntryMetadata{
+		{Fingerprint: "abcdef123456", DiscTitle: "First"},
+		{Fingerprint: "123456abcdef", DiscTitle: "Second"},
+		{Fingerprint: "fedcba654321", DiscTitle: "Third"},
+	}
+
+	selected, err := selectCacheEntries(entries, []string{"2", "fedcba", "ABCDEF", "123456abcdef"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 3 {
+		t.Fatalf("selected %d entries, want 3: %#v", len(selected), selected)
+	}
+	for i, want := range []string{"Second", "Third", "First"} {
+		if selected[i].DiscTitle != want {
+			t.Errorf("selected[%d] = %q, want %q", i, selected[i].DiscTitle, want)
+		}
+	}
+}
+
 func TestSelectCacheEntryRejectsAmbiguousFingerprint(t *testing.T) {
 	entries := []ripcache.EntryMetadata{
 		{Fingerprint: "abcdef123456"},
@@ -55,7 +76,7 @@ func TestCacheRemoveHelpDocumentsSelectors(t *testing.T) {
 	}
 
 	help := output.String()
-	for _, want := range []string{"<number-or-fingerprint>", "unique", "fingerprint prefix"} {
+	for _, want := range []string{"<number-or-fingerprint>...", "one or more", "unique", "fingerprint prefix"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("help does not contain %q:\n%s", want, help)
 		}
