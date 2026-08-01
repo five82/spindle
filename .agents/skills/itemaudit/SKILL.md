@@ -150,6 +150,8 @@ Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `lo
 
 3. **Data flow anomalies**:
    - Track counts changing unexpectedly between stages
+   - Reconcile TV counts across `makemkv_scan_complete.titles_found`, title-selection decisions, `episode_placeholders`, the episode manifest, and ripped assets. A contiguous resolved sequence does not prove the first or last episode is present.
+   - For a DVD, any `duplicate_detection` decision carrying `title_id`/`duplicate_of` is a **CRITICAL missing-episode risk**: DVD segment maps are title-local and TitleHash is metadata-only, so neither proves equal content. Compare source sizes when available, but never accept a DVD title reduction solely as deduplication.
    - Episode counts not matching expectations
    - File sizes that seem wrong for the content
 
@@ -395,6 +397,7 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 | Pattern | Stage | Evidence in Audit-Gather Output | Impact |
 |---------|-------|--------------------------------|--------|
 | Duplicate disc detection | Identification/Disc Monitor | `logs.decisions` with `decision_type=duplicate_detection` | Item rejected or enqueue skipped |
+| DVD TV title falsely deduplicated | Identification | `decision_type=duplicate_detection` with `title_id`/`duplicate_of` on a DVD; scan/title/placeholder counts decrease | Episode omitted even when the resolved episode sequence remains contiguous |
 | TMDB match rejected or weakly accepted | Identification | `logs.decisions` with `decision_type=tmdb_match` and score/threshold details in `decision_reason` | No match or wrong title match |
 | Unresolved placeholder episodes | Episode ID | `envelope.episodes` with `episode=0` and placeholder keys after episodeid | Episodes land in review_dir |
 | Wrong crop detection | Encoding | `encoding.snapshot.crop_filter` aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
@@ -577,7 +580,8 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] Reviewed `stage_gate` to determine applicable phases
 - [ ] Reviewed `analysis.anomalies` for pre-flagged issues
 - [ ] Analyzed `logs` for anomalies beyond simple error counts
-- [ ] If TV: checked for episode pipeline log patterns
+- [ ] If TV: reconciled scanned, selected, placeholder, manifest, ripped, and final episode counts; investigated every reduction
+- [ ] If TV DVD: treated any title-level duplicate skip as critical rather than trusting contiguous episode numbering
 - [ ] For failed items: diagnosed failure cause from `item.error_message` and log events
 
 ### Post-Ripping (phase_rip_cache)

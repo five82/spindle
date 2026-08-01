@@ -1080,6 +1080,23 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 				Message:  fmt.Sprintf("%d warning(s) in item log", n),
 			})
 		}
+		if r.StageGate.MediaType == "tv" && r.StageGate.DiscSource == "dvd" {
+			discarded := 0
+			for _, decision := range r.Logs.Decisions {
+				_, titleDuplicate := decision.Extras["duplicate_of"]
+				if decision.DecisionType == logs.DecisionDuplicateDetection &&
+					decision.DecisionResult == "skipped" && titleDuplicate {
+					discarded++
+				}
+			}
+			if discarded > 0 {
+				anomalies = append(anomalies, Anomaly{
+					Severity: "critical",
+					Category: "episodes",
+					Message:  fmt.Sprintf("%d eligible DVD title(s) discarded as duplicates; DVD metadata cannot prove duplicate content", discarded),
+				})
+			}
+		}
 		contested, ambiguous, decisiveLowSimilarity := countDecisionConfidenceQualities(r.Logs.Decisions)
 		if contested > 0 {
 			anomalies = append(anomalies, Anomaly{

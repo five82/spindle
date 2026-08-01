@@ -403,6 +403,32 @@ func TestDetectAnomalies_CleanItem(t *testing.T) {
 	}
 }
 
+func TestDetectAnomalies_DVDTitleDedupIsCritical(t *testing.T) {
+	r := &Report{
+		StageGate: StageGate{MediaType: "tv", DiscSource: "dvd"},
+		Logs: &LogAnalysis{Decisions: []LogDecision{
+			{
+				DecisionType:   "duplicate_detection",
+				DecisionResult: "skipped",
+				DecisionReason: "title 6 matches title 2",
+				Message:        "duplicate TV title skipped",
+				Extras:         map[string]any{"title_id": 6, "duplicate_of": 2},
+			},
+		}},
+	}
+
+	anomalies := detectAnomalies(r, &Analysis{})
+	for _, anomaly := range anomalies {
+		if anomaly.Message == "1 eligible DVD title(s) discarded as duplicates; DVD metadata cannot prove duplicate content" {
+			if anomaly.Severity != "critical" || anomaly.Category != "episodes" {
+				t.Fatalf("unexpected anomaly classification: %+v", anomaly)
+			}
+			return
+		}
+	}
+	t.Fatal("expected critical DVD title dedup anomaly")
+}
+
 func TestDetectAnomalies_MissingContentIDSummary(t *testing.T) {
 	r := &Report{
 		StageGate: StageGate{PhaseEpisodeID: true},

@@ -9,10 +9,10 @@ import (
 	"strings"
 )
 
-// TitleHash computes a deterministic SHA-256 hash for a title using stable
-// attributes (name, duration, segment map, track metadata). The goal is to
-// identify the logical piece of content regardless of which disc it appears
-// on, so the disc fingerprint is intentionally excluded.
+// TitleHash computes a deterministic SHA-256 metadata fingerprint for a title
+// using stable attributes (name, duration, segment map, track metadata). It is
+// not a payload hash: distinct DVD titles can share all of these attributes.
+// The disc fingerprint is intentionally excluded.
 func TitleHash(title TitleInfo) string {
 	h := sha256.New()
 

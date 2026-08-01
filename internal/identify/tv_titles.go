@@ -108,9 +108,9 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int, expected 
 		result.Ambiguous = true
 		result.AmbiguityReasons = append(result.AmbiguityReasons, "single_episode_length_candidate")
 	}
-	// DVD segment maps are title-local PGC cell numbers, so equal maps do not
-	// prove duplicate content and unions do not prove play-all composites.
-	if discSource != "dvd" {
+	// Only Blu-ray segment maps are structural evidence. DVD maps are
+	// title-local PGC cell numbers, and an unknown source is not safe to infer.
+	if discSource == "bluray" {
 		alive = resolveComposites(alive, &result)
 	}
 	alive = excludeRuntimeMismatches(alive, expected, &result)
@@ -514,12 +514,12 @@ func longestCandidate(candidates []tvTitleCandidate) tvTitleCandidate {
 }
 
 func dedupKey(title ripspec.Title, discSource string) string {
-	if discSource != "dvd" {
-		if key := strings.TrimSpace(title.SegmentMap); key != "" {
-			return key
-		}
+	// Only a Blu-ray segment map is structural evidence of duplicate content.
+	// DVD maps are title-local, and TitleHash is only a metadata fingerprint.
+	if discSource != "bluray" {
+		return ""
 	}
-	return strings.TrimSpace(title.TitleHash)
+	return strings.TrimSpace(title.SegmentMap)
 }
 
 func segmentsLookCombined(a, b, combined map[int]struct{}) bool {

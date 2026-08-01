@@ -682,7 +682,7 @@ func TestCreateEpisodePlaceholders_DeduplicatesBySegmentMap(t *testing.T) {
 	h := &Handler{cfg: &config.Config{}}
 	h.cfg.MakeMKV.MinTitleLength = 120
 	env := &ripspec.Envelope{
-		Metadata: ripspec.Metadata{SeasonNumber: 1},
+		Metadata: ripspec.Metadata{SeasonNumber: 1, DiscSource: "bluray"},
 		Titles: []ripspec.Title{
 			{ID: 0, Duration: 1320, SegmentMap: "00001.m2ts"},
 			{ID: 1, Duration: 1380, SegmentMap: "00002.m2ts"},
@@ -706,7 +706,7 @@ func TestCreateEpisodePlaceholders_DifferentSegmentMapSameDuration(t *testing.T)
 	h := &Handler{cfg: &config.Config{}}
 	h.cfg.MakeMKV.MinTitleLength = 120
 	env := &ripspec.Envelope{
-		Metadata: ripspec.Metadata{SeasonNumber: 1},
+		Metadata: ripspec.Metadata{SeasonNumber: 1, DiscSource: "bluray"},
 		Titles: []ripspec.Title{
 			{ID: 0, Duration: 1320, SegmentMap: "00001.m2ts"},
 			{ID: 1, Duration: 1320, SegmentMap: "00002.m2ts"},
@@ -716,30 +716,6 @@ func TestCreateEpisodePlaceholders_DifferentSegmentMapSameDuration(t *testing.T)
 
 	if len(env.Episodes) != 2 {
 		t.Fatalf("len(Episodes) = %d, want 2 (different SegmentMap = different content)", len(env.Episodes))
-	}
-}
-
-func TestCreateEpisodePlaceholders_FallsBackToTitleHash(t *testing.T) {
-	h := &Handler{cfg: &config.Config{}}
-	h.cfg.MakeMKV.MinTitleLength = 120
-	env := &ripspec.Envelope{
-		Metadata: ripspec.Metadata{SeasonNumber: 1},
-		Titles: []ripspec.Title{
-			{ID: 0, Duration: 1320, TitleHash: "abc123"},
-			{ID: 1, Duration: 1380, TitleHash: "def456"},
-			{ID: 2, Duration: 1320, TitleHash: "abc123"}, // duplicate by hash
-		},
-	}
-	h.createEpisodePlaceholders(context.Background(), discardLogger(), env)
-
-	if len(env.Episodes) != 2 {
-		t.Fatalf("len(Episodes) = %d, want 2 (TitleHash fallback dedup)", len(env.Episodes))
-	}
-	if env.Episodes[0].TitleID != 0 {
-		t.Errorf("Episodes[0].TitleID = %d, want 0", env.Episodes[0].TitleID)
-	}
-	if env.Episodes[1].TitleID != 1 {
-		t.Errorf("Episodes[1].TitleID = %d, want 1", env.Episodes[1].TitleID)
 	}
 }
 
@@ -764,7 +740,7 @@ func TestCreateEpisodePlaceholders_SegmentMapTakesPriorityOverTitleHash(t *testi
 	h := &Handler{cfg: &config.Config{}}
 	h.cfg.MakeMKV.MinTitleLength = 120
 	env := &ripspec.Envelope{
-		Metadata: ripspec.Metadata{SeasonNumber: 1},
+		Metadata: ripspec.Metadata{SeasonNumber: 1, DiscSource: "bluray"},
 		Titles: []ripspec.Title{
 			{ID: 0, Duration: 1320, SegmentMap: "00010.m2ts", TitleHash: "aaa"},
 			{ID: 1, Duration: 1320, SegmentMap: "00010.m2ts", TitleHash: "bbb"},
@@ -777,15 +753,15 @@ func TestCreateEpisodePlaceholders_SegmentMapTakesPriorityOverTitleHash(t *testi
 	}
 }
 
-func TestSelectTVEpisodeTitles_DVDDoesNotDeduplicateLocalSegmentMaps(t *testing.T) {
+func TestSelectTVEpisodeTitles_DVDDoesNotDeduplicateMetadataCollisions(t *testing.T) {
 	titles := []ripspec.Title{
 		{ID: 0, Duration: 1372, SegmentMap: "1-10,11", TitleHash: "a"},
 		{ID: 1, Duration: 1379, SegmentMap: "1-6,7", TitleHash: "b"},
-		{ID: 2, Duration: 1361, SegmentMap: "1-6,7", TitleHash: "c"},
+		{ID: 2, Duration: 1351, SegmentMap: "1-6,7", TitleHash: "c"},
 		{ID: 3, Duration: 1365, SegmentMap: "1-11,12", TitleHash: "d"},
 		{ID: 4, Duration: 1352, SegmentMap: "1-3,4-8,9", TitleHash: "e"},
 		{ID: 5, Duration: 1369, SegmentMap: "1-10,11", TitleHash: "f"},
-		{ID: 6, Duration: 1345, SegmentMap: "1-6,7", TitleHash: "g"},
+		{ID: 6, Duration: 1351, SegmentMap: "1-6,7", TitleHash: "c"},
 		{ID: 7, Duration: 129, SegmentMap: "1,2", TitleHash: "h"},
 		{ID: 8, Duration: 565, SegmentMap: "1,2", TitleHash: "i"},
 	}
@@ -1049,6 +1025,15 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 			wantReasonByID: map[int]string{1: "duplicate_title"},
 		},
 		{
+			name:           "title hash alone does not prove duplicate content",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 45 * 60, TitleHash: "same"},
+				{ID: 1, Duration: 45 * 60, TitleHash: "same"},
+			},
+			wantIDs: []int{0, 1},
+		},
+		{
 			name:           "short feature dropped when TMDB runtimes mismatch",
 			minTitleLength: 120,
 			titles: []ripspec.Title{
@@ -1119,7 +1104,7 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := selectTVEpisodeTitles(tt.titles, tt.minTitleLength, tt.expected, "")
+			got := selectTVEpisodeTitles(tt.titles, tt.minTitleLength, tt.expected, "bluray")
 			if got.Ambiguous != tt.wantAmbiguous {
 				t.Fatalf("Ambiguous = %v, want %v (reasons=%v)", got.Ambiguous, tt.wantAmbiguous, got.AmbiguityReasons)
 			}
@@ -1158,7 +1143,7 @@ func TestCreateEpisodePlaceholders_TNGLikeSelection(t *testing.T) {
 	h := &Handler{cfg: &config.Config{}}
 	h.cfg.MakeMKV.MinTitleLength = 120
 	env := &ripspec.Envelope{
-		Metadata: ripspec.Metadata{SeasonNumber: 1},
+		Metadata: ripspec.Metadata{SeasonNumber: 1, DiscSource: "bluray"},
 		Titles: []ripspec.Title{
 			{ID: 0, Duration: 5464, SegmentCount: 3, SegmentMap: "1,2,64", Playlist: "00027.mpls"},
 			{ID: 1, Duration: 2730, SegmentCount: 2, SegmentMap: "2,64", Playlist: "00042.mpls"},
