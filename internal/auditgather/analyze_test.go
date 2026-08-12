@@ -22,8 +22,8 @@ func TestAggregateDecisions_IdenticalCollapse(t *testing.T) {
 	if groups[0].Count != 3 {
 		t.Errorf("expected count 3, got %d", groups[0].Count)
 	}
-	if groups[0].Entries != nil {
-		t.Error("expected nil entries for identical messages")
+	if len(groups[0].Entries) != 3 {
+		t.Errorf("expected all 3 entries preserved, got %d", len(groups[0].Entries))
 	}
 }
 

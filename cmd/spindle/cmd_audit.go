@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -12,7 +15,7 @@ import (
 func newQueueAuditCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "audit <id>",
-		Short: "Gather audit artifacts for a queue item (JSON output)",
+		Short: "Audit a queue item: digest to stdout, full JSON report written to a temp file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := strconv.ParseInt(args[0], 10, 64)
@@ -38,7 +41,17 @@ func newQueueAuditCmd() *cobra.Command {
 				return err
 			}
 
-			return printJSON(report)
+			jsonPath := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-audit-%d.json", id))
+			data, err := json.MarshalIndent(report, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal audit report: %w", err)
+			}
+			if err := os.WriteFile(jsonPath, data, 0o644); err != nil {
+				return fmt.Errorf("write audit report: %w", err)
+			}
+
+			_, err = fmt.Fprint(cmd.OutOrStdout(), auditgather.RenderDigest(report, jsonPath))
+			return err
 		},
 	}
 }

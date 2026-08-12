@@ -22,16 +22,27 @@ The goal is to **uncover problems that automated code does not detect**. Quick l
 
 ### Phase 1: Gather Artifacts
 
-Run the `queue audit` subcommand to collect all artifacts in a single pass, saving to a temp file:
+Run:
 
 ```bash
-spindle queue audit <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
+spindle queue audit <item_id>
 ```
 
-This produces an agent-facing JSON report. The schema may evolve with this skill; treat it as diagnostic input rather than a stable public API. It contains:
+This prints a deterministic **text digest** to stdout and writes the **full JSON report** to `spindle-audit-<item_id>.json` in the system temp dir (exact path shown in the digest header). The digest is rendered by Spindle itself — do not write your own extraction script. It contains: item/task status, stage gate, gathering errors, pre-flagged anomalies, all warnings and errors with context, stage timings, all captured events, every decision (grouped, with timestamps), and the pre-computed analysis summaries. Any cap or truncation in the digest is explicit ("+N more in JSON", "truncated") — nothing is silently dropped.
+
+**The digest is the starting point, not the audit.** Drill into the full JSON for raw ffprobe streams (`media[].probe`), full envelope detail (`envelope.titles/assets/attributes`), untruncated extras values, and anything the digest marks as omitted. Investigate every anomaly, warning, error, and suspicious value before reporting.
+
+Drill-down mechanics: pass Python via a single-quoted heredoc (`python3 << 'PYEOF'` ... `PYEOF`) and `json.load(open(path))` — never `python3 -c "..."` (bash mangles `!` and `\` inside double quotes) and never pipe the file into the heredoc's stdin (the heredoc consumes stdin).
+
+If `/itemaudit` is invoked without an item ID, run `spindle status` and `spindle queue list` to diagnose daemon-level issues instead.
+
+### Full JSON Schema
+
+The JSON report schema may evolve with this skill; treat it as diagnostic input rather than a stable public API. It contains:
+
 - **`item`**: Queue item summary (`stage`, `tasks[]` per-task state/progress, review flags, paths, timestamps). `item.stage` is the scheduler's coarse position and lags running tasks during rip/encode overlap -- read `item.tasks[]` for what is actually happening (`type`, `state`, `attempts`, `error`, `progress_percent`, `progress_message`, `active_asset_key`)
 - **`stage_gate`**: Pre-computed phase applicability (which analyses apply, resolved media type, media hint, disc source)
-- **`logs`**: Parsed log entries — decisions (type/result/reason/message), warnings and errors (with `extras` maps of non-standard log fields for diagnostic context), item-specific INFO events/progress (`logs.events` with `event_type` and extras), and stage timing events (`ts`, `event_type`, `stage`, `duration_seconds`). Gathered from every daemon log file overlapping the item's lifetime (`logs.paths` — daemon restarts mid-item span multiple files), clamped to the item's creation time so reused item IDs / re-ripped discs don't leak earlier runs' lines. Flooding `*_progress` event types are downsampled (first/last/evenly-strided, ~20 per type); `logs.events_omitted` counts dropped ticks — it is normal on long encodes, not data loss
+- **`logs`**: Parsed log entries — warnings and errors (with `extras` maps of non-standard log fields), item-specific INFO events/progress (`logs.events` with `event_type` and extras), and stage timing events (`ts`, `event_type`, `stage`, `duration_seconds`). Gathered from every daemon log file overlapping the item's lifetime (`logs.paths` — daemon restarts mid-item span multiple files), clamped to the item's creation time so reused item IDs / re-ripped discs don't leak earlier runs' lines. Flooding `*_progress` event types are downsampled (first/last/evenly-strided, ~20 per type); `logs.events_omitted` counts dropped ticks — it is normal on long encodes, not data loss. Decisions are NOT in `logs` — they live in `analysis.decision_groups`.
 - **`rip_cache`**: Cache metadata (disc title, cached_at, title_count, total_bytes). Serialized `rip_spec_data` and `metadata_json` blobs are omitted (already in parsed `envelope`). `disabled: true` means the cache is turned off in config — do not report that as a pruned entry.
 - **`envelope`**: Parsed ripspec Envelope (titles, episodes, assets at each stage, attributes)
 - **`encoding`**: Encoding details snapshot (crop, validation, config, result). Spindle always uses Reel target-quality mode, so the snapshot carries the full Reel-reported config summary (`encoder`, `quality`, `preset`, `tune`, `audio_codec`) plus crop and validation (pass/fail) — nothing is omitted
@@ -41,15 +52,13 @@ This produces an agent-facing JSON report. The schema may evolve with this skill
 
 **The `stage_gate` object tells you exactly which phases to run.** Each `phase_*` boolean is pre-computed from the item's task states (which lead the coarse item stage during rip/encode overlap), media type, and disc source. Do not re-derive these — trust the gate.
 
-If `/itemaudit` is invoked without an item ID, run `spindle status` and `spindle queue list` to diagnose daemon-level issues instead.
-
 ### Analysis Reference
 
 The `analysis` object (always present; sub-fields omitted when empty) contains pre-computed summaries:
 
 | Field | Present When | Contents |
 |-------|-------------|----------|
-| `decision_groups` | Decisions exist | Groups by (type, result, reason) with count. `entries` included when count=1 or messages vary; nil when all identical. |
+| `decision_groups` | Decisions exist | Groups by (type, result, reason) with count, in log order. `entries` always carries every grouped decision with its timestamp — this is the only record of individual decisions and their spacing. |
 | `notable_decisions` | Notable decisions exist | Curated subset of decisions most useful for reporting (TMDB/title/crop/validation/audio/subtitle/routing/episode match), avoiding noisy full decision scans. |
 | `stage_timings` | Stage events exist | One row per stage with start, completion, duration, start count, and completion count. Prefer this over raw `logs.stages` for the timing table. |
 | `source_summary` | Source/output traits known | Disc source, UHD-likely flag, input/output resolution, input codecs, output codec, HDR/dynamic range. |
@@ -66,36 +75,6 @@ The `analysis` object (always present; sub-fields omitted when empty) contains p
 | `anomalies` | Issues/context detected | Pre-flagged signals with `severity` (critical/warning/info), `category`, `message`. |
 
 **Use critical/warning `analysis.anomalies` as a starting checklist for Issues Found.** Info-level anomalies, if present, are context only unless investigation shows real user impact. Each anomaly is a machine-detected flag -- the LLM's job is to investigate context, assess impact, reject false positives, and add judgment-based findings the code cannot detect.
-
-### Extraction Strategy
-
-After running `spindle queue audit`, process the full JSON output through a **single comprehensive extraction script** rather than making many narrow extraction passes. The script should produce one compact output that enables all subsequent analysis phases without further extraction calls.
-
-**Shell mechanics:**
-1. **Save queue audit output to a temp file first:**
-   ```bash
-   spindle queue audit <item_id> 2>/dev/null > /tmp/spindle-audit-<item_id>.json
-   ```
-2. **Pass the extraction script via a single-quoted heredoc**, never via `python3 -c "..."` (the `-c` form breaks because bash interprets `!`, `\`, and other special characters inside double quotes):
-   ```bash
-   python3 << 'PYEOF'
-   import json
-   data = json.load(open('/tmp/spindle-audit-<item_id>.json'))
-   # ... extraction logic ...
-   PYEOF
-   ```
-3. **Never pipe JSON into a heredoc script** (`cat file | python3 << 'PYEOF'`). The heredoc and pipe both compete for stdin — the heredoc wins (providing the script), so `json.load(sys.stdin)` gets nothing, or worse the JSON is interpreted as Python code.
-
-The extraction script should:
-
-1. **Summarize metadata**: item fields, stage_gate, gathering errors
-2. **Format pre-computed analysis**: Read `analysis.decision_groups` for deduplicated decisions (groups with `count > 1` and nil `entries` are identical repeats; groups with `entries` have varying messages). Read `analysis.notable_decisions`, `analysis.stage_timings`, `analysis.source_summary`, `analysis.title_selection`, `analysis.output_media`, `analysis.audio_summary`, `analysis.subtitle_summary`, and `analysis.routing_summary` before falling back to raw logs/probes. Read `analysis.anomalies` for pre-flagged critical/warning issues and info context. Read `analysis.episode_stats`, `analysis.media_stats`, `analysis.crop_analysis`, `analysis.episode_consistency`, `analysis.asset_health` for pre-computed summaries.
-3. **List all warnings and errors** with full context (these are always few enough to show individually)
-4. **Show stage timing** with computed durations
-5. **Summarize episode manifest** with confidence scores and episode numbers. If `analysis.episode_stats.placeholder_only` is true and `phase_episode_id` is false, label it clearly as a **placeholder episode inventory**, not a resolved episode manifest.
-6. **Title selection** (movies): Prefer `analysis.title_selection` for selected title, feature-length candidates, and similar runtimes. Fall back to `envelope.titles` only if the summary is absent.
-
-Prefer pre-computed `analysis` summaries whenever they exist; compute from raw logs/probes only as a fallback. This keeps the analysis equally thorough while avoiding many narrow extraction passes.
 
 ### Stage Gating
 
@@ -120,20 +99,20 @@ The `stage_gate` object in the audit output contains:
 - External validation (blu-ray.com lookups) is only useful when (a) there are encoded files to cross-reference AND (b) the source is Blu-ray. **Skip external validation entirely for DVDs.**
 - UHD status is not encoded in `disc_source`. Infer UHD from contextual signals: disc title containing "UHD", 2160p resolutions in bdinfo, or similar markers in the audit data.
 - **For failed items:** Focus the report on diagnosing the failure. Analyze the error, the events leading up to it, and any retry patterns. Do not pad the report with sections that say "N/A - not reached".
-- **TV-hinted no-TMDB-match is now fatal at identification.** Expect these items to fail before ripping rather than continue as degraded TV review items.
+- **TV-hinted no-TMDB-match is fatal at identification.** Expect these items to fail before ripping rather than continue as degraded TV review items.
 
 ### Phase 2: Log Analysis (when `phase_logs` is true)
 
-Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `logs.stages` from the audit output. **Go beyond simple error counts.**
+Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors`, and `logs.stages`. **Go beyond simple error counts.**
 
-1. **Decision anomalies** (from `logs.decisions`):
+1. **Decision anomalies** (from `analysis.decision_groups`):
    - Low confidence scores on decisions that were accepted anyway
    - Unexpected fallbacks (encoding retries)
    - Decisions that contradict expected behavior for the content type
-   - Filter by `decision_type` to find specific categories (`commentary_classification`, `tmdb_match`, etc.)
+   - Look up groups by `decision_type` to find specific categories (`commentary_classification`, `tmdb_match`, etc.)
    - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=duplicate_detection` (duplicate guard), `decision_type=episode_id_skip` (episode-ID skips), `decision_type=rip_cache` (hit/miss/incomplete — misses log explicitly)
    - Movie title selection: `decision_type=title_selection_funnel` records each elimination stage (rule, `candidates_before/after`, `eliminated_title_ids`, `evidence` with the threshold values); the winner is the `decision_type=title_selection` "primary title decision" line. When the wrong cut/title was picked, the funnel shows which rule eliminated the right one.
-   - Scheduler resource waits: `decision_type=stage_execution` with `decision_result=blocked` / `unblocked` shows a task waiting on GPU/drive/encode claims (`claims` attr) and the `waited` duration on grant. "stage started" lines also carry the resolved `claims` (so the GPU-for-TV choice is visible per dispatch). The `encode` claim has capacity 1 — encodes never run concurrently (cross-tier pairing removed 2026-07-07 after concurrent CVVDP pools exhausted VRAM); logs before that date may show `encode_1080p`/`encode_4k` claims and an `encode_tier_signal` decision.
+   - Scheduler resource waits: `decision_type=stage_execution` with `decision_result=blocked` / `unblocked` shows a task waiting on GPU/drive/encode claims (`claims` attr) and the `waited` duration on grant. "stage started" lines also carry the resolved `claims` (so the GPU-for-TV choice is visible per dispatch). The `encode` claim has capacity 1 — encodes never run concurrently.
    - Warnings/errors include `extras` maps with non-standard log fields for diagnostic context; decisions use structured fields only (full log lines available at the files in `logs.paths`)
 
 2. **Timing/progress anomalies** (from `logs.stages` and `logs.events`):
@@ -141,9 +120,9 @@ Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `lo
    - Large gaps between stage events suggesting hangs
    - Repeated retry attempts
    - Use `logs.events` for long-running work visibility: `encoding_progress`, `rip_progress`, `copy_progress`, `transcription_extract[_complete]`, `transcription_whisperx[_complete]`, `commentary_llm_start/_complete`, `mux_start/_complete`, `jellyfin_refresh_start`, and plan events such as `*_plan`
-   - Encode lifecycle events (2026-07-06+): `encode_init` (input resolution/dynamic range), `encoder_config` (preset/quality and full `svtav1_params` — check level/mbr cap here for playback-compat questions), `encoding_substage` (reel pipeline phase: chunking/encoding/merging/muxing), `encode_result` (sizes, wall time, speed). `encoding_progress` carries `bitrate` and `chunks_complete/chunks_total` (no `fps` field anymore — it was always 0).
+   - Encode lifecycle events: `encode_init` (input resolution/dynamic range), `encoder_config` (preset/quality and full `svtav1_params` — check level/mbr cap here for playback-compat questions), `encoding_substage` (reel pipeline phase: chunking/encoding/merging/muxing), `encode_result` (sizes, wall time, speed). `encoding_progress` carries `bitrate` and `chunks_complete/chunks_total`.
    - Item lifecycle: `event_type=item_complete` is the one-line completion summary (per-stage `<stage>_duration` attrs plus `total_wall_time`); `event_type=operator_action` records user-initiated retry/stop/remove/clear/disc-pause; `event_type=startup_queue_state` shows what a daemon restart resumed.
-   - Level layout (2026-07-06+): handler-level `stage_start`/`stage_complete` events and "item stage derived" are DEBUG (still present in the log file and in gather output); the INFO narrative is the workflow "stage started/completed" pair, whose `stage_duration` is a human-readable Go duration string (older logs carry raw nanoseconds; gather parses both).
+   - Level layout: handler-level `stage_start`/`stage_complete` events and "item stage derived" are DEBUG (still present in the log file and in gather output); the INFO narrative is the workflow "stage started/completed" pair, whose `stage_duration` is a human-readable Go duration string.
    - Transcription is BATCHED: expect one `transcription_whisperx[_complete]` pair per batch (with a `batch_files` extra), not one per episode; `transcription_extract` still fires per file. A missing per-episode WhisperX event is not an anomaly.
    - Episode-ID reference fetching runs CONCURRENTLY with transcription (`decision_result=fetch_overlapped`), so OpenSubtitles and WhisperX log lines legitimately interleave — do not flag the interleaving as disorder.
    - Rip-cache restores and stores hardlink when cache and staging share a filesystem: near-instant `copy_progress` (a single jump to 100%) is expected, not a truncated copy.
@@ -155,12 +134,12 @@ Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `lo
    - Episode counts not matching expectations
    - File sizes that seem wrong for the content
 
-4. **LLM decision review** (filter `logs.decisions` by `decision_type`):
+4. **LLM decision review** (from `analysis.decision_groups`):
    - `decision_type=commentary_classification` entries
    - `decision_type=tmdb_match` and `decision_type=tmdb_match_preference` entries — verify acceptance thresholds are reasonable
    - Evaluate if confidence levels and reasons make sense for the content
 
-5. **TV episode pipeline checks** (TV only, from `logs.decisions`, `logs.warnings`, and stage events):
+5. **TV episode pipeline checks** (TV only, from `analysis.decision_groups`, `logs.warnings`, and stage events):
    - Stage events with `stage=episode_identification` — verify the stage started/completed or identify where it failed
    - `decision_type=episode_id_skip` entries — explain legitimate skips for non-TV content
    - `decision_type=episode_placeholders` — confirm placeholders were created before content ID
@@ -170,7 +149,7 @@ Analyze `logs.decisions`, `logs.events`, `logs.warnings`, `logs.errors`, and `lo
    - `decision_type=episode_match` with `decision_result=<key> -> unresolved` — per-rip unresolved lines carry `best_candidate_episode/score/confidence` and runner-up; the full pending-claim matrix is at DEBUG (`content ID pending claim`)
    - TV title exclusions carry their evidence: `outlier_bar_seconds`/`weighted_median_seconds` on `gross_runtime_outlier`, `expected_runtimes_seconds` on `expected_runtime_mismatch`/`over_expected_episode_count` — compare the excluded title's `duration` against these to judge the exclusion
    - `decision_type=reference_search` — reference subtitle candidate quality and suspect/fallback selections
-   - Asset keys are PERMANENT placeholder identifiers (stable-key model, 2026-07-04): `episodeid` never renames `s01_001`-style keys. Episode identity lives in `envelope.episodes[]` fields (`season`, `episode`, `episode_end`) -- join assets to episodes by key and read identity from those fields. Placeholder-looking keys in logs, review reasons, and final routing are correct, not a defect
+   - Asset keys are PERMANENT placeholder identifiers (stable-key model): `episodeid` never renames `s01_001`-style keys. Episode identity lives in `envelope.episodes[]` fields (`season`, `episode`, `episode_end`) -- join assets to episodes by key and read identity from those fields. Placeholder-looking keys in logs, review reasons, and final routing are correct, not a defect
    - **Do not stop at episode-ID quality.** If organizer/review routing is implicated, compare per-episode review state against final destinations.
 
 ### Phase 3: Rip Cache Analysis (when `phase_rip_cache` is true)
@@ -188,7 +167,7 @@ Analyze the `rip_cache` section from the audit output:
      - **Disney multi-language detection**: when 2+ feature-length 800-series playlists (00800-00899) exist with runtimes within 30 seconds, the pipeline prefers the lowest playlist number (00800.mpls = English). The selected title may be *shorter* than alternatives — this is correct behavior for Disney/Pixar/Marvel/Star Wars multi-language discs where language variants differ only in localized title cards and credits.
      - **Different cuts**: when 800-series playlists differ by >30 seconds, treated as different cuts (theatrical vs director's) and longest is preferred.
      - Additional tiebreakers: chapter count, MPLS over M2TS, segment count, TitleHash fingerprint frequency.
-   - Check `decision_reason` in logs: `"primary_title_selector"` indicates the multi-stage algorithm was used.
+   - Check `decision_reason` in the decision groups: `"primary_title_selector"` indicates the multi-stage algorithm was used.
    - Report which title was selected with playlist and duration context. Example: "Selected title 0 (00800.mpls, 6151s / 102.5 min, English) over title 1 (00801.mpls, 6181s / 103.0 min) and title 3 (00802.mpls, 6181s / 103.0 min) via Disney multi-language heuristic"
    - **Flag for review**: if a non-800 playlist was selected when 800-series alternatives exist with similar runtimes (possible mis-selection)
    - The ripped asset filename (from `envelope.assets.ripped[].path`) often contains a title index (e.g., `_t02`) that maps to the `envelope.titles[].id`
@@ -199,7 +178,7 @@ Analyze the `rip_cache` section from the audit output:
    - Pre-episodeid, keys are placeholders (`s01_001`, `s01_002`) with `episode=0` — this is expected
    - Check for any ripped assets with `status: "failed"` or missing `path`
    - Verify ripped asset count matches episode count
-5. **Asset mapping strategy** (from `logs.decisions`): Check `decision_type=asset_mapping` — `title_file_map` is the normal path for TV, `directory_scan` is the fallback
+5. **Asset mapping strategy**: Check `decision_type=asset_mapping` — `title_file_map` is the normal path for TV, `directory_scan` is the fallback
 
 ### Phase 3b: Episode Identification Validation (when `phase_episode_id` is true)
 
@@ -216,7 +195,7 @@ Analyze the `rip_cache` section from the audit output:
    - **WARNING** (0.70-0.80): Marginal confidence
    - **OK** (> 0.80): High confidence match
    - **Zero** (0.0): Unresolved episode
-   - For `logs.decisions` with `decision_type=episode_match`, inspect `confidence_quality` before treating an accepted score as risky. `decisive_low_similarity` means text similarity is lower than a clear match but runner-up margins are strong enough for deterministic acceptance; it should not require `decision_reason=llm_verified`. `ambiguous` means margins were not decisive. `contested` is review-worthy.
+   - For `decision_type=episode_match` groups, inspect `confidence_quality` before treating an accepted score as risky. `decisive_low_similarity` means text similarity is lower than a clear match but runner-up margins are strong enough for deterministic acceptance; it should not require `decision_reason=llm_verified`. `ambiguous` means margins were not decisive. `contested` is review-worthy.
 
 3. **Canonical match outcomes live in `episodes[]`**:
    - Verify all episodes have sensible resolved/unresolved state
@@ -229,7 +208,7 @@ Analyze the `rip_cache` section from the audit output:
 
 Analyze the actual final routing outcome, not just item-level review flags:
 
-1. **Read `envelope.assets.final`** and map final paths by `episode_key`.
+1. **Read `envelope.assets.final`** and map final paths by `episode_key`. The digest's "Final routing" section pre-computes expected-vs-actual per output.
 2. **For TV, compute expected destination per episode**:
    - resolved + no episode review flag -> library
    - unresolved -> review
@@ -267,7 +246,7 @@ Analyze the `media` array from the audit output. Each entry contains full ffprob
      - Stream `tags.title` exists and contains "Commentary" (case-insensitive)
      - If original title was blank, it should now be exactly "Commentary"
      - If original title existed without "commentary", it should have " (Commentary)" appended
-   - Cross-reference with commentary decisions in `logs.decisions`
+   - Cross-reference with commentary decisions in `analysis.decision_groups`
 
 4. **Check subtitle streams** (from `media[].probe.streams` where `codec_type=subtitle`):
    - Verify exactly one generated display subtitle track exists with correct language
@@ -278,9 +257,9 @@ Analyze the `media` array from the audit output. Each entry contains full ffprob
    - Check `validation.passed` and individual step results
    - Review crop detection from `crop` fields
    - Check for `warning` or `error` in snapshot
-   - Check encoding config: `encoder`, `quality` (Reel target-quality summary), `preset`, `tune`, `audio_codec`. These come from Reel's target-quality mode, not Spindle config (the `[encoding]` config block was removed); `preset`/`quality` reflect what Reel chose internally, so there is no per-resolution CRF to verify
+   - Check encoding config: `encoder`, `quality` (Reel target-quality summary), `preset`, `tune`, `audio_codec`. These come from Reel's target-quality mode, not Spindle config (there is no `[encoding]` config block); `preset`/`quality` reflect what Reel chose internally, so there is no per-resolution CRF to verify
    - Encoder-library warnings/errors surface as `event_type=reel_warning` in `logs.warnings` and `event_type=reel_error` in `logs.errors`; the persisted copy is in `encoding.snapshot.warning`/`error`
-   - Check `decision_type=file_probe` in `logs.decisions` for pre-encoding resolution and codec detection
+   - Check `decision_type=file_probe` for pre-encoding resolution and codec detection
    - Check `decision_type=crop_detection` for crop decision visibility
    - Check `decision_type=encoding_validation` for per-episode validation results
    - `decision_type=validation_failure_route` with `decision_result=flagged_for_review` indicates validation-failed items routed to review
@@ -314,23 +293,22 @@ Analyze crop data from the audit output:
    - All episodes from the same disc should have identical or very similar crop
    - Spot-check one or two episodes rather than performing full validation on every episode
 
-**Pipeline structure note (task-graph Phase 4b, 2026-07-04):** the item
-template is a DAG. After `episode_identification`, the ANALYSIS branch
-(`analysis` stage: per-episode commentary detection from RIPPED sources;
-then `subtitling`: SRT GENERATION ONLY, from ripped sources/transcript
-artifacts into staging) runs CONCURRENTLY with `encoding`. The `apply`
-stage joins both branches and performs every write to the encoded files:
-audio refinement, commentary disposition, duration validation, sidecar
-placement, and subtitle muxing. Consequences for audits:
+**Pipeline structure note:** the item template is a DAG. After
+`episode_identification`, the ANALYSIS branch (`analysis` stage: per-episode
+commentary detection from RIPPED sources; then `subtitling`: SRT GENERATION
+ONLY, from ripped sources/transcript artifacts into staging) runs
+CONCURRENTLY with `encoding`. The `apply` stage joins both branches and
+performs every write to the encoded files: audio refinement, commentary
+disposition, duration validation, sidecar placement, and subtitle muxing.
+Consequences for audits:
 - Log timelines legitimately interleave encoding events with analysis and
   subtitling events for the SAME item — not disorder.
-- Progress is per task (task-graph Phase A, 2026-07-05): each running stage
-  writes its own `tasks[]` row, so `item.tasks[]` shows independent live
-  progress for both branches during overlap (for example a `ripping` task
-  and an `encoding` task both `state=running` with their own
-  `progress_percent`/`progress_message`) instead of one arbitrated item-level
-  progress field.
-- `audio_analysis` no longer exists as a stage name; commentary detection
+- Progress is per task: each running stage writes its own `tasks[]` row, so
+  `item.tasks[]` shows independent live progress for both branches during
+  overlap (for example a `ripping` task and an `encoding` task both
+  `state=running` with their own `progress_percent`/`progress_message`)
+  instead of one arbitrated item-level progress field.
+- `audio_analysis` does not exist as a stage name; commentary detection
   decisions appear under stage `analysis`, remuxes/muxing under `apply`.
 - Commentary detection is PER-EPISODE (`envelope.attributes.audio_analysis
   .per_episode`), measured on ripped files; indices are remapped in apply.
@@ -349,12 +327,12 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
    - Check `disposition.forced` is not enabled for the generated subtitle
    - **Check labeling**: subtitle title should contain the language name (e.g., "English")
 
-2. **Subtitle generation outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `logs.decisions`):
-   - Spindle now generates one English display SRT from WhisperX. It does not generate forced/foreign subtitle tracks and does not fetch OpenSubtitles output subtitles.
+2. **Subtitle generation outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `analysis.decision_groups`):
+   - Spindle generates one English display SRT from WhisperX. It does not generate forced/foreign subtitle tracks and does not fetch OpenSubtitles output subtitles.
    - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config.
    - `decision_type=transcription_asset` and `decision_type=transcription_profile` show which asset/profile WhisperX processed. Use `logs.events` entries (`transcription_extract_complete`, `transcription_whisperx_complete`, `transcription_complete`) for transcription timing before falling back to the raw files in `logs.paths`.
    - `decision_type=subtitle_transcript_source` with `decision_result=artifact_reused` means subtitle generation reused the shared per-episode transcript artifact (`envelope.assets.transcript`) and ran no WhisperX of its own — absent transcription events in the subtitling stage are then expected, not a defect. For TV, verify transcript asset count matches episode count in `analysis.asset_health`.
-   - **LLM subtitle audit** (ADR 0003): after formatting, an LLM pass may edit the display SRT. `decision_type=subtitle_audit_edit` entries in `logs.decisions` (remove/replace with category and reason) and `event_type=subtitle_audit_complete` are normal operation, not anomalies. Per-record outcome is in `audit_result`/`audit_edits_applied`/`audit_edits_dropped` (in `analysis.subtitle_summary.results` and the raw generation records): `applied` and `clean` are healthy; `skipped` means no LLM configured or the SRT was unreadable (normal when `llm.api_key` is unset); `failed` means an LLM/API/write error (subtitle proceeds unaudited — telemetry, not a defect); `rejected` means the removal-cap guardrail discarded the whole response and appended the review reason `subtitle audit rejected (removal cap)` — that IS actionable and means the item needs a manual `/subtitleaudit` pass.
+   - **LLM subtitle audit** (ADR 0003): after formatting, an LLM pass may edit the display SRT. `decision_type=subtitle_audit_edit` entries (remove/replace with category and reason) and `event_type=subtitle_audit_complete` are normal operation, not anomalies. Per-record outcome is in `audit_result`/`audit_edits_applied`/`audit_edits_dropped` (in `analysis.subtitle_summary.results` and the raw generation records): `applied` and `clean` are healthy; `skipped` means no LLM configured or the SRT was unreadable (normal when `llm.api_key` is unset); `failed` means an LLM/API/write error (subtitle proceeds unaudited — telemetry, not a defect); `rejected` means the removal-cap guardrail discarded the whole response and appended the review reason `subtitle audit rejected (removal cap)` — that IS actionable and means the item needs a manual `/subtitleaudit` pass.
    - Treat additional generated subtitle tracks, forced dispositions, or "Forced" subtitle labels as defects or stale outputs unless there is clear evidence they came from outside the current Spindle subtitle stage.
 
 3. **Per-episode subtitle asset status** (TV only, from `envelope.assets.subtitled`):
@@ -369,9 +347,9 @@ Analyze subtitle streams from `media[].probe.streams` (codec_type=subtitle) and 
 
 ### Phase 7: Commentary Track Validation (when `phase_commentary` is true)
 
-Analyze commentary decisions from `logs.decisions` and audio streams from `media[]`:
+Analyze commentary decisions from `analysis.decision_groups` and audio streams from `media[]`:
 
-1. **From logs**: Find `decision_type=commentary_classification`, `commentary_stereo_filter`, `commentary_remapping`, and `commentary_disposition` entries in `logs.decisions`
+1. **From decisions**: Find `decision_type=commentary_classification`, `commentary_stereo_filter`, `commentary_remapping`, and `commentary_disposition` groups
 2. **Expected behavior**:
    - 2-channel English tracks that aren't stereo downmixes should be candidates
    - High similarity to primary audio = stereo downmix (excluded)
@@ -380,7 +358,7 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
    - The primary track fingerprint comes from the shared transcript artifact when one exists (`commentary_stereo_filter` with `decision_result=artifact_reused`); otherwise the primary is transcribed once and recorded as the artifact (`envelope.assets.transcript`)
    - If the whole candidate batch transcription fails, ALL candidates are conservatively marked commentary (`reason: "transcription failed"`) — report the batch failure as the root cause, not per-track defects
 
-3. **Refinement impact** (from `logs.decisions`): Check `decision_type=commentary_remapping` — shows how many commentary tracks survived audio refinement. `remapped_count=0` means all commentary tracks were lost during refinement.
+3. **Refinement impact**: Check `decision_type=commentary_remapping` — shows how many commentary tracks survived audio refinement. `remapped_count=0` means all commentary tracks were lost during refinement.
 
 4. **Cross-reference with blu-ray.com** (only when `phase_external_validation` is true):
    - Check "Audio" section of disc review for commentary count
@@ -395,11 +373,11 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 
 ### Known Patterns to Check
 
-| Pattern | Stage | Evidence in Audit-Gather Output | Impact |
-|---------|-------|--------------------------------|--------|
-| Duplicate disc detection | Identification/Disc Monitor | `logs.decisions` with `decision_type=duplicate_detection` | Item rejected or enqueue skipped |
+| Pattern | Stage | Evidence in Audit Output | Impact |
+|---------|-------|--------------------------|--------|
+| Duplicate disc detection | Identification/Disc Monitor | `decision_type=duplicate_detection` groups | Item rejected or enqueue skipped |
 | DVD TV title falsely deduplicated | Identification | `decision_type=duplicate_detection` with `title_id`/`duplicate_of` on a DVD; scan/title/placeholder counts decrease | Episode omitted even when the resolved episode sequence remains contiguous |
-| TMDB match rejected or weakly accepted | Identification | `logs.decisions` with `decision_type=tmdb_match` and score/threshold details in `decision_reason` | No match or wrong title match |
+| TMDB match rejected or weakly accepted | Identification | `decision_type=tmdb_match` groups with score/threshold details in `decision_reason` | No match or wrong title match |
 | Unresolved placeholder episodes | Episode ID | `envelope.episodes` with `episode=0` and placeholder keys after episodeid | Episodes land in review_dir |
 | Wrong crop detection | Encoding | `encoding.snapshot.crop_filter` aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review using `media[].probe.streams` | Commentary tracks not preserved |
@@ -430,7 +408,7 @@ Analyze commentary decisions from `logs.decisions` and audio streams from `media
 
 ### DEBUG/Raw Log Context
 
-These details are optional context. Some are parsed into `logs.decisions` when debug logs are available; others require opening the raw files in `logs.paths`.
+These details are optional context. Some are parsed into decision groups when debug logs are available; others require opening the raw files in `logs.paths`.
 
 | Pattern | Stage | Evidence |
 |---------|-------|----------|
@@ -440,7 +418,7 @@ These details are optional context. Some are parsed into `logs.decisions` when d
 | Content-ID pending claims | Episode ID | DEBUG `content ID pending claim` — full per-rip candidate scores behind unresolved/contested outcomes |
 | Reel internals (chunk plan, CVVDP target-quality config, CRF search, timings) | Encoding | DEBUG `reel verbose` |
 | SRT validation observations | Subtitles | DEBUG `SRT validation observation` (per-check detail); the INFO `SRT validation QC summary` and `SRT validation issue` lines carry the verdicts |
-| Handler stage start/complete, item stage derived | All | DEBUG since 2026-07-06; the INFO narrative is the workflow stage pair + `item_complete` |
+| Handler stage start/complete, item stage derived | All | DEBUG; the INFO narrative is the workflow stage pair + `item_complete` |
 | LLM retry details | Various | Raw logs around the failed/slow decision |
 
 ## Audit Report Format
@@ -465,8 +443,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Duration and size ranges come directly from `analysis.media_stats`: `"Duration: 1485-1520s | Size: 292-557 MB"`
 
 **Decision traces:**
-- `analysis.decision_groups` already provides the deduplication -- groups with nil `entries` are identical repeats (show as `"type x{count}: result (reason)"`), groups with `entries` have varying messages
-- Only expand individual entries for decisions with different outcomes, notable parameter variations, or anomalous confidence/scores
+- `analysis.decision_groups` already provides the deduplication -- show identical repeats as `"type x{count}: result (reason)"`; expand a group's `entries` only for decisions with different outcomes, notable parameter variations, or anomalous confidence/scores
 - For episode matches below 0.90, use `confidence_quality` and margins from `episode_match` extras to distinguish true ambiguity from `decisive_low_similarity` (strong margins, weaker transcript overlap). Do not file a finding for `decisive_low_similarity` when margins are strong and no review routing occurred.
 
 **Episode manifest:**
@@ -481,7 +458,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Inconsistent source audio track counts across titles on the same disc — different playlists routinely carry different language sets
 - Audio refinement stripping non-English tracks — that's its job
 - Subtitle `qc_observations` that are below review thresholds and have `validation_result=passed`
-- Missing HDR10+ dynamic metadata in encoded output — Reel intentionally emits static HDR because the target playback environment does not consume HDR10+
+- Missing HDR10+ dynamic metadata in encoded output — Reel intentionally emits static HDR because the target playback environment does not consume it
 
 **Stage timing:**
 - Always show the timing table — it's compact and useful for spotting anomalies
@@ -562,7 +539,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Subtitle mux/output: <mux status and single-display-subtitle checks>
 
 #### Commentary (if phase_commentary)
-- Decisions: <from logs.decisions>
+- Decisions: <from analysis.decision_groups>
 - Tracks in output: <count from media probes>
 
 ### External Validation (if phase_external_validation)
@@ -577,11 +554,11 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 After running `spindle queue audit`, check only the phases flagged as `true` in `stage_gate`. **Do not check phases beyond the reached stage.**
 
 ### Always
-- [ ] Ran `spindle queue audit <id>` and loaded the JSON output
-- [ ] Checked `errors` array for gathering failures
+- [ ] Ran `spindle queue audit <id>`, read the full digest, noted the JSON path
+- [ ] Checked gathering errors (digest header) for incomplete data
 - [ ] Reviewed `stage_gate` to determine applicable phases
-- [ ] Reviewed `analysis.anomalies` for pre-flagged issues
-- [ ] Analyzed `logs` for anomalies beyond simple error counts
+- [ ] Reviewed pre-flagged anomalies
+- [ ] Analyzed logs/decisions for anomalies beyond simple error counts, drilling into the full JSON wherever the digest flagged an omission or something looked off
 - [ ] If TV: reconciled scanned, selected, placeholder, manifest, ripped, and final episode counts; investigated every reduction
 - [ ] If TV DVD: treated any title-level duplicate skip as critical rather than trusting contiguous episode numbering
 - [ ] For failed items: diagnosed failure cause from `item.error_message` and log events
@@ -604,7 +581,7 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] If TV: checked cross-episode consistency
 
 ### Post-Audio-Analysis (phase_commentary)
-- [ ] Reviewed commentary decisions from `logs.decisions`
+- [ ] Reviewed commentary decisions from `analysis.decision_groups`
 - [ ] If TV: verified cross-episode audio stream count consistency
 
 ### Post-Subtitling (phase_subtitles)

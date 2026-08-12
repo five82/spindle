@@ -194,7 +194,9 @@ func computeAnalysis(r *Report) *Analysis {
 }
 
 // aggregateDecisions groups decisions by (type, result, reason), preserving
-// insertion order. Entries are included when count==1 or when messages vary.
+// insertion order. Entries always carry every decision (with timestamps) —
+// the raw decision list is not serialized, so groups are the only record of
+// individual occurrences and their spacing.
 func aggregateDecisions(decisions []LogDecision) []DecisionGroup {
 	type groupKey struct {
 		decType, result, reason string
@@ -221,11 +223,7 @@ func aggregateDecisions(decisions []LogDecision) []DecisionGroup {
 
 	result := make([]DecisionGroup, 0, len(order))
 	for _, k := range order {
-		g := *groups[k]
-		if g.Count > 1 && !messagesVary(g.Entries) {
-			g.Entries = nil
-		}
-		result = append(result, g)
+		result = append(result, *groups[k])
 	}
 	return result
 }

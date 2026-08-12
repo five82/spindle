@@ -89,7 +89,10 @@ type LogAnalysis struct {
 	LinesScanned       int           `json:"lines_scanned"`
 	InferredDiscSource string        `json:"inferred_disc_source,omitempty"`
 	InferredMediaHint  string        `json:"inferred_media_hint,omitempty"`
-	Decisions          []LogDecision `json:"decisions,omitempty"`
+	// Decisions feeds analysis but is not serialized: every decision (with
+	// its timestamp) is preserved verbatim in analysis.decision_groups
+	// entries, so emitting the raw list would duplicate ~25% of the report.
+	Decisions []LogDecision `json:"-"`
 	Warnings           []LogEntry    `json:"warnings,omitempty"`
 	Errors             []LogEntry    `json:"errors,omitempty"`
 	Events             []LogEntry    `json:"events,omitempty"`
@@ -330,6 +333,8 @@ type RoutingEntry struct {
 }
 
 // DecisionGroup aggregates identical decisions by (type, result, reason).
+// Entries always holds every grouped decision in log order; it is the sole
+// serialized record of individual decision occurrences.
 type DecisionGroup struct {
 	DecisionType   string        `json:"decision_type"`
 	DecisionResult string        `json:"decision_result"`
