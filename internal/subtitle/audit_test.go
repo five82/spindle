@@ -169,6 +169,37 @@ func TestResolveAuditEditsInvalidAction(t *testing.T) {
 	}
 }
 
+func TestGuardMusicBleedRemovals(t *testing.T) {
+	resolved := []resolvedEdit{
+		{CueIndex: 0, Action: "remove", Category: "music_bleed"},
+		{CueIndex: 1, Action: "remove", Category: "music_bleed"},
+		{CueIndex: 2, Action: "remove", Category: "music_bleed"},
+		{CueIndex: 3, Action: "remove", Category: "music_bleed"},
+		{CueIndex: 4, Action: "remove", Category: "music_bleed"},
+		{CueIndex: 5, Action: "remove", Category: "music_bleed"},
+		{CueIndex: 6, Action: "replace", Category: "homophone", Replacement: "Even Rocky had a montage."},
+		{CueIndex: 7, Action: "remove", Category: "credits_music"},
+	}
+	got, preserved := guardMusicBleedRemovals(resolved)
+	if preserved != 6 {
+		t.Fatalf("expected 6 music bleed removals preserved, got %d", preserved)
+	}
+	if len(got) != 2 || got[0].Category != "homophone" || got[1].Category != "credits_music" {
+		t.Fatalf("expected unrelated edits retained, got %+v", got)
+	}
+}
+
+func TestGuardMusicBleedRemovalsAllowsSmallSet(t *testing.T) {
+	resolved := make([]resolvedEdit, maxMusicBleedRemovalEdits)
+	for i := range resolved {
+		resolved[i] = resolvedEdit{CueIndex: i, Action: "remove", Category: "music_bleed"}
+	}
+	got, preserved := guardMusicBleedRemovals(resolved)
+	if len(got) != maxMusicBleedRemovalEdits || preserved != 0 {
+		t.Fatalf("expected small music bleed set allowed, got %+v, preserved=%d", got, preserved)
+	}
+}
+
 func TestApplyResolvedEditsReindexes(t *testing.T) {
 	cues := sampleCues()
 	resolved := []resolvedEdit{

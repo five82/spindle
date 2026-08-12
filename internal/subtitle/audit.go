@@ -17,7 +17,10 @@ import (
 // creditsWindowSeconds is how far before the end of the video the
 // end-credits region is assumed to start, for both the LLM prompt hint and
 // the removal-cap guardrail.
-const creditsWindowSeconds = 420.0
+const (
+	creditsWindowSeconds      = 420.0
+	maxMusicBleedRemovalEdits = 5
+)
 
 // creditsRegionStart returns when the end-credits region is assumed to
 // begin. The window is creditsWindowSeconds capped at 10% of runtime so
@@ -43,14 +46,14 @@ const subtitleAuditSystemPrompt = `You are auditing an English SRT subtitle file
 FLAG ONLY these categories:
 - hallucination: a short phrase like "Thank you.", "Thanks for watching.", "Subscribe." appearing repeatedly in isolation (large timestamp gaps around it, not part of a conversation)
 - credits_music: lyric cues in the end-credits region after all narrative dialogue has ended. The final scene's real dialogue often continues into and interleaves with the credits song: remove only lyric lines, never conversational exchanges between characters, even inside the end-credits region.
-- music_bleed: soundtrack lyrics mid-film transcribed as dialogue (poetic/verse-chorus phrasing that does not fit the scene's conversation). PRESERVE diegetic singing: characters singing on-screen, performances, karaoke, plot-relevant lyrics. NEVER remove songs playing over the opening titles or title sequence; leave them alone. When unsure, skip.
+- music_bleed: one or a few incidental background-song lyric cues transcribed as dialogue even though they have no narrative, comedic, thematic, or performance role. Non-diegetic placement alone is not enough. NEVER flag a recognizable or sustained song sequence, musical number, montage or action song, recurring theme, character singing, or lyrics that comment on the scene. When unsure, skip.
 - garbled: text that is clearly not real English or makes no sense in any context. If garbled text is mid-film speech, propose a replacement only when the correct wording is unambiguous; NEVER remove garbled speech cues.
 - homophone: wrong word where surrounding text makes the correct word unambiguous (e.g. their/there, "would of" for "would have")
 - broken: empty cues, whitespace/punctuation-only cues, orphaned music symbols
 - repeated: adjacent cues with identical text and overlapping timestamps
 - encoding: mojibake / corrupted characters
 
-DO NOT flag: proper-noun spellings you cannot verify from context, grammar, punctuation style, capitalization, line breaks, rephrasing, timing, suspected mishearings where the correct word is not unambiguous, ambiguous short exclamations ("Oh!", "No!"), or diegetic/plot-relevant song lyrics.
+DO NOT flag: proper-noun spellings you cannot verify from context, grammar, punctuation style, capitalization, line breaks, rephrasing, timing, suspected mishearings where the correct word is not unambiguous, ambiguous short exclamations ("Oh!", "No!"), or intentional song lyrics. Correctly transcribed lyrics are real audio, not ASR errors; preserve opening and title songs, musical numbers, montage and action songs, and diegetic or plot-relevant singing.
 
 Return JSON: {"edits": [{"index": <cue index>, "current_text": "<exact current text>", "action": "remove" | "replace", "replacement": "<new text if replace>", "category": "<category>", "reason": "<brief>", "confidence": "high" | "medium"}]}
 
@@ -136,6 +139,18 @@ func auditDisplaySRT(ctx context.Context, client *llm.Client, logger *slog.Logge
 
 	proposed := len(resp.Edits)
 	resolved, dropped := resolveAuditEdits(cues, resp.Edits)
+	resolved, preserved := guardMusicBleedRemovals(resolved)
+	if preserved > 0 {
+		dropped += preserved
+		logger.Info("subtitle audit music bleed removals preserved",
+			"decision_type", "subtitle_audit_music_bleed",
+			"decision_result", "preserved",
+			"decision_reason", "removals exceed conservative cap",
+			"episode_key", params.EpisodeKey,
+			"removals", preserved,
+			"cap", maxMusicBleedRemovalEdits,
+		)
+	}
 
 	if len(resolved) == 0 {
 		logger.Info("subtitle audit complete",
@@ -286,6 +301,27 @@ func resolveAuditEdits(cues []srtutil.Cue, edits []auditEdit) ([]resolvedEdit, i
 	}
 
 	return resolved, dropped
+}
+
+// guardMusicBleedRemovals preserves all music-bleed cues when the model
+// proposes enough removals to indicate a song rather than incidental leakage.
+func guardMusicBleedRemovals(resolved []resolvedEdit) ([]resolvedEdit, int) {
+	count := 0
+	for _, r := range resolved {
+		if r.Action == "remove" && r.Category == "music_bleed" {
+			count++
+		}
+	}
+	if count <= maxMusicBleedRemovalEdits {
+		return resolved, 0
+	}
+	kept := resolved[:0]
+	for _, r := range resolved {
+		if r.Action != "remove" || r.Category != "music_bleed" {
+			kept = append(kept, r)
+		}
+	}
+	return kept, count
 }
 
 // applyResolvedEdits builds the final cue list: "remove" edits drop their
