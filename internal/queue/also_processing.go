@@ -21,7 +21,19 @@ func FormatAlsoProcessing(store *Store, excludeID int64) string {
 		if it.ID == excludeID {
 			continue
 		}
-		others = append(others, fmt.Sprintf("%s (%s)", it.DisplayTitle(), HumanStage(it.Stage)))
+
+		stage := it.Stage
+		tasks, err := store.TasksForItem(it.ID)
+		if err != nil {
+			return ""
+		}
+		for _, task := range tasks {
+			if task.State == TaskRunning {
+				stage = task.Type
+				break
+			}
+		}
+		others = append(others, fmt.Sprintf("%s (%s)", it.DisplayTitle(), HumanStage(stage)))
 	}
 
 	if len(others) == 0 {

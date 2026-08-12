@@ -628,6 +628,40 @@ func TestHumanStage(t *testing.T) {
 	}
 }
 
+func TestFormatAlsoProcessingUsesRunningTaskStage(t *testing.T) {
+	store := openTestStore(t)
+	subject, _ := store.NewDisc("Subject", "fp1")
+	other, _ := store.NewDisc("The Matrix (1999)", "fp2")
+	if err := store.MoveToStage(other, StageRipping); err != nil {
+		t.Fatalf("move to ripping: %v", err)
+	}
+	if err := store.EnsureTasks(other, []TaskSpec{
+		{Type: StageRipping},
+		{Type: StageEncoding, DependsOn: []Stage{StageRipping}},
+	}); err != nil {
+		t.Fatalf("ensure tasks: %v", err)
+	}
+	tasks, err := store.TasksForItem(other.ID)
+	if err != nil {
+		t.Fatalf("tasks: %v", err)
+	}
+	if err := store.FinishTask(tasks[0], TaskDone, ""); err != nil {
+		t.Fatalf("finish ripping: %v", err)
+	}
+	if err := store.StartTask(tasks[1]); err != nil {
+		t.Fatalf("start encoding: %v", err)
+	}
+	if err := store.StartStage(other); err != nil {
+		t.Fatalf("start item: %v", err)
+	}
+
+	got := FormatAlsoProcessing(store, subject.ID)
+	want := "\nAlso processing: The Matrix (1999) (encoding)"
+	if got != want {
+		t.Fatalf("FormatAlsoProcessing() = %q, want %q", got, want)
+	}
+}
+
 func TestFormatAlsoProcessingHumanizesAndCaps(t *testing.T) {
 	store := openTestStore(t)
 	item1, _ := store.NewDisc("Avatar (2009)", "fp1")
