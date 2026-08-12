@@ -41,7 +41,6 @@ type RipProgress struct {
 	Current int
 	Total   int
 	Percent float64
-	Message string
 }
 
 // Scan runs makemkvcon info on the given device and parses disc information.
@@ -191,22 +190,31 @@ func Rip(ctx context.Context, device string, titleID int, outputDir string, time
 	}
 
 	var (
-		errorMsgs     []ripMessage
-		warningMsgs   []ripMessage
-		savedCount    = -1 // -1 = unknown (no MSG:5036 seen)
-		failedCount   = -1
-		lastErrorText string
+		errorMsgs        []ripMessage
+		warningMsgs      []ripMessage
+		savedCount       = -1 // -1 = unknown (no MSG:5036 seen)
+		failedCount      = -1
+		lastErrorText    string
+		savingTitle      bool
+		publishedPercent float64
 	)
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if progress != nil {
-			if p, ok := parsePRGV(line, titleID); ok {
-				progress(p)
-				continue
+		if strings.HasPrefix(line, "PRGT:") {
+			savingTitle = strings.HasPrefix(line, "PRGT:5024,") // Ignore scan/open phase progress.
+			continue
+		}
+		if p, ok := parsePRGV(line, titleID); ok {
+			if savingTitle {
+				if progress != nil && p.Percent > publishedPercent && p.Percent < 100 {
+					publishedPercent = p.Percent
+					progress(p)
+				}
 			}
+			continue
 		}
 		if msg, ok := parseMSG(line); ok {
 			switch {
@@ -624,8 +632,8 @@ func parseMSG(line string) (ripMessage, bool) {
 	return msg, true
 }
 
-// parsePRGV parses a PRGV progress line and returns a RipProgress.
-// Format: PRGV:current,total,max
+// parsePRGV parses MakeMKV's current-operation, total, and maximum progress.
+// User-facing rip progress must use total; current resets for each sub-operation.
 func parsePRGV(line string, titleID int) (RipProgress, bool) {
 	prefix, body, ok := splitRobotLine(line)
 	if !ok || prefix != "PRGV" {
@@ -644,20 +652,15 @@ func parsePRGV(line string, titleID int) (RipProgress, bool) {
 		return RipProgress{}, false
 	}
 	max, err := strconv.Atoi(fields[2])
-	if err != nil {
+	if err != nil || max <= 0 {
 		return RipProgress{}, false
-	}
-
-	var pct float64
-	if max > 0 {
-		pct = float64(current) / float64(max) * 100
 	}
 
 	return RipProgress{
 		TitleID: titleID,
 		Current: current,
 		Total:   total,
-		Percent: pct,
+		Percent: float64(total) / float64(max) * 100,
 	}, true
 }
 

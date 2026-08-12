@@ -123,75 +123,53 @@ func TestParseRobotOutputCINFO(t *testing.T) {
 	}
 }
 
-func TestParsePRGV(t *testing.T) {
+func TestParsePRGVUsesTotalProgress(t *testing.T) {
 	tests := []struct {
-		name    string
-		line    string
-		titleID int
-		wantOK  bool
-		wantPct float64
-		wantCur int
-		wantTot int
+		name        string
+		line        string
+		wantOK      bool
+		wantCurrent int
+		wantTotal   int
+		wantPercent float64
 	}{
 		{
-			name:    "normal progress",
-			line:    "PRGV:50,100,200",
-			titleID: 3,
-			wantOK:  true,
-			wantPct: 25.0,
-			wantCur: 50,
-			wantTot: 100,
+			name:        "current operation complete while total has not started",
+			line:        "PRGV:65536,0,65536",
+			wantOK:      true,
+			wantCurrent: 65536,
 		},
 		{
-			name:    "complete",
-			line:    "PRGV:200,200,200",
-			titleID: 0,
-			wantOK:  true,
-			wantPct: 100.0,
-			wantCur: 200,
-			wantTot: 200,
+			name:        "title save in progress",
+			line:        "PRGV:296,108,65536",
+			wantOK:      true,
+			wantCurrent: 296,
+			wantTotal:   108,
+			wantPercent: float64(108) / 65536 * 100,
 		},
 		{
-			name:    "zero max",
-			line:    "PRGV:0,0,0",
-			titleID: 0,
-			wantOK:  true,
-			wantPct: 0,
-			wantCur: 0,
-			wantTot: 0,
+			name:        "complete",
+			line:        "PRGV:65536,65536,65536",
+			wantOK:      true,
+			wantCurrent: 65536,
+			wantTotal:   65536,
+			wantPercent: 100,
 		},
-		{
-			name:   "not prgv",
-			line:   "TINFO:0,2,0,\"test\"",
-			wantOK: false,
-		},
-		{
-			name:   "malformed",
-			line:   "PRGV:abc",
-			wantOK: false,
-		},
+		{name: "zero maximum", line: "PRGV:0,0,0"},
+		{name: "wrong record type", line: `PRGT:5024,0,"Saving all titles to MKV files"`},
+		{name: "malformed", line: "PRGV:abc"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p, ok := parsePRGV(tt.line, tt.titleID)
+			got, ok := parsePRGV(tt.line, 3)
 			if ok != tt.wantOK {
 				t.Fatalf("parsePRGV ok = %v, want %v", ok, tt.wantOK)
 			}
 			if !ok {
 				return
 			}
-			if p.TitleID != tt.titleID {
-				t.Errorf("TitleID = %d, want %d", p.TitleID, tt.titleID)
-			}
-			if p.Current != tt.wantCur {
-				t.Errorf("Current = %d, want %d", p.Current, tt.wantCur)
-			}
-			if p.Total != tt.wantTot {
-				t.Errorf("Total = %d, want %d", p.Total, tt.wantTot)
-			}
-			if p.Percent != tt.wantPct {
-				t.Errorf("Percent = %f, want %f", p.Percent, tt.wantPct)
+			if got.TitleID != 3 || got.Current != tt.wantCurrent || got.Total != tt.wantTotal || got.Percent != tt.wantPercent {
+				t.Fatalf("parsePRGV = %+v, want current=%d total=%d percent=%f", got, tt.wantCurrent, tt.wantTotal, tt.wantPercent)
 			}
 		})
 	}

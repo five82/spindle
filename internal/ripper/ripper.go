@@ -304,13 +304,10 @@ func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir s
 		h.cfg.MakeMKV.MinTitleLength,
 		func(p makemkv.RipProgress) {
 			message := sess.Task.ProgressMessage
-			if strings.TrimSpace(p.Message) != "" {
-				message = p.Message
-			}
 			_ = sess.Progress(overallRipPercent(index, total, p.Percent), message)
 
 			now := time.Now()
-			if lastRipLog.IsZero() || now.Sub(lastRipLog) >= ripProgressLogInterval || p.Percent >= 100 {
+			if lastRipLog.IsZero() || now.Sub(lastRipLog) >= ripProgressLogInterval {
 				lastRipLog = now
 				logger.Info("rip progress",
 					"event_type", "rip_progress",
