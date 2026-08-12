@@ -253,7 +253,8 @@ Analyze the `media` array from the audit output. Each entry contains full ffprob
    - Resolution matches expected (SD/HD/4K)
    - Codec is AV1 (`av1`) from Reel's SVT-AV1 (libsvtav1) encoder; libaom-av1 cannot occur
    - Duration matches source within tolerance (~1-2 seconds)
-   - HDR metadata present if expected (color_primaries, transfer_characteristics in tags)
+   - Static HDR signaling present if expected (`color_primaries`, transfer characteristics, and mastering metadata)
+   - Reel intentionally does not preserve HDR10+ dynamic metadata (SMPTE ST 2094-40) because the target playback environment does not consume it. An HDR10+ source producing a static-HDR AV1 output is expected; do not flag missing HDR10+ side data or an external HDR10+ vs output static-HDR difference.
 
 2. **Verify audio streams** (from `media[].probe.streams` where `codec_type=audio`):
    - Primary audio is first and has `disposition.default=1`
@@ -480,6 +481,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Inconsistent source audio track counts across titles on the same disc — different playlists routinely carry different language sets
 - Audio refinement stripping non-English tracks — that's its job
 - Subtitle `qc_observations` that are below review thresholds and have `validation_result=passed`
+- Missing HDR10+ dynamic metadata in encoded output — Reel intentionally emits static HDR because the target playback environment does not consume HDR10+
 
 **Stage timing:**
 - Always show the timing table — it's compact and useful for spotting anomalies
