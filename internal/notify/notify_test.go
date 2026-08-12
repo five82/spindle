@@ -5,91 +5,72 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewEmptyTopic(t *testing.T) {
-	n := New("", 10, nil)
-	if n != nil {
-		t.Fatal("expected nil notifier for empty topic")
+	for _, topic := range []string{"", "  \t"} {
+		if n := New(topic, 10); n != nil {
+			t.Fatalf("New(%q) = non-nil, want nil", topic)
+		}
 	}
 }
 
-func TestNewDefaultTimeout(t *testing.T) {
-	n := New("http://example.com/topic", 0, nil)
+func TestNewTrimsTopicAndDefaultsTimeout(t *testing.T) {
+	n := New("  http://example.com/topic  ", 0)
 	if n == nil {
 		t.Fatal("expected non-nil notifier")
 	}
-	if n.timeout != 10*1e9 {
+	if n.topic != "http://example.com/topic" {
+		t.Fatalf("topic = %q", n.topic)
+	}
+	if n.timeout != 10*time.Second {
 		t.Fatalf("expected 10s default timeout, got %v", n.timeout)
 	}
 }
 
 func TestNilNotifierSend(t *testing.T) {
 	var n *Notifier
-	err := n.Send(context.Background(), EventTest, "title", "msg")
-	if err != nil {
+	if err := n.Send(context.Background(), EventTest, "title", "msg"); err != nil {
 		t.Fatalf("expected nil error from nil notifier, got %v", err)
 	}
 }
 
-func TestPriority(t *testing.T) {
+func TestEventPresentation(t *testing.T) {
 	tests := []struct {
-		event Event
-		want  string
+		event    Event
+		priority string
+		tag      string
 	}{
-		{EventItemQueued, "default"},
-		{EventIdentificationComplete, "default"},
-		{EventRipCacheHit, "low"},
-		{EventRipComplete, "default"},
-		{EventEncodeComplete, "default"},
-		{EventReviewRequired, "high"},
-		{EventPipelineComplete, "default"},
-		{EventQueueStarted, "default"},
-		{EventQueueCompleted, "default"},
-		{EventError, "high"},
-		{EventTest, "low"},
+		{EventItemQueued, "low", "inbox_tray"},
+		{EventIdentificationComplete, "low", "mag"},
+		{EventRipCacheHit, "low", "cd"},
+		{EventRipComplete, "default", "cd"},
+		{EventReviewRequired, "default", "warning"},
+		{EventPipelineComplete, "default", "heavy_check_mark"},
+		{EventError, "high", "rotating_light"},
+		{EventTest, "low", "test_tube"},
 	}
 	for _, tt := range tests {
-		got := priority(tt.event)
-		if got != tt.want {
-			t.Errorf("priority(%q) = %q, want %q", tt.event, got, tt.want)
+		if got := priority(tt.event); got != tt.priority {
+			t.Errorf("priority(%q) = %q, want %q", tt.event, got, tt.priority)
 		}
-	}
-}
-
-func TestTags(t *testing.T) {
-	tests := []struct {
-		event Event
-		want  string
-	}{
-		{EventItemQueued, "queue"},
-		{EventIdentificationComplete, "identify"},
-		{EventRipCacheHit, "rip,cache"},
-		{EventRipComplete, "rip"},
-		{EventEncodeComplete, "encode"},
-		{EventReviewRequired, "review,warning"},
-		{EventPipelineComplete, "complete"},
-		{EventQueueStarted, "queue"},
-		{EventQueueCompleted, "queue"},
-		{EventError, "error"},
-		{EventTest, "test"},
-	}
-	for _, tt := range tests {
-		got := tags(tt.event)
-		if got != tt.want {
-			t.Errorf("tags(%q) = %q, want %q", tt.event, got, tt.want)
+		if got := tags(tt.event); got != tt.tag {
+			t.Errorf("tags(%q) = %q, want %q", tt.event, got, tt.tag)
 		}
 	}
 }
 
 func TestSendHTTP(t *testing.T) {
 	var (
-		gotTitle     string
-		gotPriority  string
-		gotTags      string
-		gotUserAgent string
-		gotBody      string
+		gotTitle       string
+		gotPriority    string
+		gotTags        string
+		gotUserAgent   string
+		gotContentType string
+		gotBody        string
 	)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,60 +78,72 @@ func TestSendHTTP(t *testing.T) {
 		gotPriority = r.Header.Get("Priority")
 		gotTags = r.Header.Get("Tags")
 		gotUserAgent = r.Header.Get("User-Agent")
+		gotContentType = r.Header.Get("Content-Type")
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
-	n := New(srv.URL, 5, nil)
-	err := n.Send(context.Background(), EventReviewRequired, "Review Required", "file.mkv needs review")
+	n := New(srv.URL, 5)
+	err := n.Send(context.Background(), EventReviewRequired, "Review needed: Amélie", "file.mkv needs review")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if gotTitle != "Review Required" {
-		t.Errorf("title = %q, want %q", gotTitle, "Review Required")
+	if gotTitle != "Review needed: Amélie" {
+		t.Errorf("title = %q", gotTitle)
 	}
-	if gotPriority != "high" {
-		t.Errorf("priority = %q, want %q", gotPriority, "high")
+	if gotPriority != "default" {
+		t.Errorf("priority = %q, want default", gotPriority)
 	}
-	if gotTags != "review,warning" {
-		t.Errorf("tags = %q, want %q", gotTags, "review,warning")
+	if gotTags != "warning" {
+		t.Errorf("tags = %q, want warning", gotTags)
 	}
-	if gotUserAgent != "Spindle-Go/0.1.0" {
-		t.Errorf("user-agent = %q, want %q", gotUserAgent, "Spindle-Go/0.1.0")
+	if gotUserAgent != "Spindle" {
+		t.Errorf("user-agent = %q, want Spindle", gotUserAgent)
+	}
+	if gotContentType != "text/plain; charset=utf-8" {
+		t.Errorf("content-type = %q", gotContentType)
 	}
 	if gotBody != "file.mkv needs review" {
-		t.Errorf("body = %q, want %q", gotBody, "file.mkv needs review")
+		t.Errorf("body = %q", gotBody)
 	}
 }
 
-func TestSendHTTPError(t *testing.T) {
+func TestSendRejectsNon2xxWithBoundedDetail(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusMultipleChoices)
+		_, _ = io.WriteString(w, "bad topic")
 	}))
 	defer srv.Close()
 
-	n := New(srv.URL, 5, nil)
-	err := n.Send(context.Background(), EventError, "Error", "something broke")
+	err := New(srv.URL, 5).Send(context.Background(), EventError, "Error", "something broke")
+	if err == nil || !strings.Contains(err.Error(), "status 300: bad topic") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestSendErrorRedactsTopicURL(t *testing.T) {
+	const secret = "super-secret-topic"
+	err := New("://"+secret, 5).Send(context.Background(), EventError, "Error", "message")
 	if err == nil {
-		t.Fatal("expected error for 500 response")
+		t.Fatal("expected malformed URL error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error leaked topic: %v", err)
 	}
 }
 
 func TestSendNoTagsHeader(t *testing.T) {
 	var gotTagsPresent bool
-
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, gotTagsPresent = r.Header["Tags"]
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
-	n := New(srv.URL, 5, nil)
-	err := n.Send(context.Background(), Event("unknown"), "Disc", "detected")
-	if err != nil {
+	if err := New(srv.URL, 5).Send(context.Background(), Event("unknown"), "Disc", "detected"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if gotTagsPresent {

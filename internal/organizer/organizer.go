@@ -525,23 +525,27 @@ func (h *Handler) cleanupStaging(logger *slog.Logger, item *queue.Item) {
 
 func (h *Handler) sendTerminalNotification(ctx context.Context, logger *slog.Logger, sess *stage.Session, libraryCount, reviewCount int) {
 	item := sess.Item
-	alsoProcessing := queue.FormatAlsoProcessing(sess.Store, item.ID)
+	displayTitle := item.DisplayTitle()
+	if sess.Env != nil && sess.Env.Metadata.DiscNumber > 0 {
+		displayTitle += fmt.Sprintf(" - Disc %d", sess.Env.Metadata.DiscNumber)
+	}
 
 	if reviewCount > 0 || item.NeedsReview == 1 {
-		title := "Review required: " + item.DisplayTitle()
+		title := "Review needed: " + displayTitle
 		var msg string
 		switch {
 		case libraryCount > 0 && reviewCount > 0:
-			msg = fmt.Sprintf("Completed with issues. %d items imported to the library, %d sent to review.", libraryCount, reviewCount)
+			msg = fmt.Sprintf("Imported %s to the library; routed %s to review.", itemCount(libraryCount), itemCount(reviewCount))
+		case libraryCount > 0:
+			msg = fmt.Sprintf("Imported %s to the library, but review is still required.", itemCount(libraryCount))
 		case reviewCount > 0:
-			msg = fmt.Sprintf("Completed with issues. Output routed to review (%d item(s)).", reviewCount)
+			msg = fmt.Sprintf("Routed %s to review.", itemCount(reviewCount))
 		default:
-			msg = "Completed with issues. Review is required before library import."
+			msg = "Review is required before library import."
 		}
 		if reason := item.ReviewSummary(2); reason != "" {
 			msg += "\nReason: " + reason
 		}
-		msg += alsoProcessing
 		_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventReviewRequired, title, msg,
 			"library_count", libraryCount,
 			"review_count", reviewCount,
@@ -549,15 +553,19 @@ func (h *Handler) sendTerminalNotification(ctx context.Context, logger *slog.Log
 		return
 	}
 
-	title := "Completed: " + item.DisplayTitle()
-	msg := "Imported to library."
-	if libraryCount > 1 {
-		msg = fmt.Sprintf("Imported %d items to the library.", libraryCount)
-	}
-	msg += alsoProcessing
+	title := "Imported: " + displayTitle
+	msg := fmt.Sprintf("Imported %s to the library.", itemCount(libraryCount))
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventPipelineComplete, title, msg,
 		"library_count", libraryCount,
 	)
+}
+
+func itemCount(count int) string {
+	word := "items"
+	if count == 1 {
+		word = "item"
+	}
+	return fmt.Sprintf("%d %s", count, word)
 }
 
 func totalOrganizationBytes(inputs []organizationInput) int64 {

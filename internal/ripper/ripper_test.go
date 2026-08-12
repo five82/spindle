@@ -6,12 +6,15 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripspec"
@@ -494,5 +497,34 @@ func TestCheckStagingSpaceSkippedOnStatfsFailure(t *testing.T) {
 	targets := []ripspec.Title{{ID: 0, SizeBytes: 1 << 62}}
 	if err := h.checkStagingSpace(testLogger(), targets); err != nil {
 		t.Fatalf("expected skip on statfs failure, got: %v", err)
+	}
+}
+
+func TestNotifyRipCompleteIncludesDiscAndDriveHandoff(t *testing.T) {
+	var title, body, priority string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		title = r.Header.Get("Title")
+		priority = r.Header.Get("Priority")
+		data, _ := io.ReadAll(r.Body)
+		body = string(data)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	h := &Handler{notifier: notify.New(srv.URL, 5)}
+	sess := &stage.Session{
+		Item: &queue.Item{ID: 1, DiscTitle: "Example Season 01"},
+		Env:  &ripspec.Envelope{Metadata: ripspec.Metadata{DiscNumber: 2}},
+	}
+	h.notifyRipComplete(context.Background(), testLogger(), sess, 1)
+
+	if title != "Rip complete: Example Season 01 - Disc 2" {
+		t.Fatalf("title = %q", title)
+	}
+	if body != "Ripped 1 title.\nDrive is available for next disc." {
+		t.Fatalf("body = %q", body)
+	}
+	if priority != "default" {
+		t.Fatalf("priority = %q, want default", priority)
 	}
 }

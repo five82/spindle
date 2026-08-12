@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -30,6 +31,15 @@ func (c *Config) Validate() error {
 	}
 	if c.MakeMKV.MinTitleLength < 0 {
 		errs = append(errs, fmt.Sprintf("makemkv.min_title_length must be >= 0 (got %d)", c.MakeMKV.MinTitleLength))
+	}
+	if c.Notifications.RequestTimeout <= 0 {
+		errs = append(errs, fmt.Sprintf("notifications.request_timeout must be > 0 (got %d)", c.Notifications.RequestTimeout))
+	}
+	if topic := strings.TrimSpace(c.Notifications.NtfyTopic); topic != "" {
+		parsed, err := url.Parse(topic)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || strings.Trim(parsed.Path, "/") == "" {
+			errs = append(errs, "notifications.ntfy_topic must be an absolute http or https topic URL")
+		}
 	}
 
 	// Conditional requirements.

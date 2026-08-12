@@ -16,7 +16,6 @@ import (
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/makemkv"
 	"github.com/five82/spindle/internal/notify"
-	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
@@ -182,11 +181,17 @@ func (h *Handler) restoreFromRipCache(ctx context.Context, sess *stage.Session, 
 		"decision_result", "restored",
 		"decision_reason", fmt.Sprintf("%d titles from cache", meta.TitleCount),
 	)
-	msg := fmt.Sprintf("%s (%d titles from cache)", item.DisplayTitle(), meta.TitleCount)
-	msg += "\n" + driveAvailableMsg
-	msg += queue.FormatAlsoProcessing(sess.Store, item.ID)
+	displayTitle := item.DisplayTitle()
+	if env.Metadata.DiscNumber > 0 {
+		displayTitle += fmt.Sprintf(" - Disc %d", env.Metadata.DiscNumber)
+	}
+	titleWord := "titles"
+	if meta.TitleCount == 1 {
+		titleWord = "title"
+	}
+	msg := fmt.Sprintf("Restored %d %s from rip cache.\n%s", meta.TitleCount, titleWord, driveAvailableMsg)
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventRipCacheHit,
-		"Rip Cache Hit: "+item.DisplayTitle(),
+		"Rip ready from cache: "+displayTitle,
 		msg,
 	)
 
@@ -442,11 +447,17 @@ func (h *Handler) cacheFreshRip(logger *slog.Logger, sess *stage.Session, ripped
 
 func (h *Handler) notifyRipComplete(ctx context.Context, logger *slog.Logger, sess *stage.Session, rippedCount int) {
 	item := sess.Item
-	msg := fmt.Sprintf("Ripped %s (%d titles)", item.DisplayTitle(), rippedCount)
-	msg += "\n" + driveAvailableMsg
-	msg += queue.FormatAlsoProcessing(sess.Store, item.ID)
+	displayTitle := item.DisplayTitle()
+	if sess.Env.Metadata.DiscNumber > 0 {
+		displayTitle += fmt.Sprintf(" - Disc %d", sess.Env.Metadata.DiscNumber)
+	}
+	titleWord := "titles"
+	if rippedCount == 1 {
+		titleWord = "title"
+	}
+	msg := fmt.Sprintf("Ripped %d %s.\n%s", rippedCount, titleWord, driveAvailableMsg)
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventRipComplete,
-		"Rip Complete: "+item.DisplayTitle(),
+		"Rip complete: "+displayTitle,
 		msg,
 	)
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
 )
 
@@ -51,8 +53,6 @@ type Manager struct {
 	notifier               *notify.Notifier
 	pipeline               *pipelineState
 	statusTracker          *httpapi.StatusTracker
-	queueNotifyMu          sync.Mutex
-	queueCycleActive       bool
 	persistenceFailures    chan error
 	persistenceFailureOnce sync.Once
 
@@ -617,8 +617,6 @@ func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue
 		"stage", ps.Stage,
 		"claims", logs.FormatCounts(claims),
 	)
-	m.maybeStartQueueCycle(ctx, itemLogger)
-
 	res, err := stage.ExecuteWorkflowStage(ctx, item, stage.WorkflowOptions{
 		Store:   m.store,
 		Handler: ps.Handler,
@@ -644,7 +642,6 @@ func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue
 			"stage", ps.Stage,
 			"stage_duration", logs.FormatDuration(res.Duration),
 		)
-		m.maybeCompleteQueueCycle(ctx, itemLogger)
 		return outcomeStopped
 	}
 	if err != nil {
@@ -687,7 +684,6 @@ func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue
 		m.statusTracker.RecordSuccess()
 	}
 
-	m.maybeCompleteQueueCycle(ctx, itemLogger)
 	return outcomeDone
 }
 
@@ -801,13 +797,37 @@ func (m *Manager) recordStageFailure(ctx context.Context, item *queue.Item, err 
 		m.statusTracker.RecordFailure(err.Error())
 	}
 
-	title := fmt.Sprintf("Failed: %s during %s", item.DisplayTitle(), queue.HumanStage(ps.Stage))
-	msg := fmt.Sprintf("Processing stopped.\nStage: %s\nReason: %s\nItem ID: %d", queue.HumanStage(ps.Stage), err.Error(), item.ID)
+	stageName := queue.HumanStage(ps.Stage)
+	title := fmt.Sprintf("Failed during %s: %s", stageName, notificationItemTitle(item))
+	msg := fmt.Sprintf("Processing stopped.\nStage: %s\nReason: %s\nInspect: spindle queue show %d", stageName, notificationReason(err), item.ID)
 	_ = notify.SendLogged(ctx, m.notifier, itemLogger, notify.EventError, title, msg,
 		"stage", ps.Stage,
 	)
+}
 
-	m.maybeCompleteQueueCycle(ctx, itemLogger)
+func notificationItemTitle(item *queue.Item) string {
+	title := item.DisplayTitle()
+	env, err := ripspec.Parse(item.RipSpecData)
+	if err == nil && env.Metadata.DiscNumber > 0 {
+		title += fmt.Sprintf(" - Disc %d", env.Metadata.DiscNumber)
+	}
+	return title
+}
+
+func notificationReason(err error) string {
+	if err == nil {
+		return "unknown error"
+	}
+	reason := strings.TrimSpace(err.Error())
+	if reason == "" {
+		return "unknown error"
+	}
+	const maxRunes = 500
+	runes := []rune(reason)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes-3]) + "..."
+	}
+	return reason
 }
 
 func (m *Manager) reportPersistenceFailure(logger *slog.Logger, err error, eventType, hint string, itemID int64) {
@@ -826,78 +846,8 @@ func (m *Manager) reportPersistenceFailure(logger *slog.Logger, err error, event
 
 		_ = notify.SendLogged(context.Background(), m.notifier, logger, notify.EventError,
 			"Workflow paused: queue persistence failed",
-			fmt.Sprintf("Spindle could not persist queue state and stopped workflow processing to avoid untracked side effects.\nItem ID: %d\nReason: %s", itemID, err.Error()),
+			fmt.Sprintf("Spindle stopped workflow processing to avoid untracked side effects.\nReason: %s\nInspect: spindle queue show %d", notificationReason(err), itemID),
 			"source_event_type", eventType,
 		)
 	})
-}
-
-// maybeStartQueueCycle sends queue_started once per backlog cycle.
-func (m *Manager) maybeStartQueueCycle(ctx context.Context, logger *slog.Logger) {
-	if m.notifier == nil || m.store == nil {
-		return
-	}
-
-	activeCount, err := m.store.ActiveItemCount()
-	if err != nil {
-		logger.Error("check queue start failed",
-			"event_type", "queue_check_failed",
-			"error_hint", "failed to count active queue items",
-			"error", err,
-		)
-		return
-	}
-	if activeCount < 2 {
-		return
-	}
-
-	m.queueNotifyMu.Lock()
-	defer m.queueNotifyMu.Unlock()
-	if m.queueCycleActive {
-		return
-	}
-
-	msg := fmt.Sprintf("Queue is active with %d items in progress or waiting.", activeCount)
-	if err := notify.SendLogged(ctx, m.notifier, logger, notify.EventQueueStarted, "Queue started", msg,
-		"active_count", activeCount,
-	); err != nil {
-		return
-	}
-	m.queueCycleActive = true
-}
-
-// maybeCompleteQueueCycle sends queue_completed when a started backlog cycle drains.
-func (m *Manager) maybeCompleteQueueCycle(ctx context.Context, logger *slog.Logger) {
-	if m.notifier == nil || m.store == nil {
-		return
-	}
-
-	activeCount, err := m.store.ActiveItemCount()
-	if err != nil {
-		logger.Error("check queue completion failed",
-			"event_type", "queue_check_failed",
-			"error_hint", "failed to count active queue items",
-			"error", err,
-		)
-		return
-	}
-	if activeCount > 0 {
-		return
-	}
-
-	m.queueNotifyMu.Lock()
-	defer m.queueNotifyMu.Unlock()
-	if !m.queueCycleActive {
-		logger.Info("queue completion notification suppressed",
-			"event_type", "notification_suppressed",
-			"notification_event", string(notify.EventQueueCompleted),
-			"decision_reason", "no queue_started notification was sent for this cycle",
-		)
-		return
-	}
-
-	if err := notify.SendLogged(ctx, m.notifier, logger, notify.EventQueueCompleted, "Queue completed", "All queued items finished processing."); err != nil {
-		return
-	}
-	m.queueCycleActive = false
 }

@@ -530,31 +530,6 @@ func (s *Store) Stats() (map[Stage]int, error) {
 	return result, rows.Err()
 }
 
-// InProgressItems returns all items with in_progress=1, ordered by creation time.
-func (s *Store) InProgressItems() ([]*Item, error) {
-	rows, err := s.db.Query(
-		"SELECT " + allColumns + " FROM queue_items WHERE in_progress = 1 ORDER BY created_at",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("in-progress items: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	return collectItems(rows)
-}
-
-// ActiveItemCount returns the number of items in non-terminal stages.
-func (s *Store) ActiveItemCount() (int, error) {
-	var count int
-	err := s.db.QueryRow(
-		"SELECT COUNT(*) FROM queue_items WHERE stage NOT IN (?, ?)",
-		string(StageCompleted), string(StageFailed),
-	).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("active item count: %w", err)
-	}
-	return count, nil
-}
-
 // ResetInProgress clears in_progress on all items (startup recovery).
 func (s *Store) ResetInProgress() error {
 	return retryOnBusy(func() error {

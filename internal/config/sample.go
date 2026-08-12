@@ -57,7 +57,7 @@ api_key = ""
 # overwrite_existing = false
 
 [notifications]
-# ntfy topic URL (empty disables all notifications)
+# ntfy topic URL (empty disables all notifications; treat the topic as a password)
 # ntfy_topic = ""
 
 # HTTP timeout in seconds

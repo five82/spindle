@@ -184,6 +184,30 @@ func TestValidatePassesWithRequiredFields(t *testing.T) {
 	}
 }
 
+func TestValidateNotifications(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.TMDB.APIKey = "test-key"
+
+	cfg.Notifications.NtfyTopic = "://secret-topic"
+	cfg.Notifications.RequestTimeout = 0
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate should reject invalid notification settings")
+	}
+	if !strings.Contains(err.Error(), "notifications.ntfy_topic") || !strings.Contains(err.Error(), "notifications.request_timeout") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-topic") {
+		t.Fatalf("validation error leaked topic: %v", err)
+	}
+
+	cfg.Notifications.NtfyTopic = " https://ntfy.sh/private-topic "
+	cfg.Notifications.RequestTimeout = 5
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate rejected valid notification settings: %v", err)
+	}
+}
+
 func TestValidateJellyfinConditional(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.TMDB.APIKey = "test-key"

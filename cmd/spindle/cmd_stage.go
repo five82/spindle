@@ -392,7 +392,7 @@ func newTestNotifyCmd() *cobra.Command {
 		Use:   "notify",
 		Short: "Send a test notification",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			n := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout, nil)
+			n := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout)
 			if n == nil {
 				return fmt.Errorf("notifications not configured (no ntfy topic)")
 			}

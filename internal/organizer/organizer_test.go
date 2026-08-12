@@ -335,21 +335,21 @@ func TestSendTerminalNotificationCleanSuccess(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := &Handler{notifier: notify.New(srv.URL, 5, logger)}
+	h := &Handler{notifier: notify.New(srv.URL, 5)}
 	item := &queue.Item{ID: 1, DiscTitle: "Avatar (2009)"}
 	sess := &stage.Session{Store: store, Item: item}
 
 	h.sendTerminalNotification(context.Background(), logger, sess, 1, 0)
 
-	if gotTitle != "Completed: Avatar (2009)" {
-		t.Fatalf("title = %q, want %q", gotTitle, "Completed: Avatar (2009)")
+	if gotTitle != "Imported: Avatar (2009)" {
+		t.Fatalf("title = %q, want %q", gotTitle, "Imported: Avatar (2009)")
 	}
-	if gotBody != "Imported to library." {
-		t.Fatalf("body = %q, want %q", gotBody, "Imported to library.")
+	if gotBody != "Imported 1 item to the library." {
+		t.Fatalf("body = %q, want %q", gotBody, "Imported 1 item to the library.")
 	}
 }
 
-func TestSendTerminalNotificationReviewRequired(t *testing.T) {
+func TestSendTerminalNotificationImportedButReviewRequired(t *testing.T) {
 	var gotTitle, gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotTitle = r.Header.Get("Title")
@@ -366,17 +366,21 @@ func TestSendTerminalNotificationReviewRequired(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := &Handler{notifier: notify.New(srv.URL, 5, logger)}
-	item := &queue.Item{ID: 2, DiscTitle: "Unknown Disc"}
+	h := &Handler{notifier: notify.New(srv.URL, 5)}
+	item := &queue.Item{ID: 2, DiscTitle: "Example Season 01", NeedsReview: 1}
 	item.AppendReviewReason("low-confidence identification")
-	sess := &stage.Session{Store: store, Item: item}
-
-	h.sendTerminalNotification(context.Background(), logger, sess, 0, 1)
-
-	if gotTitle != "Review required: Unknown Disc" {
-		t.Fatalf("title = %q, want %q", gotTitle, "Review required: Unknown Disc")
+	sess := &stage.Session{
+		Store: store,
+		Item:  item,
+		Env:   &ripspec.Envelope{Metadata: ripspec.Metadata{DiscNumber: 2}},
 	}
-	want := "Completed with issues. Output routed to review (1 item(s)).\nReason: low-confidence identification"
+
+	h.sendTerminalNotification(context.Background(), logger, sess, 3, 0)
+
+	if gotTitle != "Review needed: Example Season 01 - Disc 2" {
+		t.Fatalf("title = %q, want %q", gotTitle, "Review needed: Example Season 01 - Disc 2")
+	}
+	want := "Imported 3 items to the library, but review is still required.\nReason: low-confidence identification"
 	if gotBody != want {
 		t.Fatalf("body = %q, want %q", gotBody, want)
 	}

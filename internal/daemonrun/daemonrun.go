@@ -121,7 +121,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Create clients.
 	tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, logger)
 	llmClient := llm.New(cfg.LLM, logger)
-	notifier := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout, logger)
+	notifier := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout)
 	if notifier == nil {
 		logger.Info("ntfy notifications disabled",
 			"decision_type", logs.DecisionIntegrationConfig,
@@ -180,7 +180,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	identifyHandler := identify.New(cfg, tmdbClient, notifier, discIDStore, keydbCat)
 	ripperHandler := ripper.New(cfg, notifier, ripCacheStore, discMon, ripper.NoTitleOverride)
 	contentidHandler := contentid.New(cfg, llmClient, osClient, tmdbClient, transcriber)
-	encoderHandler := encoder.New(cfg, notifier)
+	encoderHandler := encoder.New(cfg)
 	analysisHandler := audioanalysis.New(cfg, llmClient, transcriber)
 	subtitleHandler := subtitle.New(cfg, transcriber, llmClient)
 	applyHandler := apply.New(cfg)

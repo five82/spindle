@@ -16,7 +16,6 @@ import (
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
-	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
@@ -24,13 +23,12 @@ import (
 
 // Handler implements stage.Handler for encoding.
 type Handler struct {
-	cfg      *config.Config
-	notifier *notify.Notifier
+	cfg *config.Config
 }
 
 // New creates an encoding handler.
-func New(cfg *config.Config, notifier *notify.Notifier) *Handler {
-	return &Handler{cfg: cfg, notifier: notifier}
+func New(cfg *config.Config) *Handler {
+	return &Handler{cfg: cfg}
 }
 
 // Run executes the encoding stage.
@@ -126,23 +124,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	if summary.errors > 0 {
 		return fmt.Errorf("encoding failed for %d of %d jobs", summary.errors, attempted)
 	}
-
-	// Notification.
-	snap, _ := encodingstate.Unmarshal(item.EncodingDetailsJSON)
-	msg := fmt.Sprintf("Encoded %s (%d files", item.DisplayTitle(), attempted)
-	if snap.Resolution != "" {
-		msg += ", " + snap.Resolution
-	}
-	if summary.originalSize > 0 {
-		reduction := (1 - float64(summary.encodedSize)/float64(summary.originalSize)) * 100
-		msg += fmt.Sprintf(", %.1f%% smaller", reduction)
-	}
-	msg += ")"
-	msg += queue.FormatAlsoProcessing(sess.Store, item.ID)
-	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventEncodeComplete,
-		"Encode Complete: "+item.DisplayTitle(),
-		msg,
-	)
 
 	logger.Debug("encoding stage completed",
 		"event_type", "stage_complete",

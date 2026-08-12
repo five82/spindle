@@ -439,11 +439,15 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		}
 	}
 
-	// Send notification.
-	msg := item.DisplayTitle() + queue.FormatAlsoProcessing(sess.Store, item.ID)
+	// Send a silent confirmation so the operator can verify the match without
+	// another audible interruption before the drive handoff.
+	displayTitle := item.DisplayTitle()
+	if result.Envelope.Metadata.DiscNumber > 0 {
+		displayTitle += fmt.Sprintf(" - Disc %d", result.Envelope.Metadata.DiscNumber)
+	}
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventIdentificationComplete,
-		"Identification Complete: "+item.DisplayTitle(),
-		msg,
+		"Identified: "+displayTitle,
+		"Metadata match confirmed. Ripping is next.",
 	)
 
 	logger.Debug("identification stage completed",

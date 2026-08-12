@@ -5,16 +5,15 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/five82/spindle/internal/httpapi"
-	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
 )
 
@@ -188,142 +187,20 @@ func TestFinalPersistenceFailureSignalsWorkflowStop(t *testing.T) {
 	}
 }
 
-func TestQueueCycleNotificationsRequireBacklogAndPair(t *testing.T) {
-	var events []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		events = append(events, r.Header.Get("Title"))
-		_, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+func TestNotificationContentIsCompactAndIdentifiesDisc(t *testing.T) {
+	env := ripspec.Envelope{Version: ripspec.CurrentVersion, Metadata: ripspec.Metadata{DiscNumber: 3}}
+	raw, err := env.Encode()
 	if err != nil {
-		t.Fatalf("open queue: %v", err)
+		t.Fatal(err)
 	}
-	defer func() { _ = store.Close() }()
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	manager := New(store, notify.New(srv.URL, 5, logger), nil, logger)
-
-	item1, _ := store.NewDisc("A", "fp1")
-	item2, _ := store.NewDisc("B", "fp2")
-
-	manager.maybeStartQueueCycle(context.Background(), logger)
-	if len(events) != 1 || events[0] != "Queue started" {
-		t.Fatalf("events after start = %v, want [Queue started]", events)
+	item := &queue.Item{DiscTitle: "Example Season 01", RipSpecData: raw}
+	if got := notificationItemTitle(item); got != "Example Season 01 - Disc 3" {
+		t.Fatalf("notificationItemTitle() = %q", got)
 	}
 
-	manager.maybeStartQueueCycle(context.Background(), logger)
-	if len(events) != 1 {
-		t.Fatalf("queue_started duplicated: %v", events)
-	}
-
-	_ = store.MoveToStage(item1, queue.StageCompleted)
-	_ = store.MoveToStage(item2, queue.StageCompleted)
-	manager.maybeCompleteQueueCycle(context.Background(), logger)
-	if len(events) != 2 || events[1] != "Queue completed" {
-		t.Fatalf("events after complete = %v, want [Queue started Queue completed]", events)
-	}
-}
-
-func TestQueueStartNotificationRetriesAfterFailure(t *testing.T) {
-	var attempts int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts == 1 {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
-	if err != nil {
-		t.Fatalf("open queue: %v", err)
-	}
-	defer func() { _ = store.Close() }()
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	manager := New(store, notify.New(srv.URL, 5, logger), nil, logger)
-
-	_, _ = store.NewDisc("A", "fp1")
-	_, _ = store.NewDisc("B", "fp2")
-
-	manager.maybeStartQueueCycle(context.Background(), logger)
-	if manager.queueCycleActive {
-		t.Fatal("queue cycle should remain inactive after failed queue_started notification")
-	}
-
-	manager.maybeStartQueueCycle(context.Background(), logger)
-	if !manager.queueCycleActive {
-		t.Fatal("queue cycle should become active after successful retry")
-	}
-	if attempts != 2 {
-		t.Fatalf("queue_started attempts = %d, want 2", attempts)
-	}
-}
-
-func TestQueueCompletionNotificationRetriesAfterFailure(t *testing.T) {
-	var attempts int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts == 1 {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
-	if err != nil {
-		t.Fatalf("open queue: %v", err)
-	}
-	defer func() { _ = store.Close() }()
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	manager := New(store, notify.New(srv.URL, 5, logger), nil, logger)
-	manager.queueCycleActive = true
-
-	manager.maybeCompleteQueueCycle(context.Background(), logger)
-	if !manager.queueCycleActive {
-		t.Fatal("queue cycle should remain active after failed queue_completed notification")
-	}
-
-	manager.maybeCompleteQueueCycle(context.Background(), logger)
-	if manager.queueCycleActive {
-		t.Fatal("queue cycle should clear after successful queue_completed notification")
-	}
-	if attempts != 2 {
-		t.Fatalf("queue_completed attempts = %d, want 2", attempts)
-	}
-}
-
-func TestQueueCompletionSuppressedWithoutStartedCycle(t *testing.T) {
-	var events []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		events = append(events, r.Header.Get("Title"))
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
-	if err != nil {
-		t.Fatalf("open queue: %v", err)
-	}
-	defer func() { _ = store.Close() }()
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	manager := New(store, notify.New(srv.URL, 5, logger), nil, logger)
-
-	item, _ := store.NewDisc("A", "fp1")
-	_ = store.MoveToStage(item, queue.StageCompleted)
-
-	manager.maybeCompleteQueueCycle(context.Background(), logger)
-	if len(events) != 0 {
-		t.Fatalf("unexpected queue notification(s): %v", events)
+	reason := notificationReason(errors.New(strings.Repeat("é", 600)))
+	if len([]rune(reason)) != 500 || !strings.HasSuffix(reason, "...") {
+		t.Fatalf("notificationReason() rune length = %d, suffix=%q", len([]rune(reason)), reason[len(reason)-3:])
 	}
 }
 

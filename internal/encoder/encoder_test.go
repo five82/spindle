@@ -195,7 +195,7 @@ func TestRippingActiveStates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	h := New(nil, nil)
+	h := New(nil)
 
 	active, err := h.rippingActive(sess)
 	if err != nil || !active {

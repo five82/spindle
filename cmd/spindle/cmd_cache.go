@@ -448,9 +448,13 @@ func newCacheProcessCmd() *cobra.Command {
 			}
 
 			displayItem := queue.Item{ID: item.ID, DiscTitle: item.DiscTitle, MetadataJSON: string(item.Metadata)}
-			notifier := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout, logger)
+			displayTitle := displayItem.DisplayTitle()
+			if entry.DiscNumber > 0 {
+				displayTitle += fmt.Sprintf(" - Disc %d", entry.DiscNumber)
+			}
+			notifier := notify.New(cfg.Notifications.NtfyTopic, cfg.Notifications.RequestTimeout)
 			_ = notify.SendLogged(context.Background(), notifier, logger, notify.EventItemQueued,
-				"Queued: "+displayItem.DisplayTitle(),
+				"Queued: "+displayTitle,
 				"Accepted for processing from rip cache.",
 				"item_id", item.ID,
 			)
