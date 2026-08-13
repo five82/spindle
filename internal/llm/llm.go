@@ -111,7 +111,7 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 		ResponseFormat: &responseFormat{Type: "json_object"},
 	}
 	if c.model == defaultModel {
-		reqBody.Reasoning = &reasoningConfig{Effort: "medium"}
+		reqBody.Reasoning = &reasoningConfig{Effort: "low"}
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)

@@ -86,8 +86,8 @@ func TestCompleteJSONSuccess(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if req.Reasoning == nil || req.Reasoning.Effort != "medium" {
-			t.Errorf("reasoning = %#v, want medium effort", req.Reasoning)
+		if req.Reasoning == nil || req.Reasoning.Effort != "low" {
+			t.Errorf("reasoning = %#v, want low effort", req.Reasoning)
 		}
 
 		resp := map[string]any{
