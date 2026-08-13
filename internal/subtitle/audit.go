@@ -18,8 +18,11 @@ import (
 // end-credits region is assumed to start, for both the LLM prompt hint and
 // the removal-cap guardrail.
 const (
-	creditsWindowSeconds      = 420.0
-	maxMusicBleedRemovalEdits = 5
+	creditsWindowSeconds        = 420.0
+	maxMusicBleedRemovalEdits   = 5
+	auditChunkCues              = 200
+	auditChunkOverlap           = 20
+	auditVerificationCandidates = 15
 )
 
 // creditsRegionStart returns when the end-credits region is assumed to
@@ -47,17 +50,20 @@ FLAG ONLY these categories:
 - hallucination: a short phrase like "Thank you.", "Thanks for watching.", "Subscribe." appearing repeatedly in isolation (large timestamp gaps around it, not part of a conversation)
 - credits_music: lyric cues in the end-credits region after all narrative dialogue has ended. The final scene's real dialogue often continues into and interleaves with the credits song: remove only lyric lines, never conversational exchanges between characters, even inside the end-credits region.
 - music_bleed: one or a few incidental background-song lyric cues transcribed as dialogue even though they have no narrative, comedic, thematic, or performance role. Non-diegetic placement alone is not enough. NEVER flag a recognizable or sustained song sequence, musical number, montage or action song, recurring theme, character singing, or lyrics that comment on the scene. When unsure, skip.
-- garbled: text that is clearly not real English or makes no sense in any context. If garbled text is mid-film speech, propose a replacement only when the correct wording is unambiguous; NEVER remove garbled speech cues.
+- garbled: text that is clearly not real English or is valid English but makes no sense in context. If garbled text is mid-film speech, propose a replacement only when the exact wording is established by nearby dialogue, repeated usage, or a firmly known title fact; NEVER remove garbled speech cues. A plausible reconstruction is not enough.
 - homophone: wrong word where surrounding text makes the correct word unambiguous (e.g. their/there, "would of" for "would have")
+- entity: a wrong or inconsistent person, place, organization, brand, or model name when the title identity, repeated usage, or nearby dialogue makes the correction unambiguous. Preserve former names, surnames, nicknames, jokes, and wordplay. Do not replace one plausible entity with another merely because the other person or place is relevant to the plot.
 - broken: empty cues, whitespace/punctuation-only cues, orphaned music symbols
 - repeated: adjacent cues with identical text and overlapping timestamps
 - encoding: mojibake / corrupted characters
 
-DO NOT flag: proper-noun spellings you cannot verify from context, grammar, punctuation style, capitalization, line breaks, rephrasing, timing, suspected mishearings where the correct word is not unambiguous, ambiguous short exclamations ("Oh!", "No!"), or intentional song lyrics. Correctly transcribed lyrics are real audio, not ASR errors; preserve opening and title songs, musical numbers, montage and action songs, and diegetic or plot-relevant singing.
+Review every cue in the supplied window. Check local meaning, entity consistency, contextually impossible phrases, hallucinations or music bleed, and broken or corrupted cues. You may use firmly established facts about the identified title, but do not guess.
+
+DO NOT flag: proper-noun spellings that the title identity, repeated usage, or nearby dialogue cannot verify, grammar, punctuation style, capitalization, line breaks, rephrasing, timing, suspected mishearings where the correct word is not unambiguous, ambiguous short exclamations ("Oh!", "No!"), or intentional song lyrics. Correctly transcribed lyrics are real audio, not ASR errors; preserve opening and title songs, musical numbers, montage and action songs, and diegetic or plot-relevant singing. Preserve unusual but possible dialogue, profanity, dialect, verbal stumbles, and incomplete sentences exactly. Never sanitize profanity or replace a valid word merely because another word fits the scene. Do not add meaning that is absent from the current text. Do not partially repair a phrase: if any part of the proposed replacement remains uncertain, skip the whole edit.
 
 Return JSON: {"edits": [{"index": <cue index>, "current_text": "<exact current text>", "action": "remove" | "replace", "replacement": "<new text if replace>", "category": "<category>", "reason": "<brief>", "confidence": "high" | "medium"}]}
 
-Return {"edits": []} if nothing qualifies. current_text must exactly match the cue text. List every affected cue as its own edit: when a run of consecutive cues qualifies (for example an end-credits song), emit one edit per cue in the run; never summarize a range in a single edit. Never emit a replace whose replacement equals the current text.`
+Return {"edits": []} if nothing qualifies. current_text must exactly match the cue text. List every affected cue as its own edit: when a run of consecutive cues qualifies (for example an end-credits song), emit one edit per cue in the run; never summarize a range in a single edit. Never emit a replace whose replacement equals the current text. Use confidence "high" only when the edit is safe to apply automatically; all other proposals will be discarded.`
 
 // AuditStats reports the outcome of the LLM display-subtitle audit.
 // Result "rejected" means the whole response was discarded by the removal-cap
@@ -86,6 +92,8 @@ type auditEdit struct {
 	Category    string `json:"category"`
 	Confidence  string `json:"confidence"` // "high" | "medium"
 	Reason      string `json:"reason"`
+	WindowFirst int    `json:"-"`
+	WindowLast  int    `json:"-"`
 }
 
 // auditResponse is the JSON response schema requested from the LLM.
@@ -102,6 +110,11 @@ type resolvedEdit struct {
 	Replacement string // resolved, wrapped replacement text; only for "replace"
 	Category    string
 	Reason      string
+}
+
+type droppedAuditEdit struct {
+	Edit   auditEdit
+	Reason string
 }
 
 // auditDisplaySRT audits a display SRT file with the LLM and rewrites it in
@@ -129,34 +142,80 @@ func auditDisplaySRT(ctx context.Context, client *llm.Client, logger *slog.Logge
 		return AuditStats{Result: "skipped", FailureReason: "no cues found"}
 	}
 
-	userPrompt := buildAuditUserPrompt(cues, params)
-
-	var resp auditResponse
-	if err := client.CompleteJSON(ctx, subtitleAuditSystemPrompt, userPrompt, &resp); err != nil {
-		warnAuditSkipped(logger, "LLM subtitle audit request failed", "llm api error", err, params.EpisodeKey)
-		return AuditStats{Result: "failed", FailureReason: err.Error()}
+	stride := auditChunkCues - auditChunkOverlap
+	chunkCount := 1
+	if len(cues) > auditChunkCues {
+		chunkCount += (len(cues) - auditChunkCues + stride - 1) / stride
 	}
 
-	proposed := len(resp.Edits)
-	resolved, dropped := resolveAuditEdits(cues, resp.Edits)
-	resolved, preserved := guardMusicBleedRemovals(resolved)
-	if preserved > 0 {
-		dropped += preserved
-		logger.Info("subtitle audit music bleed removals preserved",
-			"decision_type", "subtitle_audit_music_bleed",
-			"decision_result", "preserved",
-			"decision_reason", "removals exceed conservative cap",
+	var proposedEdits []auditEdit
+	for chunkNumber, start := 1, 0; chunkNumber <= chunkCount; chunkNumber, start = chunkNumber+1, start+stride {
+		end := start + auditChunkCues
+		if end > len(cues) {
+			end = len(cues)
+		}
+		logger.Debug("subtitle audit chunk started",
+			"event_type", "subtitle_audit_chunk_start",
 			"episode_key", params.EpisodeKey,
-			"removals", preserved,
-			"cap", maxMusicBleedRemovalEdits,
+			"chunk_number", chunkNumber,
+			"chunk_count", chunkCount,
+			"first_cue", cues[start].Index,
+			"last_cue", cues[end-1].Index,
 		)
+
+		var resp auditResponse
+		userPrompt := buildAuditUserPrompt(cues[start:end], params, chunkNumber, chunkCount, len(cues))
+		if err := client.CompleteJSON(ctx, subtitleAuditSystemPrompt, userPrompt, &resp); err != nil {
+			err = fmt.Errorf("chunk %d/%d: %w", chunkNumber, chunkCount, err)
+			warnAuditSkipped(logger, "LLM subtitle audit request failed", "llm api error", err, params.EpisodeKey)
+			return AuditStats{Result: "failed", FailureReason: err.Error()}
+		}
+		for _, edit := range resp.Edits {
+			edit.WindowFirst = cues[start].Index
+			edit.WindowLast = cues[end-1].Index
+			proposedEdits = append(proposedEdits, edit)
+		}
+	}
+
+	proposed := len(proposedEdits)
+	proposedEdits, deduplicated, conflictDrops := deduplicateAuditEdits(proposedEdits)
+	resolved, resolutionDrops := resolveAuditEdits(cues, proposedEdits)
+	for _, d := range append(conflictDrops, resolutionDrops...) {
+		logDroppedAuditEdit(logger, params.EpisodeKey, d)
+	}
+	dropped := len(conflictDrops) + len(resolutionDrops)
+
+	var musicDrops []resolvedEdit
+	resolved, musicDrops = guardMusicBleedRemovals(resolved)
+	for _, r := range musicDrops {
+		logDroppedResolvedEdit(logger, params.EpisodeKey, cues[r.CueIndex], r, "music bleed removals exceed conservative cap")
+	}
+	dropped += len(musicDrops)
+
+	verified := 0
+	if len(resolved) > 0 {
+		var verificationDrops []resolvedEdit
+		resolved, verificationDrops, err = verifyAuditEdits(ctx, client, cues, resolved, params)
+		if err != nil {
+			err = fmt.Errorf("verification: %w", err)
+			warnAuditSkipped(logger, "LLM subtitle audit verification failed", "llm api error", err, params.EpisodeKey)
+			return AuditStats{Result: "failed", FailureReason: err.Error()}
+		}
+		verified = len(resolved)
+		for _, r := range verificationDrops {
+			logDroppedResolvedEdit(logger, params.EpisodeKey, cues[r.CueIndex], r, "not confirmed by independent verification")
+		}
+		dropped += len(verificationDrops)
 	}
 
 	if len(resolved) == 0 {
 		logger.Info("subtitle audit complete",
 			"event_type", "subtitle_audit_complete",
 			"episode_key", params.EpisodeKey,
+			"chunks", chunkCount,
 			"proposed", proposed,
+			"deduplicated", deduplicated,
+			"verified", verified,
 			"applied", 0,
 			"dropped", dropped,
 		)
@@ -164,14 +223,18 @@ func auditDisplaySRT(ctx context.Context, client *llm.Client, logger *slog.Logge
 	}
 
 	if exceeded, nonCreditsRemovals, cap := auditRemovalCap(cues, resolved, params.VideoSeconds); exceeded {
+		for _, r := range resolved {
+			logDroppedResolvedEdit(logger, params.EpisodeKey, cues[r.CueIndex], r, auditRemovalCapFailureReason)
+		}
 		logger.Warn("subtitle audit rejected",
 			"event_type", "subtitle_audit_rejected",
 			"error_hint", fmt.Sprintf("non_credits_removals=%d exceeds cap=%d", nonCreditsRemovals, cap),
 			"impact", "subtitle not audited; WhisperX errors may remain",
 			"episode_key", params.EpisodeKey,
+			"chunks", chunkCount,
 			"proposed", proposed,
 		)
-		return AuditStats{Result: "rejected", FailureReason: auditRemovalCapFailureReason}
+		return AuditStats{Result: "rejected", Dropped: dropped + len(resolved), FailureReason: auditRemovalCapFailureReason}
 	}
 
 	for _, r := range resolved {
@@ -199,7 +262,10 @@ func auditDisplaySRT(ctx context.Context, client *llm.Client, logger *slog.Logge
 	logger.Info("subtitle audit complete",
 		"event_type", "subtitle_audit_complete",
 		"episode_key", params.EpisodeKey,
+		"chunks", chunkCount,
 		"proposed", proposed,
+		"deduplicated", deduplicated,
+		"verified", verified,
 		"applied", len(resolved),
 		"dropped", dropped,
 	)
@@ -219,10 +285,88 @@ func warnAuditSkipped(logger *slog.Logger, msg, hint string, err error, episodeK
 	)
 }
 
-// resolveAuditEdits matches each proposed edit to a cue, applies dedupe and
-// validity rules, and returns the edits that survive. dropped counts every
-// edit that did not survive resolution.
-func resolveAuditEdits(cues []srtutil.Cue, edits []auditEdit) ([]resolvedEdit, int) {
+// deduplicateAuditEdits collapses identical overlap proposals and rejects all
+// proposals for a cue when overlapping chunks disagree about the edit.
+func deduplicateAuditEdits(edits []auditEdit) (kept []auditEdit, deduplicated int, dropped []droppedAuditEdit) {
+	type candidate struct {
+		edit       auditEdit
+		conflicted bool
+	}
+	var candidates []candidate
+	byTarget := make(map[string]int, len(edits))
+
+	for _, e := range edits {
+		target := fmt.Sprintf("%d\x00%s", e.Index, normalizeAuditText(e.CurrentText))
+		position, exists := byTarget[target]
+		if !exists {
+			byTarget[target] = len(candidates)
+			candidates = append(candidates, candidate{edit: e})
+			continue
+		}
+
+		candidate := &candidates[position]
+		if candidate.conflicted {
+			dropped = append(dropped, droppedAuditEdit{Edit: e, Reason: "conflicting overlap proposals"})
+			continue
+		}
+		if equivalentAuditEdits(candidate.edit, e) {
+			deduplicated++
+			continue
+		}
+		candidate.conflicted = true
+		dropped = append(dropped,
+			droppedAuditEdit{Edit: candidate.edit, Reason: "conflicting overlap proposals"},
+			droppedAuditEdit{Edit: e, Reason: "conflicting overlap proposals"},
+		)
+	}
+
+	for _, candidate := range candidates {
+		if !candidate.conflicted {
+			kept = append(kept, candidate.edit)
+		}
+	}
+	return kept, deduplicated, dropped
+}
+
+func equivalentAuditEdits(a, b auditEdit) bool {
+	return a.Action == b.Action &&
+		normalizeAuditText(a.Replacement) == normalizeAuditText(b.Replacement) &&
+		a.Category == b.Category &&
+		a.Confidence == b.Confidence
+}
+
+func logDroppedAuditEdit(logger *slog.Logger, episodeKey string, dropped droppedAuditEdit) {
+	logger.Info("subtitle audit edit dropped",
+		"decision_type", "subtitle_audit_edit",
+		"decision_result", "dropped",
+		"decision_reason", dropped.Reason,
+		"episode_key", episodeKey,
+		"cue_index", dropped.Edit.Index,
+		"cue_text", dropped.Edit.CurrentText,
+		"action", dropped.Edit.Action,
+		"replacement", dropped.Edit.Replacement,
+		"category", dropped.Edit.Category,
+		"confidence", dropped.Edit.Confidence,
+	)
+}
+
+func logDroppedResolvedEdit(logger *slog.Logger, episodeKey string, cue srtutil.Cue, edit resolvedEdit, reason string) {
+	logger.Info("subtitle audit edit dropped",
+		"decision_type", "subtitle_audit_edit",
+		"decision_result", "dropped",
+		"decision_reason", reason,
+		"episode_key", episodeKey,
+		"cue_index", cue.Index,
+		"cue_text", cue.Text,
+		"action", edit.Action,
+		"replacement", edit.Replacement,
+		"category", edit.Category,
+	)
+}
+
+// resolveAuditEdits matches each proposed edit to a cue and applies validity
+// rules, returning both surviving edits and exact reasons for dropped ones.
+func resolveAuditEdits(cues []srtutil.Cue, edits []auditEdit) ([]resolvedEdit, []droppedAuditEdit) {
 	norm := make([]string, len(cues))
 	for i, c := range cues {
 		norm[i] = normalizeAuditText(c.Text)
@@ -237,12 +381,16 @@ func resolveAuditEdits(cues []srtutil.Cue, edits []auditEdit) ([]resolvedEdit, i
 	}
 
 	var resolved []resolvedEdit
-	dropped := 0
+	var dropped []droppedAuditEdit
 	used := make(map[int]bool, len(edits))
 
 	for _, e := range edits {
 		if e.Action != "remove" && e.Action != "replace" {
-			dropped++
+			dropped = append(dropped, droppedAuditEdit{Edit: e, Reason: "invalid action"})
+			continue
+		}
+		if e.Confidence != "high" {
+			dropped = append(dropped, droppedAuditEdit{Edit: e, Reason: "confidence is not high"})
 			continue
 		}
 
@@ -261,11 +409,15 @@ func resolveAuditEdits(cues []srtutil.Cue, edits []auditEdit) ([]resolvedEdit, i
 			}
 		}
 		if pos == -1 {
-			dropped++
+			dropped = append(dropped, droppedAuditEdit{Edit: e, Reason: "cue text or index did not resolve uniquely"})
+			continue
+		}
+		if e.WindowFirst > 0 && (cues[pos].Index < e.WindowFirst || cues[pos].Index > e.WindowLast) {
+			dropped = append(dropped, droppedAuditEdit{Edit: e, Reason: "resolved cue is outside the audited window"})
 			continue
 		}
 		if used[pos] {
-			dropped++
+			dropped = append(dropped, droppedAuditEdit{Edit: e, Reason: "duplicate proposal for resolved cue"})
 			continue
 		}
 
@@ -273,12 +425,12 @@ func resolveAuditEdits(cues []srtutil.Cue, edits []auditEdit) ([]resolvedEdit, i
 			// Models echo the prompt's literal \n cue serialization back in
 			// replacement text; normalize it away before it reaches the SRT.
 			replacement := normalizeAuditText(e.Replacement)
-			if e.Confidence != "high" || replacement == "" {
-				dropped++
+			if replacement == "" {
+				dropped = append(dropped, droppedAuditEdit{Edit: e, Reason: "blank replacement"})
 				continue
 			}
 			if replacement == normCurrent {
-				dropped++
+				dropped = append(dropped, droppedAuditEdit{Edit: e, Reason: "replacement is unchanged"})
 				continue
 			}
 			wrapped, _ := wrapDisplayCueText(replacement)
@@ -303,9 +455,89 @@ func resolveAuditEdits(cues []srtutil.Cue, edits []auditEdit) ([]resolvedEdit, i
 	return resolved, dropped
 }
 
+const subtitleAuditVerificationSystemPrompt = `Independently audit only the marked target cues from an English WhisperX subtitle. You are not being shown the first pass's proposed edits. A false correction is much worse than a missed error.
+
+Return an edit only when BOTH are certain:
+1. The current text is an actual ASR error, not merely unusual, awkward, profane, dialectal, incomplete, or contextually surprising dialogue.
+2. The exact replacement is established by the supplied context, repeated usage, or a firmly known fact about the identified title. A plausible reconstruction is not enough.
+
+Do not capitalize or restyle text, paraphrase, add or remove meaning, sanitize profanity, substitute a plot-relevant person/place for another plausible entity, overwrite a former name/surname/nickname/joke/wordplay, or partially repair a phrase. Preserve valid words even when another word might fit the scene better. Never remove mid-film speech merely because it is garbled.
+
+Return JSON: {"edits": [{"index": <global cue index>, "current_text": "<exact current text>", "action": "remove" | "replace", "replacement": "<new text if replace>", "category": "<category>", "reason": "<brief>", "confidence": "high" | "medium"}]}. Return {"edits": []} if no marked target has an independently certain correction. Do not edit unmarked context cues.`
+
+// verifyAuditEdits performs a blind global safety pass. An edit survives only
+// when the second pass independently returns the same action and replacement.
+func verifyAuditEdits(ctx context.Context, client *llm.Client, cues []srtutil.Cue, resolved []resolvedEdit, params auditParams) (kept, dropped []resolvedEdit, err error) {
+	for start := 0; start < len(resolved); start += auditVerificationCandidates {
+		end := start + auditVerificationCandidates
+		if end > len(resolved) {
+			end = len(resolved)
+		}
+		batch := resolved[start:end]
+		var resp auditResponse
+		if err := client.CompleteJSON(ctx, subtitleAuditVerificationSystemPrompt, buildAuditVerificationPrompt(cues, resolved, batch, params), &resp); err != nil {
+			return nil, nil, err
+		}
+
+		byIndex := make(map[int][]auditEdit, len(resp.Edits))
+		for _, edit := range resp.Edits {
+			byIndex[edit.Index] = append(byIndex[edit.Index], edit)
+		}
+		for _, candidate := range batch {
+			cue := cues[candidate.CueIndex]
+			confirmed := false
+			verification := byIndex[cue.Index]
+			if len(verification) == 1 {
+				edit := verification[0]
+				confirmed = edit.Confidence == "high" &&
+					normalizeAuditText(edit.CurrentText) == normalizeAuditText(cue.Text) &&
+					edit.Action == candidate.Action &&
+					(candidate.Action == "remove" || normalizeAuditText(edit.Replacement) == normalizeAuditText(candidate.Replacement))
+			}
+			if confirmed {
+				kept = append(kept, candidate)
+			} else {
+				dropped = append(dropped, candidate)
+			}
+		}
+	}
+	return kept, dropped, nil
+}
+
+// buildAuditVerificationPrompt hides the first pass's proposed actions and
+// replacements. The complete target list supports global consistency while a
+// small detailed batch keeps the independent review focused.
+func buildAuditVerificationPrompt(cues []srtutil.Cue, all, batch []resolvedEdit, params auditParams) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Blind final audit for %s. Independently review the %d detailed target cues. Unmarked cues are context only.\n\nALL TARGET CUES FOR GLOBAL CONSISTENCY:\n", params.MediaContext, len(batch))
+	for _, r := range all {
+		fmt.Fprintf(&b, "%d|%s\n", cues[r.CueIndex].Index, strings.ReplaceAll(cues[r.CueIndex].Text, "\n", `\n`))
+	}
+	b.WriteString("\nDETAILED TARGETS:\n")
+	for i, r := range batch {
+		fmt.Fprintf(&b, "\nTarget %d:\n", i+1)
+		first := r.CueIndex - 2
+		if first < 0 {
+			first = 0
+		}
+		last := r.CueIndex + 2
+		if last >= len(cues) {
+			last = len(cues) - 1
+		}
+		for pos := first; pos <= last; pos++ {
+			marker := " "
+			if pos == r.CueIndex {
+				marker = "*"
+			}
+			fmt.Fprintf(&b, "%s%d|%s\n", marker, cues[pos].Index, strings.ReplaceAll(cues[pos].Text, "\n", `\n`))
+		}
+	}
+	return b.String()
+}
+
 // guardMusicBleedRemovals preserves all music-bleed cues when the model
 // proposes enough removals to indicate a song rather than incidental leakage.
-func guardMusicBleedRemovals(resolved []resolvedEdit) ([]resolvedEdit, int) {
+func guardMusicBleedRemovals(resolved []resolvedEdit) (kept, dropped []resolvedEdit) {
 	count := 0
 	for _, r := range resolved {
 		if r.Action == "remove" && r.Category == "music_bleed" {
@@ -313,15 +545,16 @@ func guardMusicBleedRemovals(resolved []resolvedEdit) ([]resolvedEdit, int) {
 		}
 	}
 	if count <= maxMusicBleedRemovalEdits {
-		return resolved, 0
+		return resolved, nil
 	}
-	kept := resolved[:0]
 	for _, r := range resolved {
-		if r.Action != "remove" || r.Category != "music_bleed" {
+		if r.Action == "remove" && r.Category == "music_bleed" {
+			dropped = append(dropped, r)
+		} else {
 			kept = append(kept, r)
 		}
 	}
-	return kept, count
+	return kept, dropped
 }
 
 // applyResolvedEdits builds the final cue list: "remove" edits drop their
@@ -381,8 +614,8 @@ func normalizeAuditText(s string) string {
 	return normalizeCueWhitespace(strings.ReplaceAll(s, `\n`, " "))
 }
 
-// buildAuditUserPrompt renders the cue list and media context for the LLM.
-func buildAuditUserPrompt(cues []srtutil.Cue, params auditParams) string {
+// buildAuditUserPrompt renders one focused cue window with global indexes.
+func buildAuditUserPrompt(cues []srtutil.Cue, params auditParams, chunkNumber, chunkCount, totalCues int) string {
 	var b strings.Builder
 	b.WriteString("Subtitle file for ")
 	b.WriteString(params.MediaContext)
@@ -391,7 +624,9 @@ func buildAuditUserPrompt(cues []srtutil.Cue, params auditParams) string {
 		fmt.Fprintf(&b, " Video duration: %s. Cues starting after %s are likely in the end-credits region.",
 			formatHMS(params.VideoSeconds), formatHMS(creditsRegionStart(params.VideoSeconds)))
 	}
-	b.WriteString("\n\nSUBTITLE CUES (index|start-->end|text, cue line breaks shown as \\n):\n")
+	fmt.Fprintf(&b, " Audit window %d/%d contains global cues %d-%d of %d. Review every supplied cue; overlap with adjacent windows is intentional.",
+		chunkNumber, chunkCount, cues[0].Index, cues[len(cues)-1].Index, totalCues)
+	b.WriteString("\n\nSUBTITLE CUES (global index|start-->end|text, cue line breaks shown as \\n):\n")
 	for i, c := range cues {
 		if i > 0 {
 			b.WriteString("\n")

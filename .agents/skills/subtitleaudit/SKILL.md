@@ -17,7 +17,7 @@ Review and correct obvious WhisperX transcription errors in the primary embedded
 
 This skill extracts the primary (non-forced) display subtitle from an MKV file, reviews it for obvious WhisperX transcription/content errors, presents the planned corrections, applies them automatically, and muxes the corrected subtitle back into the MKV.
 
-The pipeline now runs this audit automatically during subtitle generation (`internal/subtitle/audit.go`, see ADR 0003), before the SRT is muxed into the MKV. This skill remains for post-hoc auditing of already-organized library files (produced before the pipeline audit existed, or otherwise outside the pipeline) and for items the pipeline audit rejected or flagged for review.
+The pipeline runs a focused, overlapping-window audit automatically during subtitle generation (`internal/subtitle/audit.go`) before the SRT is muxed into the MKV. Proposed pipeline edits then face a blind second pass in small batches: the verifier sees the original target cues and global target ledger, but not the first pass's replacements, and only exact independent agreement is applied. This skill remains for post-hoc auditing of already-organized library files, for items the pipeline audit rejected or flagged for review, and for reference-assisted investigation of title-specific errors that an unattended audit may miss.
 
 This skill is for title-specific cleanup after the generic subtitle pipeline has already handled wrapping, splitting, retiming, and validation. It edits only the derived display subtitle track that viewers see. Do not edit or replace canonical WhisperX transcript artifacts (item-scoped under the queue item's staging `transcripts/` directory while staging exists).
 
@@ -86,15 +86,24 @@ OpenSubtitles is a comparison source only. Never replace the embedded subtitle w
    - Last cue: <timestamp>
    - Cue density: <N> cues/min
    - QC observations: <N> high-CPS cues, <N> short-duration cues, <N> overlong-line cues
-   - Estimated credits region: after ~<timestamp> (last ~5-8 min of video)
+   - Estimated credits region: after ~<timestamp>
    ```
-   The credits region estimate is the video duration minus ~5-8 minutes. Cues in this region that aren't clearly dialogue deserve extra scrutiny. QC observations guide review only; do not manually polish timing or line wrapping unless the text itself is clearly junk.
+   Match Spindle's credits estimate: subtract the smaller of 7 minutes and 10% of the video duration. Cues in this region that aren't clearly dialogue deserve extra scrutiny. QC observations guide review only; do not manually polish timing or line wrapping unless the text itself is clearly junk.
 
 ### Phase 2: Review for Transcription Errors
 
-**Reading large SRT files:** SRT files for feature-length films are typically too large to read in a single pass. Read the file in chunks (2000 lines at a time) to cover the full file. Do not skip sections.
+**Reading large SRT files:** Review at most **200 cues per window**, with **20 cues overlapping** the previous window. Retain the original global cue numbers and timestamps. Record the global cue range for every window and verify that the ranges cover every cue without gaps. Do not use line counts and do not skip sections.
 
-Analyze the file for **obvious** WhisperX transcription/content errors. Err heavily on the side of caution -- false positives (incorrect "corrections") are worse than missed errors.
+For every window, check each supplied cue for:
+1. local garbling and homophones
+2. entity consistency
+3. valid-English phrases that are contextually impossible
+4. hallucinations, music bleed, and credits lyrics
+5. broken or corrupted cues
+
+Collect findings across all windows before applying anything. Deduplicate identical findings from overlap regions. If two windows suggest different edits for the same cue, treat the cue as uncertain and do not edit it.
+
+Analyze the file for **obvious** WhisperX transcription/content errors. Err heavily on the side of caution -- false positives (incorrect "corrections") are worse than missed errors. Apply only high-confidence changes.
 
 Focus on residual title-specific problems that the generic pipeline cannot safely fix. Do not use this skill to re-litigate generic subtitle formatting behavior. Netflix/general timed-text guidance is background only; do not perform broad style normalization, paraphrasing, grammar cleanup, number/date style edits, punctuation preferences, or capitalization changes unless the cue is clearly corrupted or nonsensical.
 
@@ -156,8 +165,9 @@ There is no direct episode-ID equivalent for movies. Only use OpenSubtitles as a
 | Credits music/lyrics | Obvious WhisperX music bleed after the final scene's dialogue. Use the estimated credits region from Phase 1 to identify these, but do not automatically remove all lyrics. Remove only lyric runs that local context makes clearly non-dialogue and non-plot. | Cues after 01:44:00 in a 01:51:00 movie containing unrelated verse/chorus lyrics after all narrative dialogue has ended |
 | Background music bleed | Soundtrack lyrics incorrectly transcribed as dialogue mid-film. Telltale signs: poetic/lyrical phrasing that doesn't fit the scene's conversation, multiple consecutive cues forming verse/chorus patterns, cues during montages or transitions. Be careful: dialogue may be interleaved with music cues in the same scene. Preserve diegetic singing, on-screen singing, musicals, performances, karaoke, music documentaries, quoted lyrics, and plot-relevant lyrics. When unsure, skip. | "He's a goat, he's a god, he's a man, he's a guru" from a Nick Cave song playing on a car stereo |
 | Misattributed sound effects | Non-dialogue sounds transcribed as if they were speech. Obvious cases only: clearly non-verbal sounds rendered as words. | "BOOM!" transcribed as dialogue when it's a sound effect |
-| Garbled nonsense | Words/phrases that are clearly not English or make no sense in context | "the flibberty jibbet of cromulence" when context makes no sense |
-| Obvious homophones | Wrong word where audio context makes the correct word unambiguous | "their" vs "there" vs "they're" when sentence grammar makes it clear |
+| Garbled or contextually impossible speech | Non-English nonsense or valid-English words that make no sense in the surrounding dialogue | "leaving a tags-based plank" when the established subject is a vehicle registration form |
+| Obvious homophones | Wrong word where surrounding dialogue makes the correct word unambiguous | "their" vs "there" vs "they're" when sentence grammar makes it clear |
+| Entity errors | Wrong or inconsistent people, places, organizations, brands, or model names when title identity, repeated usage, context, or a reliable reference makes the correction unambiguous | A one-letter corruption of the movie title used as its location |
 | Broken cues | Empty cues, cues with only whitespace, or cues with only punctuation | A cue containing just "..." or " " |
 | Encoding artifacts | Mojibake or corrupted characters | "donâ€™t" instead of "don't" |
 | Repeated cues | Adjacent cues with identical or near-identical text and overlapping timestamps | Same line appearing twice in a row |
@@ -167,7 +177,7 @@ There is no direct episode-ID equivalent for movies. Only use OpenSubtitles as a
 
 | Skip | Why |
 |------|-----|
-| Proper noun spelling | WhisperX may have the correct uncommon spelling; we can't verify without the script |
+| Unverified proper noun spelling | Do not guess uncommon spellings. Correct only when title identity, repeated usage, nearby dialogue, or a reliable comparison source makes the answer unambiguous. |
 | Grammar "corrections" | The dialogue may be intentionally ungrammatical (dialect, character voice) |
 | Punctuation style | Comma placement, semicolons vs periods -- these are style choices |
 | Broad style normalization | Netflix/general timed-text style rules are not a license to rewrite otherwise valid cues |
@@ -179,13 +189,27 @@ There is no direct episode-ID equivalent for movies. Only use OpenSubtitles as a
 | Cue splitting / merging for readability | Generic segmentation trade-offs belong in code, not title-specific manual edits |
 | CPS / duration / retiming tweaks | Unless the text itself is clearly junk, timing polish should stay in the pipeline |
 | Generic subtitle mechanics | Do not manually chase issues that should be fixed once in code for all titles |
-| Suspected mishearings | Unless the correct word is unambiguous from surrounding text, don't guess |
+| Suspected mishearings | Unless the correction is unambiguous from surrounding text, title identity, repeated usage, or reliable comparison evidence, don't guess |
 | Diegetic singing / plot-relevant lyrics | Characters singing on-screen, musical/performance/karaoke/music-documentary content, quoted lyrics, and plot-relevant songs are valid content and should stay |
 | Ambiguous exclamations | Short cues like "Oh!" or "No!" during dialogue scenes are likely real speech |
 
-### Phase 3: Present Proposed Edits
+### Phase 3: Global Consistency Sweep
 
-Present findings in this format:
+After all focused windows have been reviewed and before presenting edits:
+
+1. Collect every suspicious person, place, organization, brand, and model name found during the window review.
+2. Search the complete extracted SRT for every occurrence and plausible spelling variant.
+3. Compare variants against the known title/year, repeated usage, and nearby dialogue.
+4. Use local Spindle reference subtitles first when confirmation would materially improve confidence. Use the OpenSubtitles fallback under the policy above only when local evidence is insufficient.
+5. Apply a recurring correction consistently only when the evidence is unambiguous. List every affected global cue number; do not silently replace text across the file.
+6. Search globally for repeated isolated short phrases so hallucinations split across distant windows are still considered together.
+7. Challenge every proposed replacement without assuming it is right: reject plausible reconstructions, partial repairs, plot-based entity substitutions, sanitized profanity, and edits whose exact wording is not independently supported.
+
+This sweep is an evidence-gathering pass, not permission to normalize style or guess spellings.
+
+### Phase 4: Present Proposed Edits
+
+Present the deduplicated, globally reconciled findings in this format:
 
 ```
 ## Subtitle Audit: <filename>
@@ -214,11 +238,11 @@ Found <N> issues (<M> total cues affected):
 **Batching:** Consecutive cues with the same error type (e.g., a run of credits lyrics or a cluster of hallucinations) should be batched into a single numbered item listing the cue range. This keeps the report readable.
 
 **After presenting**, continue automatically:
-- If no issues were found, report that no changes are needed and stop.
+- If no issues were found, report "No high-confidence corrections found" and stop. Do not claim that the subtitle is semantically validated.
 - If issues were found, apply every proposed edit without waiting for user confirmation.
 - Keep the report concise but explicit so the user can see exactly what changed.
 
-### Phase 4: Apply Edits
+### Phase 5: Apply Edits
 
 1. Read the SRT file from `/tmp/subtitleaudit_<basename>.srt`
 2. Apply all proposed edits:
@@ -228,7 +252,7 @@ Found <N> issues (<M> total cues affected):
 4. Write the edited file to `/tmp/subtitleaudit_<basename>_edited.srt`
 5. Show a summary: "Applied N edits (M cues removed, K cues modified). Ready to mux back into MKV."
 
-### Phase 5: Mux Edited Subtitle Back into MKV
+### Phase 6: Mux Edited Subtitle Back into MKV
 
 1. **Reconstruct all subtitle tracks** for muxing. The goal is to replace ONLY the primary subtitle while preserving all other subtitle tracks exactly as they were.
 
