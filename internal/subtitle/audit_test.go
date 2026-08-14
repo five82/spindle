@@ -204,6 +204,21 @@ func TestDeduplicateAuditEdits(t *testing.T) {
 			t.Fatalf("unexpected conflict reason: %+v", drop)
 		}
 	}
+
+	sameReplacementDifferentCategory := base
+	sameReplacementDifferentCategory.Category = "garbled"
+	kept, duplicates, dropped = deduplicateAuditEdits([]auditEdit{base, sameReplacementDifferentCategory})
+	if len(kept) != 1 || duplicates != 1 || len(dropped) != 0 {
+		t.Fatalf("same replacement with telemetry-only category difference: kept=%+v duplicates=%d dropped=%+v", kept, duplicates, dropped)
+	}
+
+	remove := auditEdit{Index: 10, CurrentText: ".", Action: "remove", Category: "broken", Confidence: "high"}
+	musicRemoval := remove
+	musicRemoval.Category = "music_bleed"
+	kept, duplicates, dropped = deduplicateAuditEdits([]auditEdit{remove, musicRemoval})
+	if len(kept) != 0 || duplicates != 0 || len(dropped) != 2 {
+		t.Fatalf("removal category conflict must be preserved: kept=%+v duplicates=%d dropped=%+v", kept, duplicates, dropped)
+	}
 }
 
 func TestGuardMusicBleedRemovals(t *testing.T) {
@@ -453,12 +468,19 @@ func TestAuditPromptsIncludeUntimedReferenceLookup(t *testing.T) {
 	}
 
 	resolved := []resolvedEdit{{CueIndex: 0, Action: "replace", Replacement: "General Kenobi."}}
-	verification := buildAuditVerificationPrompt(cues, resolved, resolved, params)
-	if !strings.Contains(verification, "Reference transcript lookup (untimed") || !strings.Contains(verification, "Commander T'Pol") {
-		t.Fatalf("verification prompt lacks reference transcript: %s", verification)
+	blindVerification := buildAuditVerificationPrompt(cues, resolved, resolved, params)
+	if !strings.Contains(blindVerification, "Reference transcript lookup (untimed") || !strings.Contains(blindVerification, "Commander T'Pol") {
+		t.Fatalf("blind verification prompt lacks reference transcript: %s", blindVerification)
 	}
-	if strings.Contains(verification, "General Kenobi") {
-		t.Fatalf("blind verifier saw proposed replacement: %s", verification)
+	if strings.Contains(blindVerification, "General Kenobi") {
+		t.Fatalf("blind verifier saw proposed replacement: %s", blindVerification)
+	}
+
+	referenceVerification := buildReferenceAuditVerificationPrompt(cues, resolved, resolved, params)
+	for _, want := range []string{"one explicit verdict", "Proposed replacement: General Kenobi.", "Commander T'Pol"} {
+		if !strings.Contains(referenceVerification, want) {
+			t.Fatalf("reference verification prompt lacks %q: %s", want, referenceVerification)
+		}
 	}
 }
 
@@ -617,6 +639,57 @@ func TestAuditDisplaySRTVerificationDropsUnconfirmedEdits(t *testing.T) {
 	}
 	if !bytes.Equal(after, original) {
 		t.Fatal("rejected verification candidates modified the SRT")
+	}
+}
+
+func TestAuditDisplaySRTReferenceVerificationUsesExplicitVerdicts(t *testing.T) {
+	cues := []srtutil.Cue{
+		{Index: 1, Start: 1, End: 2, Text: "I'm Jerry Lundegarden."},
+		{Index: 2, Start: 3, End: 4, Text: "Margie Olmsted?"},
+	}
+	path := writeSRTFile(t, cues)
+	proposals := auditResponse{Edits: []auditEdit{
+		{Index: 1, CurrentText: cues[0].Text, Action: "replace", Replacement: "I'm Jerry Lundegaard.", Category: "entity", Confidence: "high", Reason: "reference spelling"},
+		{Index: 2, CurrentText: cues[1].Text, Action: "replace", Replacement: "Marge Olmstead?", Category: "entity", Confidence: "high", Reason: "reference name"},
+	}}
+	proposalJSON, _ := json.Marshal(proposals)
+	requests := 0
+	var verificationPrompt string
+	client := newTestLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		prompt := requestUserPrompt(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(prompt, "Reference-assisted final review") {
+			verificationPrompt = prompt
+			response, _ := json.Marshal(auditVerificationResponse{Verdicts: []auditVerificationVerdict{
+				{Index: 1, Accept: true, Reason: "reference confirms Lundegaard"},
+				{Index: 2, Accept: false, Reason: "reference says Margie, not Marge"},
+			}})
+			_, _ = w.Write(chatResponseBody(string(response)))
+			return
+		}
+		_, _ = w.Write(chatResponseBody(string(proposalJSON)))
+	})
+
+	stats := auditDisplaySRT(context.Background(), client, nil, auditParams{
+		DisplayPath:         path,
+		MediaContext:        `the movie "Fargo" (1996)`,
+		ReferenceTranscript: "I'm Jerry Lundegaard. Margie Olmstead?",
+	})
+	if stats.Result != "applied" || stats.Applied != 1 || stats.Dropped != 1 || requests != 2 {
+		t.Fatalf("unexpected reference verification result: stats=%+v requests=%d", stats, requests)
+	}
+	for _, want := range []string{"Proposed replacement: I'm Jerry Lundegaard.", "Proposed replacement: Marge Olmstead?", "Return one explicit verdict"} {
+		if !strings.Contains(verificationPrompt, want) {
+			t.Errorf("verification prompt missing %q: %s", want, verificationPrompt)
+		}
+	}
+	got, err := srtutil.ParseFile(path)
+	if err != nil {
+		t.Fatalf("parse audited SRT: %v", err)
+	}
+	if got[0].Text != "I'm Jerry Lundegaard." || got[1].Text != "Margie Olmsted?" {
+		t.Fatalf("unexpected audited cues: %+v", got)
 	}
 }
 

@@ -60,7 +60,7 @@ FLAG ONLY these categories:
 
 Review every cue in the supplied window. Check local meaning, entity consistency, contextually impossible phrases, hallucinations or music bleed, and broken or corrupted cues. You may use firmly established facts about the identified title, but do not guess.
 
-You may also receive a best-effort excerpt from an untimed OpenSubtitles reference transcript. Use it to look up suspicious wording, names, and terminology. It may come from another release and may contain paraphrasing, censorship, SDH text, or its own errors. Ignore its timestamps, cue boundaries, punctuation, capitalization, formatting, and sound descriptions. When the excerpt clearly contains the same exchange, it may establish the exact replacement. If it does not contain the exchange or is questionable, audit exactly as if no reference were supplied. Never change or remove target text merely because it is absent from the reference.
+You may also receive a best-effort excerpt from an untimed OpenSubtitles reference transcript. Use it to look up suspicious wording, names, and terminology. It may come from another release and may contain paraphrasing, censorship, SDH text, or its own errors. Ignore its timestamps, cue boundaries, punctuation, capitalization, formatting, and sound descriptions. When the excerpt clearly contains the same exchange, compare every target cue in that exchange against it; do not wait for a cue to look nonsensical first. It may establish the exact replacement for a wrong name, term, model, or garbled phrase. Flag every independently affected cue, including repeated instances of the same confirmed error; do not stop after correcting one occurrence. If the excerpt does not contain the exchange or is questionable, audit exactly as if no reference were supplied. Never change or remove target text merely because it is absent from the reference.
 
 DO NOT flag: proper-noun spellings that the title identity, repeated usage, nearby dialogue, or a clearly corresponding reference passage cannot verify, grammar, punctuation style, capitalization, line breaks, rephrasing, timing, suspected mishearings where the correct word is not unambiguous, ambiguous short exclamations ("Oh!", "No!"), or intentional song lyrics. Correctly transcribed lyrics are real audio, not ASR errors; preserve opening and title songs, musical numbers, montage and action songs, and diegetic or plot-relevant singing. Preserve unusual but possible dialogue, profanity, dialect, verbal stumbles, and incomplete sentences exactly. Never sanitize profanity or replace a valid word merely because another word fits the scene. Do not add meaning that is absent from the current text. Do not partially repair a phrase: if any part of the proposed replacement remains uncertain, skip the whole edit.
 
@@ -105,6 +105,16 @@ type auditResponse struct {
 	Edits []auditEdit `json:"edits"`
 }
 
+type auditVerificationVerdict struct {
+	Index  int    `json:"index"`
+	Accept bool   `json:"accept"`
+	Reason string `json:"reason"`
+}
+
+type auditVerificationResponse struct {
+	Verdicts []auditVerificationVerdict `json:"verdicts"`
+}
+
 // resolvedEdit is an auditEdit that has been matched to a specific cue and
 // passed validity checks. CueIndex is a position into the cues slice that
 // resolution operated on (0-based), not the cue's own Index field.
@@ -122,12 +132,10 @@ type droppedAuditEdit struct {
 }
 
 // auditDisplaySRT audits a display SRT file with the LLM and rewrites it in
-// place with any applied edits. It never returns an error: every failure
-// path is logged and reflected in the returned stats, and the caller
-// continues with the unaudited file.
+// place with any applied edits. It never returns an error: failures are logged
+// and leave the subtitle unapplied.
 func auditDisplaySRT(ctx context.Context, client *llm.Client, logger *slog.Logger, params auditParams) AuditStats {
 	logger = logs.Default(logger)
-
 	if client == nil {
 		logger.Debug("subtitle audit skipped",
 			"event_type", "subtitle_audit_skipped",
@@ -207,7 +215,7 @@ func auditDisplaySRT(ctx context.Context, client *llm.Client, logger *slog.Logge
 		}
 		verified = len(resolved)
 		for _, r := range verificationDrops {
-			logDroppedResolvedEdit(logger, params.EpisodeKey, cues[r.CueIndex], r, "not confirmed by independent verification")
+			logDroppedResolvedEdit(logger, params.EpisodeKey, cues[r.CueIndex], r, "not confirmed by final verification")
 		}
 		dropped += len(verificationDrops)
 	}
@@ -333,10 +341,14 @@ func deduplicateAuditEdits(edits []auditEdit) (kept []auditEdit, deduplicated in
 }
 
 func equivalentAuditEdits(a, b auditEdit) bool {
-	return a.Action == b.Action &&
-		normalizeAuditText(a.Replacement) == normalizeAuditText(b.Replacement) &&
-		a.Category == b.Category &&
-		a.Confidence == b.Confidence
+	if a.Action != b.Action ||
+		normalizeAuditText(a.Replacement) != normalizeAuditText(b.Replacement) ||
+		a.Confidence != b.Confidence {
+		return false
+	}
+	// A replacement's category changes only telemetry, not what is applied.
+	// Removal categories drive the music-bleed guard and must still agree.
+	return a.Action == "replace" || a.Category == b.Category
 }
 
 func logDroppedAuditEdit(logger *slog.Logger, episodeKey string, dropped droppedAuditEdit) {
@@ -471,9 +483,22 @@ A target may include a best-effort lookup excerpt from an untimed OpenSubtitles 
 
 Return JSON: {"edits": [{"index": <global cue index>, "current_text": "<exact current text>", "action": "remove" | "replace", "replacement": "<new text if replace>", "category": "<category>", "reason": "<brief>", "confidence": "high" | "medium"}]}. Return {"edits": []} if no marked target has an independently certain correction. Do not edit unmarked context cues.`
 
-// verifyAuditEdits performs a blind global safety pass. An edit survives only
-// when the second pass independently returns the same action and replacement.
+const subtitleAuditReferenceVerificationSystemPrompt = `Review proposed corrections to an English WhisperX subtitle against local dialogue context and an untimed OpenSubtitles reference transcript. You are intentionally shown each proposal. A false correction is worse than a missed error, but a clearly corresponding reference exchange is strong evidence: accept a replacement when it fixes an actual ASR error and the reference directly supports the complete proposed wording. When a multi-word proposed replacement appears verbatim in the clearly corresponding reference exchange, accept it even if the current ASR text is grammatical or superficially plausible.
+
+Reject a proposal if the reference passage is absent, unrelated, ambiguous, or disagrees; if the proposal changes only punctuation, capitalization, line wrapping, grammar, or style; if any part remains uncertain; or if it alters valid dialect, profanity, wordplay, names, or meaning. The reference may contain paraphrasing, censorship, SDH text, or errors, and its timestamps and cue boundaries are irrelevant. For removals, absence from the reference is never evidence: accept only when the target itself and local context prove it is broken, repeated, hallucinated, or qualifying music/credits bleed.
+
+Return JSON: {"verdicts": [{"index": <global cue index>, "accept": true | false, "reason": "<brief>"}]}. Return exactly one verdict for every detailed target, in the supplied order. Do not propose different wording and do not review unmarked context cues.`
+
+// verifyAuditEdits uses candidate-aware reference verification when external
+// text is available; reference-free audits retain the independent blind pass.
 func verifyAuditEdits(ctx context.Context, client *llm.Client, cues []srtutil.Cue, resolved []resolvedEdit, params auditParams) (kept, dropped []resolvedEdit, err error) {
+	if strings.TrimSpace(params.ReferenceTranscript) != "" {
+		return verifyReferenceAuditEdits(ctx, client, cues, resolved, params)
+	}
+	return verifyBlindAuditEdits(ctx, client, cues, resolved, params)
+}
+
+func verifyBlindAuditEdits(ctx context.Context, client *llm.Client, cues []srtutil.Cue, resolved []resolvedEdit, params auditParams) (kept, dropped []resolvedEdit, err error) {
 	for start := 0; start < len(resolved); start += auditVerificationCandidates {
 		end := start + auditVerificationCandidates
 		if end > len(resolved) {
@@ -510,6 +535,35 @@ func verifyAuditEdits(ctx context.Context, client *llm.Client, cues []srtutil.Cu
 	return kept, dropped, nil
 }
 
+func verifyReferenceAuditEdits(ctx context.Context, client *llm.Client, cues []srtutil.Cue, resolved []resolvedEdit, params auditParams) (kept, dropped []resolvedEdit, err error) {
+	for start := 0; start < len(resolved); start += auditVerificationCandidates {
+		end := start + auditVerificationCandidates
+		if end > len(resolved) {
+			end = len(resolved)
+		}
+		batch := resolved[start:end]
+		var resp auditVerificationResponse
+		if err := client.CompleteJSON(ctx, subtitleAuditReferenceVerificationSystemPrompt, buildReferenceAuditVerificationPrompt(cues, resolved, batch, params), &resp); err != nil {
+			return nil, nil, err
+		}
+
+		byIndex := make(map[int][]auditVerificationVerdict, len(resp.Verdicts))
+		for _, verdict := range resp.Verdicts {
+			byIndex[verdict.Index] = append(byIndex[verdict.Index], verdict)
+		}
+		for _, candidate := range batch {
+			cue := cues[candidate.CueIndex]
+			verdicts := byIndex[cue.Index]
+			if len(verdicts) == 1 && verdicts[0].Accept {
+				kept = append(kept, candidate)
+			} else {
+				dropped = append(dropped, candidate)
+			}
+		}
+	}
+	return kept, dropped, nil
+}
+
 // buildAuditVerificationPrompt hides the first pass's proposed actions and
 // replacements. The complete target list supports global consistency while a
 // small detailed batch keeps the independent review focused.
@@ -530,6 +584,49 @@ func buildAuditVerificationPrompt(cues []srtutil.Cue, all, batch []resolvedEdit,
 		if last >= len(cues) {
 			last = len(cues) - 1
 		}
+		for pos := first; pos <= last; pos++ {
+			marker := " "
+			if pos == r.CueIndex {
+				marker = "*"
+			}
+			fmt.Fprintf(&b, "%s%d|%s\n", marker, cues[pos].Index, strings.ReplaceAll(cues[pos].Text, "\n", `\n`))
+		}
+		if excerpt := referenceExcerpt(params.ReferenceTranscript, cues[first:last+1]); excerpt != "" {
+			b.WriteString("Reference transcript lookup (untimed, best effort):\n")
+			b.WriteString(excerpt)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func buildReferenceAuditVerificationPrompt(cues []srtutil.Cue, all, batch []resolvedEdit, params auditParams) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Reference-assisted final review for %s. Return one explicit verdict for each of the %d detailed targets. Unmarked cues are context only.\n\nALL PROPOSED EDITS FOR GLOBAL CONSISTENCY:\n", params.MediaContext, len(batch))
+	for _, r := range all {
+		cue := cues[r.CueIndex]
+		fmt.Fprintf(&b, "%d|%s|%s", cue.Index, r.Action, strings.ReplaceAll(cue.Text, "\n", `\n`))
+		if r.Action == "replace" {
+			fmt.Fprintf(&b, " => %s", strings.ReplaceAll(r.Replacement, "\n", `\n`))
+		}
+		b.WriteByte('\n')
+	}
+	b.WriteString("\nDETAILED TARGETS:\n")
+	for i, r := range batch {
+		cue := cues[r.CueIndex]
+		fmt.Fprintf(&b, "\nTarget %d (index %d):\nProposed action: %s\nCurrent text: %s\n", i+1, cue.Index, r.Action, strings.ReplaceAll(cue.Text, "\n", `\n`))
+		if r.Action == "replace" {
+			fmt.Fprintf(&b, "Proposed replacement: %s\n", strings.ReplaceAll(r.Replacement, "\n", `\n`))
+		}
+		first := r.CueIndex - 2
+		if first < 0 {
+			first = 0
+		}
+		last := r.CueIndex + 2
+		if last >= len(cues) {
+			last = len(cues) - 1
+		}
+		b.WriteString("Local context:\n")
 		for pos := first; pos <= last; pos++ {
 			marker := " "
 			if pos == r.CueIndex {
