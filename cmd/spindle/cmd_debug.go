@@ -28,7 +28,6 @@ func newDebugCmd() *cobra.Command {
 	cmd.AddCommand(
 		newDebugCropCmd(),
 		newDebugCommentaryCmd(),
-		newGensubtitleCmd(),
 		newTestNotifyCmd(),
 	)
 	return cmd

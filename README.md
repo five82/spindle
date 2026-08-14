@@ -115,7 +115,7 @@ default or kept as sidecars when muxing is disabled or fails. The best-effort
 LLM audit uses the identified episode's downloaded OpenSubtitles text as an
 untimed reference transcript when available; movie references are selected by
 TMDB ID and cached. Reference failure falls back to the WhisperX-only audit.
-`spindle debug subtitle` also reads Jellyfin's TMDB provider marker from a
+`spindle subtitle` also reads Jellyfin's TMDB provider marker from a
 library path and downloads the corresponding movie or episode reference before
 regenerating the subtitle.
 
@@ -126,7 +126,7 @@ season. Edge cases - disc extras, theatrical shorts, multi-disc movies,
 multiple editions, discs MakeMKV struggles with - are handled by a coding
 agent using the `orchestrate` skill in `.agents/skills/orchestrate/`. The
 skill drives the same building blocks by hand: `spindle disc scan`,
-`spindle rip`, `spindle encode`, `spindle debug subtitle`, and
+`spindle rip`, `spindle encode`, `spindle subtitle`, and
 `spindle jellyfin refresh`. The daemon must be stopped while orchestration
 runs; `spindle rip` and `spindle encode` enforce this.
 

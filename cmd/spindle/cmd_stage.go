@@ -202,7 +202,8 @@ func newGensubtitleCmd() *cobra.Command {
 		Short: "Regenerate a WhisperX display subtitle for an encoded file",
 		Long: "Regenerate and replace an encoded file's display subtitle. " +
 			"For Jellyfin library paths containing [tmdbid-ID], the LLM audit downloads an untimed OpenSubtitles reference transcript.",
-		Args: cobra.ExactArgs(1),
+		GroupID: groupDisc,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			file := args[0]
 			if _, err := os.Stat(file); err != nil {
@@ -275,7 +276,7 @@ func newGensubtitleCmd() *cobra.Command {
 				}
 				switch {
 				case refErr != nil:
-					decisionLogger.Warn("debug subtitle reference unavailable",
+					decisionLogger.Warn("subtitle reference unavailable",
 						"event_type", "subtitle_audit_reference_unavailable",
 						"error_hint", refErr.Error(),
 						"impact", "subtitle audit continues without external reference text",
@@ -283,14 +284,14 @@ func newGensubtitleCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "%s reference transcript unavailable; continuing without it: %v\n", warnStyle("Warning:"), refErr)
 					referenceTranscript = ""
 				case found:
-					decisionLogger.Info("debug subtitle reference selected",
+					decisionLogger.Info("subtitle reference selected",
 						"decision_type", "subtitle_audit_reference",
 						"decision_result", "reference_assisted",
 						"decision_reason", "Jellyfin TMDB provider ID found in media path",
 					)
 					fmt.Println("Reference transcript ready.")
 				default:
-					decisionLogger.Info("debug subtitle reference unavailable",
+					decisionLogger.Info("subtitle reference unavailable",
 						"decision_type", "subtitle_audit_reference",
 						"decision_result", "whisperx_only",
 						"decision_reason", "media path has no Jellyfin TMDB provider ID",

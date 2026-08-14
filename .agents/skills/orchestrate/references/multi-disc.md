@@ -34,7 +34,7 @@ Check TMDB (via `spindle disc identify` and a web search of the TMDB entry):
    point with ffmpeg if in doubt).
 3. `spindle encode scratch/joined.mkv -o scratch/encoded/` - one encode of
    the full film.
-4. `spindle debug subtitle` on the encoded file (it is a feature).
+4. `spindle subtitle` on the encoded file (it is a feature).
 5. Place as a normal single movie:
    `Movies/Film (1963) [tmdbid-12345]/Film (1963) [tmdbid-12345].mkv`.
 

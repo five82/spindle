@@ -30,7 +30,7 @@ immediately; filenames alone won't tell you later.
 Then per file: `spindle encode scratch/ripped/FILE -o scratch/encoded/`.
 
 - **Extras: no subtitles.**
-- **Theatrical shorts: generate subtitles** - `spindle debug subtitle
+- **Theatrical shorts: generate subtitles** - `spindle subtitle
   scratch/encoded/SHORT.mkv` after encoding.
 - If the movie itself is also wanted and is ordinary, run it through the
   normal pipeline instead (`spindle cache rip` then `spindle cache process`),

@@ -18,7 +18,7 @@ Comprehensive audit of Spindle queue items through multi-layer artifact analysis
 
 The goal is to **uncover problems that automated code does not detect**. Quick log scans saying "no warnings, no errors" are insufficient. This skill performs deep analysis of the applicable artifacts to find anomalies.
 
-**Subtitle content is out of scope.** Never read, extract, sample, quote, compare, or judge subtitle/transcript cue text, and never evaluate the correctness of individual LLM subtitle-audit edits. Spindle's automated workflow subtitle audit intentionally uses the cost-effective Luna model; its accuracy trade-off is deliberate. Item audits check only subtitle pipeline integrity and metadata (generation status, validation verdicts, routing, assets, muxing, stream format/dispositions/labels). If subtitle wording or edit accuracy is questioned, recommend regenerating it with `spindle debug subtitle <mkv>`; do not run that modifying command during an item audit.
+**Subtitle content is out of scope.** Never read, extract, sample, quote, compare, or judge subtitle/transcript cue text, and never evaluate the correctness of individual LLM subtitle-audit edits. Spindle's automated workflow subtitle audit intentionally uses the cost-effective Luna model; its accuracy trade-off is deliberate. Item audits check only subtitle pipeline integrity and metadata (generation status, validation verdicts, routing, assets, muxing, stream format/dispositions/labels). If subtitle wording or edit accuracy is questioned, recommend regenerating it with `spindle subtitle <mkv>`; do not run that modifying command during an item audit.
 
 ## Audit Procedure
 
@@ -458,7 +458,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 
 **Do not report as findings (these are normal):**
 - Individual subtitle wording, transcription accuracy, or LLM subtitle-audit edit choices — subtitle content is outside this skill's scope
-- The known accuracy trade-offs of the Luna model used by Spindle's automated workflow subtitle audit; title-specific regeneration is an explicit operator action through `spindle debug subtitle`
+- The known accuracy trade-offs of the Luna model used by Spindle's automated workflow subtitle audit; title-specific regeneration is an explicit operator action through `spindle subtitle`
 - Non-sequential disc title ordering — disc layout varies by manufacturer and is irrelevant once content ID resolves episodes
 - Inconsistent source audio track counts across titles on the same disc — different playlists routinely carry different language sets
 - Audio refinement stripping non-English tracks — that's its job
@@ -541,7 +541,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Labels correct: <yes/no>
 - Validation result: <aggregate subtitle_generation_results.validation_result; list structured review_issues/severe_issues only when they affected routing, without inspecting cue text>
 - Subtitle mux/output: <mux status and single-display-subtitle checks>
-- Content audit: <not performed; use `spindle debug subtitle <mkv>` to regenerate and reference-audit title-specific subtitle content>
+- Content audit: <not performed; use `spindle subtitle <mkv>` to regenerate and reference-audit title-specific subtitle content>
 
 #### Commentary (if phase_commentary)
 - Decisions: <from analysis.decision_groups>

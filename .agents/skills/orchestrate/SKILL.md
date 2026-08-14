@@ -41,7 +41,7 @@ forgotten stop fails loudly rather than corrupting anything.
 | `spindle disc identify` | Disc label, fingerprint, TMDB match candidates (human-readable but parseable) |
 | `spindle rip --title 2,5 -o DIR` | Rip specific titles to a directory (`--all` for everything). Use the same `--min-length` as the scan that produced the IDs (default 0 for both) |
 | `spindle encode FILE -o DIR` | Reel AV1 target-quality encode of one file, same encode path as the daemon. Exits non-zero if validation fails |
-| `spindle debug subtitle FILE` | Generate a WhisperX English SRT and mux it into the file (or `--external` for a sidecar) |
+| `spindle subtitle FILE` | Generate a WhisperX English SRT and mux it into the file (or `--external` for a sidecar) |
 | `spindle cache rip` / `spindle cache process N` | Route a disc's *main feature* through the normal automated pipeline (rip to cache, then queue it) |
 | `spindle debug crop FILE` / `spindle debug commentary FILE` | Crop and commentary diagnostics for a single file |
 | `spindle jellyfin refresh` | Trigger a Jellyfin library scan after manual placement |
@@ -63,13 +63,13 @@ staging_dir`, plus `[library] movies_dir / tv_dir`.
   movie file, and show folder carries the TMDB provider ID -
   `Title (Year) [tmdbid-ID]` (TV: `Show (Year) [tmdbid-ID]/Season NN/`).
   This is what the automated pipeline produces, and Spindle tooling depends
-  on it - `spindle debug subtitle` reads the `[tmdbid-ID]` marker from
+  on it - `spindle subtitle` reads the `[tmdbid-ID]` marker from
   library paths to fetch reference transcripts. Get the ID from
   `spindle disc identify` or TMDB directly. Extras files inside the named
   subfolders do not need the marker; the feature file and its folder do.
 - **Subtitles:** none for extras (featurettes, deleted scenes, interviews,
   trailers). Yes for theatrical shorts (Pixar, Looney Tunes, etc.) and for
-  every feature-length cut - run `spindle debug subtitle` on the encoded file.
+  every feature-length cut - run `spindle subtitle` on the encoded file.
 - **Verify before placing.** `ffprobe` every encoded file: AV1 video, expected
   audio streams, duration within ~2s of the ripped source. `spindle encode`
   already validates, but confirm anything you renamed or remuxed yourself.
