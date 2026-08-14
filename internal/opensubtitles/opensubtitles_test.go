@@ -65,6 +65,9 @@ func TestSearch_MockServer(t *testing.T) {
 		if r.URL.Path != "/subtitles" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
+		if r.URL.Query().Get("type") != "movie" {
+			t.Errorf("expected movie search type, got %q", r.URL.Query().Get("type"))
+		}
 		if r.Header.Get("Api-Key") != "test-key" {
 			t.Errorf("missing Api-Key header")
 		}
@@ -110,6 +113,29 @@ func TestSearch_MockServer(t *testing.T) {
 	}
 	if len(results[0].Attributes.Files) != 1 || results[0].Attributes.Files[0].FileID != 456 {
 		t.Error("unexpected file data")
+	}
+}
+
+func TestSearchEpisodeSetsType(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("type"); got != "episode" {
+			t.Errorf("expected episode search type, got %q", got)
+		}
+		if got := r.URL.Query().Get("season_number"); got != "2" {
+			t.Errorf("season_number = %q", got)
+		}
+		if got := r.URL.Query().Get("episode_number"); got != "7" {
+			t.Errorf("episode_number = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	client := New(Params{APIKey: "test-key", BaseURL: srv.URL}, nil)
+	client.rateDelay = 0
+	if _, err := client.Search(context.Background(), 123, 2, 7, []string{"en"}); err != nil {
+		t.Fatalf("Search failed: %v", err)
 	}
 }
 

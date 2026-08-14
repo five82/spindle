@@ -85,6 +85,7 @@ func TestDestFilename_Movie(t *testing.T) {
 
 func TestDestFilename_TVEpisode(t *testing.T) {
 	meta := &mediameta.Metadata{
+		ID:           1396,
 		Title:        "Breaking Bad",
 		ShowTitle:    "Breaking Bad",
 		MediaType:    "tv",

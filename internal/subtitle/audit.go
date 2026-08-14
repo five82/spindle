@@ -12,6 +12,7 @@ import (
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/srtutil"
+	"github.com/five82/spindle/internal/textutil"
 )
 
 // creditsWindowSeconds is how far before the end of the video the
@@ -59,7 +60,9 @@ FLAG ONLY these categories:
 
 Review every cue in the supplied window. Check local meaning, entity consistency, contextually impossible phrases, hallucinations or music bleed, and broken or corrupted cues. You may use firmly established facts about the identified title, but do not guess.
 
-DO NOT flag: proper-noun spellings that the title identity, repeated usage, or nearby dialogue cannot verify, grammar, punctuation style, capitalization, line breaks, rephrasing, timing, suspected mishearings where the correct word is not unambiguous, ambiguous short exclamations ("Oh!", "No!"), or intentional song lyrics. Correctly transcribed lyrics are real audio, not ASR errors; preserve opening and title songs, musical numbers, montage and action songs, and diegetic or plot-relevant singing. Preserve unusual but possible dialogue, profanity, dialect, verbal stumbles, and incomplete sentences exactly. Never sanitize profanity or replace a valid word merely because another word fits the scene. Do not add meaning that is absent from the current text. Do not partially repair a phrase: if any part of the proposed replacement remains uncertain, skip the whole edit.
+You may also receive a best-effort excerpt from an untimed OpenSubtitles reference transcript. Use it to look up suspicious wording, names, and terminology. It may come from another release and may contain paraphrasing, censorship, SDH text, or its own errors. Ignore its timestamps, cue boundaries, punctuation, capitalization, formatting, and sound descriptions. When the excerpt clearly contains the same exchange, it may establish the exact replacement. If it does not contain the exchange or is questionable, audit exactly as if no reference were supplied. Never change or remove target text merely because it is absent from the reference.
+
+DO NOT flag: proper-noun spellings that the title identity, repeated usage, nearby dialogue, or a clearly corresponding reference passage cannot verify, grammar, punctuation style, capitalization, line breaks, rephrasing, timing, suspected mishearings where the correct word is not unambiguous, ambiguous short exclamations ("Oh!", "No!"), or intentional song lyrics. Correctly transcribed lyrics are real audio, not ASR errors; preserve opening and title songs, musical numbers, montage and action songs, and diegetic or plot-relevant singing. Preserve unusual but possible dialogue, profanity, dialect, verbal stumbles, and incomplete sentences exactly. Never sanitize profanity or replace a valid word merely because another word fits the scene. Do not add meaning that is absent from the current text. Do not partially repair a phrase: if any part of the proposed replacement remains uncertain, skip the whole edit.
 
 Return JSON: {"edits": [{"index": <cue index>, "current_text": "<exact current text>", "action": "remove" | "replace", "replacement": "<new text if replace>", "category": "<category>", "reason": "<brief>", "confidence": "high" | "medium"}]}
 
@@ -77,10 +80,11 @@ type AuditStats struct {
 
 // auditParams configures a single audit run.
 type auditParams struct {
-	DisplayPath  string  // SRT file to audit and rewrite in place
-	VideoSeconds float64 // full video duration; <= 0 means unknown
-	MediaContext string  // e.g. `the movie "Air" (2023)` or `Breaking Bad S01E01`
-	EpisodeKey   string  // for logging only
+	DisplayPath         string  // SRT file to audit and rewrite in place
+	VideoSeconds        float64 // full video duration; <= 0 means unknown
+	MediaContext        string  // e.g. `the movie "Air" (2023)` or `Breaking Bad S01E01`
+	EpisodeKey          string  // for logging only
+	ReferenceTranscript string  // untimed external transcript; empty means unavailable
 }
 
 // auditEdit is a single proposed edit as returned by the LLM.
@@ -463,6 +467,8 @@ Return an edit only when BOTH are certain:
 
 Do not capitalize or restyle text, paraphrase, add or remove meaning, sanitize profanity, substitute a plot-relevant person/place for another plausible entity, overwrite a former name/surname/nickname/joke/wordplay, or partially repair a phrase. Preserve valid words even when another word might fit the scene better. Never remove mid-film speech merely because it is garbled.
 
+A target may include a best-effort lookup excerpt from an untimed OpenSubtitles reference transcript. It may be from another release and may contain paraphrasing, censorship, SDH text, or errors. Ignore formatting and sound descriptions. A clearly corresponding exchange may establish exact wording; an absent, unrelated, or questionable excerpt is no evidence and must be ignored.
+
 Return JSON: {"edits": [{"index": <global cue index>, "current_text": "<exact current text>", "action": "remove" | "replace", "replacement": "<new text if replace>", "category": "<category>", "reason": "<brief>", "confidence": "high" | "medium"}]}. Return {"edits": []} if no marked target has an independently certain correction. Do not edit unmarked context cues.`
 
 // verifyAuditEdits performs a blind global safety pass. An edit survives only
@@ -530,6 +536,11 @@ func buildAuditVerificationPrompt(cues []srtutil.Cue, all, batch []resolvedEdit,
 				marker = "*"
 			}
 			fmt.Fprintf(&b, "%s%d|%s\n", marker, cues[pos].Index, strings.ReplaceAll(cues[pos].Text, "\n", `\n`))
+		}
+		if excerpt := referenceExcerpt(params.ReferenceTranscript, cues[first:last+1]); excerpt != "" {
+			b.WriteString("Reference transcript lookup (untimed, best effort):\n")
+			b.WriteString(excerpt)
+			b.WriteByte('\n')
 		}
 	}
 	return b.String()
@@ -634,7 +645,57 @@ func buildAuditUserPrompt(cues []srtutil.Cue, params auditParams, chunkNumber, c
 		text := strings.ReplaceAll(c.Text, "\n", `\n`)
 		fmt.Fprintf(&b, "%d|%s-->%s|%s", c.Index, srtutil.FormatTimestamp(c.Start), srtutil.FormatTimestamp(c.End), text)
 	}
+	if excerpt := referenceExcerpt(params.ReferenceTranscript, cues); excerpt != "" {
+		b.WriteString("\n\nREFERENCE TRANSCRIPT LOOKUP (untimed, best effort; ignore it if this exchange is absent):\n")
+		b.WriteString(excerpt)
+	}
 	return b.String()
+}
+
+// referenceExcerpt retrieves the most textually similar contiguous passage
+// from an untimed external transcript. Retrieval only limits prompt size; its
+// result is evidence for the LLM, never an edit or synchronization decision.
+func referenceExcerpt(reference string, target []srtutil.Cue) string {
+	reference = strings.TrimSpace(reference)
+	targetText := srtutil.PlainText(target)
+	if reference == "" || targetText == "" {
+		return ""
+	}
+
+	words := strings.Fields(reference)
+	window := len(strings.Fields(targetText)) * 3 / 2
+	if window < 80 {
+		window = 80
+	}
+	if window > 1800 {
+		window = 1800
+	}
+	if len(words) <= window {
+		return strings.Join(words, " ")
+	}
+
+	targetPrint := textutil.NewFingerprint(targetText)
+	stride := window / 4
+	if stride < 20 {
+		stride = 20
+	}
+	bestStart := 0
+	bestScore := -1.0
+	for start := 0; ; start += stride {
+		if start+window > len(words) {
+			start = len(words) - window
+		}
+		candidate := strings.Join(words[start:start+window], " ")
+		score := textutil.CosineSimilarity(targetPrint, textutil.NewFingerprint(candidate))
+		if score > bestScore {
+			bestStart = start
+			bestScore = score
+		}
+		if start+window == len(words) {
+			break
+		}
+	}
+	return strings.Join(words[bestStart:bestStart+window], " ")
 }
 
 // formatHMS renders seconds as an SRT-style HH:MM:SS (no milliseconds).

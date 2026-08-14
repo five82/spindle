@@ -68,6 +68,13 @@ func (h *Handler) fetchReferenceFingerprints(
 		return nil, err
 	}
 	refDir := filepath.Join(stagingRoot, "contentid", "references")
+	if len(cache) == 0 {
+		// References are transient stage artifacts. Clear a prior attempt so
+		// canonical episode lookup can never see a stale candidate.
+		if err := os.RemoveAll(refDir); err != nil {
+			return nil, err
+		}
+	}
 	if err := os.MkdirAll(refDir, 0o755); err != nil {
 		return nil, err
 	}

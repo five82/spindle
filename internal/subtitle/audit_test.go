@@ -426,6 +426,42 @@ func TestAuditDisplaySRTChunksFocusedWindows(t *testing.T) {
 	}
 }
 
+func TestReferenceExcerptRetrievesMatchingTranscriptPassage(t *testing.T) {
+	prefix := strings.Repeat("unrelated bakery conversation ", 80)
+	matching := strings.Repeat("enterprise commander riker data android ", 30)
+	suffix := strings.Repeat("unrelated courtroom testimony ", 80)
+	target := []srtutil.Cue{{Index: 1, Text: "Commander Riker asked Data to return to the Enterprise."}}
+
+	excerpt := referenceExcerpt(prefix+matching+suffix, target)
+	if !strings.Contains(excerpt, "enterprise commander riker data android") {
+		t.Fatalf("matching passage was not retrieved: %q", excerpt)
+	}
+	if strings.Contains(excerpt, "courtroom") {
+		t.Fatalf("retrieved passage drifted into unrelated suffix: %q", excerpt)
+	}
+}
+
+func TestAuditPromptsIncludeUntimedReferenceLookup(t *testing.T) {
+	cues := sampleCues()
+	params := auditParams{
+		MediaContext:        "a test movie",
+		ReferenceTranscript: "Hello there. How are you? Her name is Commander T'Pol.",
+	}
+	firstPass := buildAuditUserPrompt(cues, params, 1, 1, len(cues))
+	if !strings.Contains(firstPass, "REFERENCE TRANSCRIPT LOOKUP (untimed") || !strings.Contains(firstPass, "Commander T'Pol") {
+		t.Fatalf("first-pass prompt lacks reference transcript: %s", firstPass)
+	}
+
+	resolved := []resolvedEdit{{CueIndex: 0, Action: "replace", Replacement: "General Kenobi."}}
+	verification := buildAuditVerificationPrompt(cues, resolved, resolved, params)
+	if !strings.Contains(verification, "Reference transcript lookup (untimed") || !strings.Contains(verification, "Commander T'Pol") {
+		t.Fatalf("verification prompt lacks reference transcript: %s", verification)
+	}
+	if strings.Contains(verification, "General Kenobi") {
+		t.Fatalf("blind verifier saw proposed replacement: %s", verification)
+	}
+}
+
 func TestAuditDisplaySRTOverlapProposalDeduplicated(t *testing.T) {
 	cues := manyCues(201)
 	cues[49].Text = "This is Marge from our brainer."

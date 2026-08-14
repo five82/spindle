@@ -18,7 +18,7 @@ Comprehensive audit of Spindle queue items through multi-layer artifact analysis
 
 The goal is to **uncover problems that automated code does not detect**. Quick log scans saying "no warnings, no errors" are insufficient. This skill performs deep analysis of the applicable artifacts to find anomalies.
 
-**Subtitle content is out of scope.** Never read, extract, sample, quote, compare, or judge subtitle/transcript cue text, and never evaluate the correctness of individual LLM subtitle-audit edits. Spindle's automated workflow subtitle audit intentionally uses the cost-effective Luna model; its accuracy trade-off is deliberate. The separately invoked `/subtitleaudit` skill uses the harness's current LLM and owns title-specific content review. Item audits check only subtitle pipeline integrity and metadata (generation status, validation verdicts, routing, assets, muxing, stream format/dispositions/labels). If subtitle wording or edit accuracy is questioned, defer it to `/subtitleaudit` without duplicating that analysis here.
+**Subtitle content is out of scope.** Never read, extract, sample, quote, compare, or judge subtitle/transcript cue text, and never evaluate the correctness of individual LLM subtitle-audit edits. Spindle's automated workflow subtitle audit intentionally uses the cost-effective Luna model; its accuracy trade-off is deliberate. Item audits check only subtitle pipeline integrity and metadata (generation status, validation verdicts, routing, assets, muxing, stream format/dispositions/labels). If subtitle wording or edit accuracy is questioned, recommend regenerating it with `spindle debug subtitle <mkv>`; do not run that modifying command during an item audit.
 
 ## Audit Procedure
 
@@ -331,7 +331,7 @@ Analyze only structural subtitle evidence from `media[].probe.streams` (codec_ty
    - **Check labeling**: subtitle title should contain the language name (e.g., "English")
 
 2. **Subtitle generation outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `analysis.decision_groups`):
-   - Spindle generates one English display SRT from WhisperX. It does not generate forced/foreign subtitle tracks and does not fetch OpenSubtitles output subtitles.
+   - Spindle generates one English display SRT from WhisperX. It does not generate forced/foreign subtitle tracks. Downloaded OpenSubtitles text is audit reference material only and is never used as the output subtitle.
    - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config.
    - `decision_type=transcription_asset` and `decision_type=transcription_profile` show which asset/profile WhisperX processed. Use `logs.events` entries (`transcription_extract_complete`, `transcription_whisperx_complete`, `transcription_complete`) for transcription timing before falling back to the raw files in `logs.paths`.
    - `decision_type=subtitle_transcript_source` with `decision_result=artifact_reused` means subtitle generation reused the shared per-episode transcript artifact (`envelope.assets.transcript`) and ran no WhisperX of its own — absent transcription events in the subtitling stage are then expected, not a defect. For TV, verify transcript asset count matches episode count in `analysis.asset_health`.
@@ -458,7 +458,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 
 **Do not report as findings (these are normal):**
 - Individual subtitle wording, transcription accuracy, or LLM subtitle-audit edit choices — subtitle content is outside this skill's scope
-- The known accuracy trade-offs of the Luna model used by Spindle's automated workflow subtitle audit; `/subtitleaudit` is a separate harness-driven review
+- The known accuracy trade-offs of the Luna model used by Spindle's automated workflow subtitle audit; title-specific regeneration is an explicit operator action through `spindle debug subtitle`
 - Non-sequential disc title ordering — disc layout varies by manufacturer and is irrelevant once content ID resolves episodes
 - Inconsistent source audio track counts across titles on the same disc — different playlists routinely carry different language sets
 - Audio refinement stripping non-English tracks — that's its job
@@ -541,7 +541,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Labels correct: <yes/no>
 - Validation result: <aggregate subtitle_generation_results.validation_result; list structured review_issues/severe_issues only when they affected routing, without inspecting cue text>
 - Subtitle mux/output: <mux status and single-display-subtitle checks>
-- Content audit: <not performed; the separately invoked `/subtitleaudit` skill owns wording/edit accuracy and uses the harness's current LLM>
+- Content audit: <not performed; use `spindle debug subtitle <mkv>` to regenerate and reference-audit title-specific subtitle content>
 
 #### Commentary (if phase_commentary)
 - Decisions: <from analysis.decision_groups>

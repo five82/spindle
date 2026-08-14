@@ -21,6 +21,7 @@ import (
 	"github.com/five82/spindle/internal/keydb"
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/notify"
+	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/subtitle"
 	"github.com/five82/spindle/internal/tmdb"
@@ -198,8 +199,10 @@ func newGensubtitleCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "subtitle <encoded-file>",
-		Short: "Generate a WhisperX display subtitle for an encoded file",
-		Args:  cobra.ExactArgs(1),
+		Short: "Regenerate a WhisperX display subtitle for an encoded file",
+		Long: "Regenerate and replace an encoded file's display subtitle. " +
+			"For Jellyfin library paths containing [tmdbid-ID], the LLM audit downloads an untimed OpenSubtitles reference transcript.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			file := args[0]
 			if _, err := os.Stat(file); err != nil {
@@ -256,18 +259,57 @@ func newGensubtitleCmd() *cobra.Command {
 
 			llmClient := llm.New(cfg.LLM, cmdLogger)
 			mediaContext := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+			var referenceTranscript string
+			if llmClient != nil {
+				osClient := opensubtitles.New(opensubtitles.Params{
+					APIKey:    cfg.Subtitles.OpenSubtitlesAPIKey,
+					UserAgent: cfg.Subtitles.OpenSubtitlesUserAgent,
+					UserToken: cfg.Subtitles.OpenSubtitlesUserToken,
+				}, cmdLogger)
+				var found bool
+				var refErr error
+				referenceTranscript, found, refErr = subtitle.ReferenceTranscriptForPath(ctx, cfg, osClient, file)
+				decisionLogger := cmdLogger
+				if decisionLogger == nil {
+					decisionLogger = slog.Default()
+				}
+				switch {
+				case refErr != nil:
+					decisionLogger.Warn("debug subtitle reference unavailable",
+						"event_type", "subtitle_audit_reference_unavailable",
+						"error_hint", refErr.Error(),
+						"impact", "subtitle audit continues without external reference text",
+					)
+					fmt.Fprintf(os.Stderr, "%s reference transcript unavailable; continuing without it: %v\n", warnStyle("Warning:"), refErr)
+					referenceTranscript = ""
+				case found:
+					decisionLogger.Info("debug subtitle reference selected",
+						"decision_type", "subtitle_audit_reference",
+						"decision_result", "reference_assisted",
+						"decision_reason", "Jellyfin TMDB provider ID found in media path",
+					)
+					fmt.Println("Reference transcript ready.")
+				default:
+					decisionLogger.Info("debug subtitle reference unavailable",
+						"decision_type", "subtitle_audit_reference",
+						"decision_result", "whisperx_only",
+						"decision_reason", "media path has no Jellyfin TMDB provider ID",
+					)
+				}
+			}
 
 			selectedLanguage := "en"
 			var formatStart time.Time
 			result, err := subtitle.GenerateDisplaySubtitle(ctx, subtitle.GenerateDisplaySubtitleRequest{
-				VideoPath:       file,
-				DisplayBasePath: filepath.Join(workDir, filepath.Base(file)),
-				WorkDir:         workDir,
-				Language:        "en",
-				Transcriber:     svc,
-				LLM:             llmClient,
-				MediaContext:    mediaContext,
-				Logger:          cmdLogger,
+				VideoPath:           file,
+				DisplayBasePath:     filepath.Join(workDir, filepath.Base(file)),
+				WorkDir:             workDir,
+				Language:            "en",
+				Transcriber:         svc,
+				LLM:                 llmClient,
+				MediaContext:        mediaContext,
+				ReferenceTranscript: referenceTranscript,
+				Logger:              cmdLogger,
 				Progress: func(phase transcription.Phase, elapsed time.Duration) {
 					switch {
 					case phase == transcription.PhaseExtract && elapsed == 0:

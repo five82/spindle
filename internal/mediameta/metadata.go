@@ -73,7 +73,7 @@ func (m *Metadata) IsMovie() bool {
 
 // LibraryPath computes the target library folder via SafeJoin.
 // Movies: {root}/{moviesDir}/{baseFilename}
-// TV: {root}/{tvDir}/{show}/Season {NN}
+// TV: {root}/{tvDir}/{show (year) [tmdbid-ID]}/Season {NN}
 func (m *Metadata) LibraryPath(root, moviesDir, tvDir string) (string, error) {
 	if m.IsMovie() {
 		base := m.BaseFilename()
@@ -87,6 +87,12 @@ func (m *Metadata) LibraryPath(root, moviesDir, tvDir string) (string, error) {
 	show := textutil.SanitizeDisplayName(m.ShowTitle)
 	if show == "" || show == "manual-import" {
 		show = textutil.SanitizeDisplayName(m.Title)
+	}
+	if m.Year != "" {
+		show += " (" + m.Year + ")"
+	}
+	if m.ID > 0 {
+		show += fmt.Sprintf(" [tmdbid-%d]", m.ID)
 	}
 
 	dir, err := textutil.SafeJoin(root, tvDir)
@@ -109,7 +115,8 @@ func (m *Metadata) Filename() string {
 	return buildEpisodeFilename(m)
 }
 
-// BaseFilename returns the movie/base filename: "Title (Year)".
+// BaseFilename returns the movie/base filename using Jellyfin provider-ID
+// naming: "Title (Year) [tmdbid-ID]".
 func (m *Metadata) BaseFilename() string {
 	title := m.Title
 	if m.DisplayTitle != "" {
@@ -121,6 +128,9 @@ func (m *Metadata) BaseFilename() string {
 	name := textutil.SanitizeDisplayName(title)
 	if m.Year != "" {
 		name += " (" + m.Year + ")"
+	}
+	if m.ID > 0 {
+		name += fmt.Sprintf(" [tmdbid-%d]", m.ID)
 	}
 	return name
 }

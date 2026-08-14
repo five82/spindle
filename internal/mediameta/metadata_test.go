@@ -31,12 +31,13 @@ func TestMetadataIsMovie(t *testing.T) {
 
 func TestFilenameMovie(t *testing.T) {
 	m := Metadata{
+		ID:        603,
 		Title:     "The Matrix",
 		MediaType: "movie",
 		Year:      "1999",
 	}
 	got := m.Filename()
-	want := "The Matrix (1999)"
+	want := "The Matrix (1999) [tmdbid-603]"
 	if got != want {
 		t.Errorf("Filename() = %q, want %q", got, want)
 	}
@@ -82,6 +83,7 @@ func TestFilenameTV(t *testing.T) {
 
 func TestLibraryPathMovie(t *testing.T) {
 	m := Metadata{
+		ID:        27205,
 		Title:     "Inception",
 		MediaType: "movie",
 		Year:      "2010",
@@ -90,7 +92,7 @@ func TestLibraryPathMovie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LibraryPath: %v", err)
 	}
-	want := "/media/movies/Inception (2010)"
+	want := "/media/movies/Inception (2010) [tmdbid-27205]"
 	if got != want {
 		t.Errorf("LibraryPath() = %q, want %q", got, want)
 	}
@@ -98,15 +100,17 @@ func TestLibraryPathMovie(t *testing.T) {
 
 func TestLibraryPathTV(t *testing.T) {
 	m := Metadata{
+		ID:           2316,
 		ShowTitle:    "The Office",
 		MediaType:    "tv",
+		Year:         "2005",
 		SeasonNumber: 3,
 	}
 	got, err := m.LibraryPath("/media", "movies", "tv")
 	if err != nil {
 		t.Fatalf("LibraryPath: %v", err)
 	}
-	want := "/media/tv/The Office/Season 03"
+	want := "/media/tv/The Office (2005) [tmdbid-2316]/Season 03"
 	if got != want {
 		t.Errorf("LibraryPath() = %q, want %q", got, want)
 	}

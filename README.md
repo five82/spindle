@@ -111,7 +111,13 @@ to the configured review area instead of being silently accepted. Clean TV
 episodes may reach the library while only unresolved episodes go to review.
 
 Final Jellyfin-facing display subtitles are SRT. They are muxed into the MKV by
-default or kept as sidecars when muxing is disabled or fails.
+default or kept as sidecars when muxing is disabled or fails. The best-effort
+LLM audit uses the identified episode's downloaded OpenSubtitles text as an
+untimed reference transcript when available; movie references are selected by
+TMDB ID and cached. Reference failure falls back to the WhisperX-only audit.
+`spindle debug subtitle` also reads Jellyfin's TMDB provider marker from a
+library path and downloads the corresponding movie or episode reference before
+regenerating the subtitle.
 
 ## Recovery
 
@@ -170,6 +176,13 @@ Locations come from the generated configuration:
 - `state_dir`: timestamped JSON daemon logs and the transient queue database
 - XDG cache: rip cache, disc-ID cache, and OpenSubtitles cache
 - XDG runtime directory, with `/tmp` fallback: daemon socket and lock
+
+Identified library paths include durable Jellyfin TMDB provider IDs:
+
+```text
+Movies/Movie (2024) [tmdbid-123456]/Movie (2024) [tmdbid-123456].mkv
+TV/Show (2020) [tmdbid-654321]/Season 01/Show - S01E05.mkv
+```
 
 Successful organization cleans that item's staging directory. Cleanup failures
 are warnings so completed media is not discarded merely because temporary

@@ -16,6 +16,7 @@ import (
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/srtutil"
 	"github.com/five82/spindle/internal/stage"
@@ -29,14 +30,16 @@ type Handler struct {
 	cfg         *config.Config
 	transcriber *transcription.Service
 	llm         *llm.Client
+	osClient    *opensubtitles.Client
 }
 
 // New creates a subtitle handler.
-func New(cfg *config.Config, transcriber *transcription.Service, llmClient *llm.Client) *Handler {
+func New(cfg *config.Config, transcriber *transcription.Service, llmClient *llm.Client, osClient *opensubtitles.Client) *Handler {
 	return &Handler{
 		cfg:         cfg,
 		transcriber: transcriber,
 		llm:         llmClient,
+		osClient:    osClient,
 	}
 }
 
@@ -66,7 +69,10 @@ type GenerateDisplaySubtitleRequest struct {
 	// MediaContext describes the content for the audit prompt, e.g.
 	// `the movie "Air" (2023)` or `the TV episode Breaking Bad s01_001`.
 	MediaContext string
-	Transcriber  interface {
+	// ReferenceTranscript is optional untimed comparison text. It can improve
+	// exact wording but never controls display timing or cue boundaries.
+	ReferenceTranscript string
+	Transcriber         interface {
 		SelectPrimaryAudioTrack(context.Context, string, string) (transcription.SelectedAudio, error)
 		Transcribe(context.Context, transcription.TranscribeRequest, ...transcription.ProgressFunc) (*transcription.TranscribeResult, error)
 	}
@@ -163,10 +169,11 @@ func GenerateDisplaySubtitle(ctx context.Context, req GenerateDisplaySubtitleReq
 	// Audit before returning so callers that re-parse formatting.DisplayPath
 	// see the audited cues.
 	audit := auditDisplaySRT(ctx, req.LLM, req.Logger, auditParams{
-		DisplayPath:  formatting.DisplayPath,
-		VideoSeconds: videoSeconds,
-		MediaContext: req.MediaContext,
-		EpisodeKey:   req.EpisodeKey,
+		DisplayPath:         formatting.DisplayPath,
+		VideoSeconds:        videoSeconds,
+		MediaContext:        req.MediaContext,
+		EpisodeKey:          req.EpisodeKey,
+		ReferenceTranscript: req.ReferenceTranscript,
 	})
 
 	if req.OnFormattingComplete != nil {
@@ -360,19 +367,22 @@ func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Sessi
 		return nil, fmt.Errorf("create subtitles dir: %w", err)
 	}
 
+	referenceTranscript := h.auditReferenceTranscript(ctx, sess, key)
+
 	return GenerateDisplaySubtitle(ctx, GenerateDisplaySubtitleRequest{
-		VideoPath:       asset.Path,
-		DisplayBasePath: filepath.Join(subtitleDir, key+".mkv"),
-		WorkDir:         workDir,
-		Language:        "en",
-		ItemID:          item.ID,
-		EpisodeKey:      key,
-		Purpose:         "subtitle_generation",
-		Transcript:      transcriptArtifact(sess, key),
-		Transcriber:     h.transcriber,
-		LLM:             h.llm,
-		MediaContext:    auditMediaContext(sess.Env.Metadata, key),
-		Logger:          sess.Logger,
+		VideoPath:           asset.Path,
+		DisplayBasePath:     filepath.Join(subtitleDir, key+".mkv"),
+		WorkDir:             workDir,
+		Language:            "en",
+		ItemID:              item.ID,
+		EpisodeKey:          key,
+		Purpose:             "subtitle_generation",
+		Transcript:          transcriptArtifact(sess, key),
+		Transcriber:         h.transcriber,
+		LLM:                 h.llm,
+		MediaContext:        auditMediaContext(sess.Env.Metadata, key),
+		ReferenceTranscript: referenceTranscript,
+		Logger:              sess.Logger,
 		Progress: func(phase transcription.Phase, elapsed time.Duration) {
 			message := sess.Task.ProgressMessage
 			switch phase {

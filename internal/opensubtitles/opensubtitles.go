@@ -117,6 +117,11 @@ func (c *Client) Search(ctx context.Context, tmdbID int, season, episode int, la
 
 	params := url.Values{}
 	params.Set("tmdb_id", fmt.Sprintf("%d", tmdbID))
+	if season > 0 || episode > 0 {
+		params.Set("type", "episode")
+	} else {
+		params.Set("type", "movie")
+	}
 	if season > 0 {
 		params.Set("season_number", fmt.Sprintf("%d", season))
 	}
