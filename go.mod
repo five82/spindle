@@ -1,10 +1,10 @@
 module github.com/five82/spindle
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/fatih/color v1.19.0
-	github.com/five82/reel v0.0.0-20260802003558-9d24d28fd651
+	github.com/five82/reel v0.0.0-20260814205800-f1a802bd5a09
 	github.com/gofrs/flock v0.13.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pilebones/go-udev v0.9.1
@@ -28,5 +28,5 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.11.0 // indirect
+	modernc.org/memory v1.12.0 // indirect
 )

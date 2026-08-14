@@ -27,8 +27,9 @@ version_lt() {
 
 print_step "Checking Go toolchain"
 
+MIN_GO_VERSION=$(awk '$1 == "go" { print $2; exit }' go.mod)
 if ! command -v go &>/dev/null; then
-    print_error "Go is not installed. Install Go 1.26.5 or newer."
+    print_error "Go is not installed. Install Go $MIN_GO_VERSION or newer."
     exit 1
 fi
 
@@ -37,7 +38,6 @@ if [ -z "$GO_VERSION" ]; then
     GO_VERSION=$(go version | awk '{print $3}' | sed 's/^go//')
 fi
 
-MIN_GO_VERSION="1.26.5"
 if version_lt "$GO_VERSION" "$MIN_GO_VERSION"; then
     print_error "Go $MIN_GO_VERSION or newer required (found $GO_VERSION)."
     exit 1
@@ -81,7 +81,7 @@ else
 fi
 
 print_step "Running go test -race ./..."
-if GOWORK=off go test -race ./...; then
+if GOWORK=off go test -race -p 1 ./...; then
     print_success "Race detection passed"
 else
     print_error "Race condition detected"
