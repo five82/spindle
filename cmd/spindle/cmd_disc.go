@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/five82/spindle/internal/daemonctl"
+	"github.com/five82/spindle/internal/makemkv"
 	"github.com/five82/spindle/internal/sockhttp"
 )
 
@@ -25,7 +27,96 @@ func newDiscCmd() *cobra.Command {
 		newDiscResumeCmd(),
 		newDiscDetectCmd(),
 		newIdentifyCmd(),
+		newDiscScanCmd(),
 	)
+	return cmd
+}
+
+// newDiscScanCmd lists every title on a disc from a raw MakeMKV scan, with
+// no identification or TMDB involvement. Unlike 'disc identify' it defaults
+// to --min-length 0 so short extras and trailers are visible; the reported
+// title IDs are what 'spindle rip' consumes.
+func newDiscScanCmd() *cobra.Command {
+	var (
+		asJSON    bool
+		minLength int
+	)
+	cmd := &cobra.Command{
+		Use:   "scan [device]",
+		Short: "List all disc titles from a raw MakeMKV scan",
+		Example: `  spindle disc scan                # all titles, configured drive
+  spindle disc scan --json         # machine-readable title inventory
+  spindle disc scan /dev/sr1 --min-length 60`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			var device string
+			if len(args) > 0 {
+				device = args[0]
+			}
+			if device == "" && cfg != nil {
+				device = cfg.MakeMKV.OpticalDrive
+			}
+			if device == "" {
+				return fmt.Errorf("no device specified and no optical drive configured")
+			}
+
+			if !asJSON {
+				fmt.Printf("Scanning disc on %s...\n", device)
+			}
+			info, err := makemkv.Scan(context.Background(), device,
+				time.Duration(cfg.MakeMKV.InfoTimeout)*time.Second, minLength, buildLogger())
+			if err != nil {
+				return fmt.Errorf("makemkv scan: %w", err)
+			}
+
+			if asJSON {
+				type scanTitle struct {
+					ID              int    `json:"id"`
+					Name            string `json:"name,omitempty"`
+					Playlist        string `json:"playlist,omitempty"`
+					DurationSeconds int    `json:"duration_seconds"`
+					Chapters        int    `json:"chapters"`
+					SizeBytes       int64  `json:"size_bytes"`
+					Segments        int    `json:"segments,omitempty"`
+				}
+				out := struct {
+					Device           string      `json:"device"`
+					DiscName         string      `json:"disc_name,omitempty"`
+					MinLengthSeconds int         `json:"min_length_seconds"`
+					Titles           []scanTitle `json:"titles"`
+				}{Device: device, DiscName: info.Name, MinLengthSeconds: minLength, Titles: []scanTitle{}}
+				for _, t := range info.Titles {
+					out.Titles = append(out.Titles, scanTitle{
+						ID:              t.ID,
+						Name:            t.Name,
+						Playlist:        t.Playlist,
+						DurationSeconds: t.Duration,
+						Chapters:        t.Chapters,
+						SizeBytes:       t.SizeBytes,
+						Segments:        t.SegmentCount,
+					})
+				}
+				return printJSON(out)
+			}
+
+			fmt.Printf("\n%s %s\n", labelStyle("Disc:  "), info.Name)
+			fmt.Printf("%s %d (min length %ds)\n", labelStyle("Titles:"), len(info.Titles), minLength)
+			for _, t := range info.Titles {
+				line := fmt.Sprintf("  Title %d: %s (%d chapters, %s)",
+					t.ID, formatTitleDuration(t.Duration), t.Chapters, formatBytes(t.SizeBytes))
+				if t.Playlist != "" {
+					line += fmt.Sprintf(" [%s]", t.Playlist)
+				}
+				if t.Name != "" {
+					line += " " + t.Name
+				}
+				fmt.Println(line)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the title inventory as JSON")
+	cmd.Flags().IntVar(&minLength, "min-length", 0, "Minimum title length in seconds (0 reports everything)")
 	return cmd
 }
 

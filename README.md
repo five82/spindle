@@ -119,6 +119,17 @@ TMDB ID and cached. Reference failure falls back to the WhisperX-only audit.
 library path and downloads the corresponding movie or episode reference before
 regenerating the subtitle.
 
+## Manual orchestration
+
+The daemon automates the standard case: one disc, one feature or one TV
+season. Edge cases - disc extras, theatrical shorts, multi-disc movies,
+multiple editions, discs MakeMKV struggles with - are handled by a coding
+agent using the `orchestrate` skill in `.agents/skills/orchestrate/`. The
+skill drives the same building blocks by hand: `spindle disc scan`,
+`spindle rip`, `spindle encode`, `spindle debug subtitle`, and
+`spindle jellyfin refresh`. The daemon must be stopped while orchestration
+runs; `spindle rip` and `spindle encode` enforce this.
+
 ## Recovery
 
 Retry a failed item or every failed item:
