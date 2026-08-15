@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/five82/spindle/internal/daemonctl"
 	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/queueaccess"
 	"github.com/five82/spindle/internal/queueops"
 )
 
@@ -86,17 +88,16 @@ func newQueueListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List queue items",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			acc, err := openQueueAccess()
-			if err != nil {
-				return err
-			}
+		Long: `List queue items.
 
+Uses the daemon API when the daemon is running; with the daemon stopped,
+reads the queue database directly (read-only).`,
+		RunE: func(_ *cobra.Command, _ []string) error {
 			var queueStages []queue.Stage
 			for _, s := range stages {
 				queueStages = append(queueStages, queue.Stage(strings.ToLower(s)))
 			}
-			items, err := acc.List(queueStages...)
+			items, err := fetchQueueItems(queueStages...)
 			if err != nil {
 				return err
 			}
@@ -155,18 +156,18 @@ func newQueueShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id>",
 		Short: "Show detailed information for a queue item",
-		Args:  cobra.ExactArgs(1),
+		Long: `Show detailed information for a queue item.
+
+Uses the daemon API when the daemon is running; with the daemon stopped,
+reads the queue database directly (read-only).`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			id, err := parseQueueID(args[0])
 			if err != nil {
 				return err
 			}
 
-			acc, err := openQueueAccess()
-			if err != nil {
-				return err
-			}
-			item, err := acc.GetByID(id)
+			item, err := fetchQueueItem(id)
 			if err != nil {
 				return err
 			}
@@ -386,6 +387,97 @@ func newQueueCancelCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// openQueueDB opens the queue database directly for stopped-daemon read-only
+// fallbacks. Returns (nil, nil) when the database file does not exist yet, so
+// callers see an empty queue instead of creating a file the daemon owns.
+func openQueueDB(dbPath string) (*queue.Store, error) {
+	if _, err := os.Stat(dbPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stat queue db: %w", err)
+	}
+	return queue.Open(dbPath)
+}
+
+// directQueueItems reads queue items straight from the database, converted
+// with the same response builder the daemon API uses so rendering and --json
+// output match the daemon-backed path.
+func directQueueItems(dbPath string, stages ...queue.Stage) ([]queueaccess.Item, error) {
+	store, err := openQueueDB(dbPath)
+	if err != nil || store == nil {
+		return nil, err
+	}
+	defer func() { _ = store.Close() }()
+	items, err := store.List(stages...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]queueaccess.Item, 0, len(items))
+	for _, item := range items {
+		tasks, err := store.TasksForItem(item.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, httpapi.ToItemResponse(item, tasks, false))
+	}
+	return out, nil
+}
+
+// directQueueItem reads one queue item straight from the database. Returns
+// (nil, nil) when the item or the database does not exist.
+func directQueueItem(dbPath string, id int64) (*queueaccess.Item, error) {
+	store, err := openQueueDB(dbPath)
+	if err != nil || store == nil {
+		return nil, err
+	}
+	defer func() { _ = store.Close() }()
+	item, err := store.GetByID(id)
+	if err != nil || item == nil {
+		return nil, err
+	}
+	tasks, err := store.TasksForItem(item.ID)
+	if err != nil {
+		return nil, err
+	}
+	resp := httpapi.ToItemResponse(item, tasks, true)
+	return &resp, nil
+}
+
+// noteDirectQueueRead tells the operator a read is bypassing the daemon API.
+// Goes to stderr so --json output stays clean.
+func noteDirectQueueRead() {
+	fmt.Fprintln(os.Stderr, dimStyle("Daemon stopped; reading queue database directly"))
+}
+
+// fetchQueueItems lists items via the daemon API, falling back to a direct
+// read-only database read when the daemon is stopped.
+func fetchQueueItems(stages ...queue.Stage) ([]queueaccess.Item, error) {
+	acc, err := openQueueAccess()
+	if err == nil {
+		return acc.List(stages...)
+	}
+	if !errors.Is(err, queueaccess.ErrDaemonUnavailable) {
+		return nil, err
+	}
+	noteDirectQueueRead()
+	return directQueueItems(cfg.QueueDBPath(), stages...)
+}
+
+// fetchQueueItem gets one item via the daemon API, falling back to a direct
+// read-only database read when the daemon is stopped.
+func fetchQueueItem(id int64) (*queueaccess.Item, error) {
+	acc, err := openQueueAccess()
+	if err == nil {
+		return acc.GetByID(id)
+	}
+	if !errors.Is(err, queueaccess.ErrDaemonUnavailable) {
+		return nil, err
+	}
+	noteDirectQueueRead()
+	return directQueueItem(cfg.QueueDBPath(), id)
 }
 
 func clearQueueDBFiles(dbPath string) error {

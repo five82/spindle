@@ -155,7 +155,7 @@ func (s *Server) handleQueueList(w http.ResponseWriter, r *http.Request) {
 	}
 	responses := make([]ItemResponse, 0, len(items))
 	for _, item := range items {
-		responses = append(responses, toItemResponse(item, s.tasksFor(item.ID), false))
+		responses = append(responses, ToItemResponse(item, s.tasksFor(item.ID), false))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": responses})
 }
@@ -176,7 +176,7 @@ func (s *Server) handleQueueGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "item not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"item": toItemResponse(item, s.tasksFor(item.ID), true)})
+	writeJSON(w, http.StatusOK, map[string]any{"item": ToItemResponse(item, s.tasksFor(item.ID), true)})
 }
 
 // tasksFor loads an item's task rows for response building; a load failure
@@ -308,7 +308,7 @@ func (s *Server) handleQueueEnqueueCached(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to enqueue cached rip")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"item": toItemResponse(item, nil, false)})
+	writeJSON(w, http.StatusOK, map[string]any{"item": ToItemResponse(item, nil, false)})
 }
 
 func (s *Server) handleQueueRemove(w http.ResponseWriter, r *http.Request) {

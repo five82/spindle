@@ -54,6 +54,73 @@ func TestClearQueueDBFilesMissingFilesOK(t *testing.T) {
 	}
 }
 
+func TestDirectQueueReadsMissingDB(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "queue.db")
+
+	items, err := directQueueItems(dbPath)
+	if err != nil || items != nil {
+		t.Fatalf("directQueueItems on missing db = (%v, %v), want (nil, nil)", items, err)
+	}
+	item, err := directQueueItem(dbPath, 1)
+	if err != nil || item != nil {
+		t.Fatalf("directQueueItem on missing db = (%v, %v), want (nil, nil)", item, err)
+	}
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatalf("direct read must not create the database file: %v", err)
+	}
+}
+
+func TestDirectQueueReads(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "queue.db")
+	store, err := queue.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	alpha, err := store.NewDisc("Alpha", "fp-alpha")
+	if err != nil {
+		t.Fatalf("insert alpha: %v", err)
+	}
+	beta, err := store.NewDisc("Beta", "fp-beta")
+	if err != nil {
+		t.Fatalf("insert beta: %v", err)
+	}
+	if err := store.MoveToStage(beta, queue.StageEncoding); err != nil {
+		t.Fatalf("move beta: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	items, err := directQueueItems(dbPath)
+	if err != nil {
+		t.Fatalf("directQueueItems: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("directQueueItems returned %d items, want 2", len(items))
+	}
+
+	filtered, err := directQueueItems(dbPath, queue.StageEncoding)
+	if err != nil {
+		t.Fatalf("directQueueItems filtered: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].DiscTitle != "Beta" {
+		t.Fatalf("stage filter returned %+v, want single Beta item", filtered)
+	}
+
+	got, err := directQueueItem(dbPath, alpha.ID)
+	if err != nil {
+		t.Fatalf("directQueueItem: %v", err)
+	}
+	if got == nil || got.DiscTitle != "Alpha" || got.DiscFingerprint != "fp-alpha" {
+		t.Fatalf("directQueueItem returned %+v, want Alpha", got)
+	}
+
+	missing, err := directQueueItem(dbPath, 9999)
+	if err != nil || missing != nil {
+		t.Fatalf("directQueueItem missing id = (%v, %v), want (nil, nil)", missing, err)
+	}
+}
+
 func TestPrintTaskLines(t *testing.T) {
 	tasks := []httpapi.TaskResponse{
 		{

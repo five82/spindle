@@ -187,34 +187,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	organizerHandler := organizer.New(cfg, jfClient, notifier)
 
 	// Check dependencies and create status tracker.
-	depReqs := []deps.Requirement{
-		{Name: "makemkvcon", Command: "makemkvcon", Description: "MakeMKV CLI", Optional: false},
-		{Name: "ffmpeg", Command: "ffmpeg", Description: "FFmpeg media processor", Optional: false},
-		{Name: "ffprobe", Command: "ffprobe", Description: "FFprobe media analyzer", Optional: false},
-		{Name: "mkvmerge", Command: "mkvmerge", Description: "MKVToolNix merge tool", Optional: false},
-		{Name: "uvx", Command: "uvx", Description: "uv tool runner (WhisperX, ffsubsync)", Optional: false},
-		{Name: "libSvtAv1Enc", Command: "libSvtAv1Enc.so", Description: "Reel SVT-AV1 encoder library", Optional: false, Library: true},
-		{Name: "libavformat", Command: "libavformat.so", Description: "Reel FFmpeg format library", Optional: false, Library: true},
-		{Name: "libavcodec", Command: "libavcodec.so", Description: "Reel FFmpeg codec library", Optional: false, Library: true},
-		{Name: "libavutil", Command: "libavutil.so", Description: "Reel FFmpeg utility library", Optional: false, Library: true},
-		{Name: "libswscale", Command: "libswscale.so", Description: "Reel FFmpeg scaling library", Optional: false, Library: true},
-		{Name: "libswresample", Command: "libswresample.so", Description: "Reel FFmpeg resampling library", Optional: false, Library: true},
-		{Name: "libopusenc", Command: "libopusenc.so", Description: "Reel Opus encoder library", Optional: false, Library: true},
-		{Name: "libvship", Command: "libvship.so", Description: "Reel target-quality VSHIP/CVVDP library", Optional: false, Library: true},
-	}
-	depStatuses := deps.CheckRequirements(depReqs)
-	depResponses := make([]httpapi.DependencyResponse, len(depStatuses))
-	for i, s := range depStatuses {
-		depResponses[i] = httpapi.DependencyResponse{
-			Name:        s.Name,
-			Command:     s.Command,
-			Description: s.Description,
-			Optional:    s.Optional,
-			Available:   s.Available,
-			Detail:      s.Detail,
-		}
-	}
-	statusTracker := httpapi.NewStatusTracker(depResponses)
+	statusTracker := httpapi.NewStatusTracker(CheckDependencies())
 
 	// Create workflow manager and configure stages.
 	manager := workflow.New(store, notifier, statusTracker, logger)
@@ -455,6 +428,40 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	logger.Info("daemon stopped")
 	return lock.Unlock()
+}
+
+// CheckDependencies probes the external commands and libraries Spindle
+// requires. Used by the daemon's status tracker and by the CLI to render
+// dependency status while the daemon is stopped.
+func CheckDependencies() []httpapi.DependencyResponse {
+	depReqs := []deps.Requirement{
+		{Name: "makemkvcon", Command: "makemkvcon", Description: "MakeMKV CLI", Optional: false},
+		{Name: "ffmpeg", Command: "ffmpeg", Description: "FFmpeg media processor", Optional: false},
+		{Name: "ffprobe", Command: "ffprobe", Description: "FFprobe media analyzer", Optional: false},
+		{Name: "mkvmerge", Command: "mkvmerge", Description: "MKVToolNix merge tool", Optional: false},
+		{Name: "uvx", Command: "uvx", Description: "uv tool runner (WhisperX, ffsubsync)", Optional: false},
+		{Name: "libSvtAv1Enc", Command: "libSvtAv1Enc.so", Description: "Reel SVT-AV1 encoder library", Optional: false, Library: true},
+		{Name: "libavformat", Command: "libavformat.so", Description: "Reel FFmpeg format library", Optional: false, Library: true},
+		{Name: "libavcodec", Command: "libavcodec.so", Description: "Reel FFmpeg codec library", Optional: false, Library: true},
+		{Name: "libavutil", Command: "libavutil.so", Description: "Reel FFmpeg utility library", Optional: false, Library: true},
+		{Name: "libswscale", Command: "libswscale.so", Description: "Reel FFmpeg scaling library", Optional: false, Library: true},
+		{Name: "libswresample", Command: "libswresample.so", Description: "Reel FFmpeg resampling library", Optional: false, Library: true},
+		{Name: "libopusenc", Command: "libopusenc.so", Description: "Reel Opus encoder library", Optional: false, Library: true},
+		{Name: "libvship", Command: "libvship.so", Description: "Reel target-quality VSHIP/CVVDP library", Optional: false, Library: true},
+	}
+	depStatuses := deps.CheckRequirements(depReqs)
+	depResponses := make([]httpapi.DependencyResponse, len(depStatuses))
+	for i, s := range depStatuses {
+		depResponses[i] = httpapi.DependencyResponse{
+			Name:        s.Name,
+			Command:     s.Command,
+			Description: s.Description,
+			Optional:    s.Optional,
+			Available:   s.Available,
+			Detail:      s.Detail,
+		}
+	}
+	return depResponses
 }
 
 // cleanOldLogs removes timestamped daemon log files older than retentionDays.

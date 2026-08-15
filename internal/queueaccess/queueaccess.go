@@ -88,21 +88,23 @@ type EnqueueCachedRequest struct {
 	AllowDuplicate bool   `json:"allow_duplicate"`
 }
 
-// Status is the daemon status response used by CLI rendering.
+// Status is the daemon status response used by CLI rendering. JSON field
+// names mirror the daemon's /api/status payload so `spindle status --json`
+// output is shaped the same whether the daemon is running or stopped.
 type Status struct {
-	Running      bool
-	PID          int
-	QueueDBPath  string
-	LockFilePath string
-	Workflow     WorkflowStatus
-	Dependencies []DependencyStatus
+	Running      bool               `json:"running"`
+	PID          int                `json:"pid"`
+	QueueDBPath  string             `json:"queueDbPath"`
+	LockFilePath string             `json:"lockFilePath"`
+	Workflow     WorkflowStatus     `json:"workflow"`
+	Dependencies []DependencyStatus `json:"dependencies"`
 }
 
 // WorkflowStatus is the daemon workflow status used by CLI rendering.
 type WorkflowStatus struct {
-	Running    bool
-	QueueStats map[queue.Stage]int
-	LastError  string
+	Running    bool                `json:"running"`
+	QueueStats map[queue.Stage]int `json:"queueStats"`
+	LastError  string              `json:"lastError"`
 }
 
 // DependencyStatus reports an external dependency health check.

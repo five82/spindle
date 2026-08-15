@@ -15,6 +15,7 @@ import (
 	"github.com/five82/spindle/internal/daemonctl"
 	"github.com/five82/spindle/internal/daemonrun"
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/queueaccess"
 )
 
 func newStartCmd() *cobra.Command {
@@ -102,34 +103,41 @@ func newStatusCmd() *cobra.Command {
 		Use:     "status",
 		Short:   "Show system and queue status",
 		GroupID: groupDaemon,
+		Long: `Show system and queue status.
+
+Works with the daemon stopped: queue counts come from a direct read-only
+database read and dependency checks run locally.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			lp, sp := lockPath(), socketPath()
-			if !daemonctl.IsRunning(lp, sp) {
-				if asJSON {
-					fmt.Println(`{"running": false}`)
-					return nil
+			var status *queueaccess.Status
+			if daemonctl.IsRunning(lp, sp) {
+				acc, err := openQueueAccess()
+				if err != nil {
+					return err
 				}
-				fmt.Println("Daemon stopped")
-				return nil
-			}
-
-			acc, err := openQueueAccess()
-			if err != nil {
-				return err
-			}
-			status, err := acc.Status()
-			if err != nil {
-				return err
+				if status, err = acc.Status(); err != nil {
+					return err
+				}
+			} else {
+				var err error
+				if status, err = localStatus(); err != nil {
+					return err
+				}
 			}
 
 			if asJSON {
 				return printJSON(status)
 			}
 
+			daemonState := successStyle("running")
+			if !status.Running {
+				daemonState = dimStyle("stopped")
+			}
+
 			fmt.Println()
 			fmt.Println(headerStyle("Spindle Status"))
 			fmt.Println()
-			fmt.Printf("  %-12s %s\n", labelStyle("Daemon"), successStyle("running"))
+			fmt.Printf("  %-12s %s\n", labelStyle("Daemon"), daemonState)
 			if flagVerbose {
 				fmt.Printf("  %-12s %s\n", labelStyle("Socket"), dimStyle(sp))
 				fmt.Printf("  %-12s %s\n", labelStyle("Lock"), dimStyle(lp))
@@ -191,6 +199,28 @@ func newStatusCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output status as JSON")
 	return cmd
+}
+
+// localStatus builds status while the daemon is stopped: queue counts come
+// from a direct read-only database read, dependency checks run locally.
+func localStatus() (*queueaccess.Status, error) {
+	stats := map[queue.Stage]int{}
+	store, err := openQueueDB(cfg.QueueDBPath())
+	if err != nil {
+		return nil, err
+	}
+	if store != nil {
+		defer func() { _ = store.Close() }()
+		if stats, err = store.Stats(); err != nil {
+			return nil, err
+		}
+	}
+	return &queueaccess.Status{
+		QueueDBPath:  cfg.QueueDBPath(),
+		LockFilePath: cfg.LockPath(),
+		Workflow:     queueaccess.WorkflowStatus{QueueStats: stats},
+		Dependencies: daemonrun.CheckDependencies(),
+	}, nil
 }
 
 func checkPath(label, path string) {

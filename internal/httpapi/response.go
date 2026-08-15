@@ -259,10 +259,11 @@ func (t *StatusTracker) Snapshot() (lastError string, deps []DependencyResponse)
 	return t.lastError, t.dependencies
 }
 
-// toItemResponse converts a queue.Item and its task rows to the API
+// ToItemResponse converts a queue.Item and its task rows to the API
 // response format. includeRipSpec attaches the raw envelope (single-item
 // GETs only: the list endpoint would ship every envelope on every poll).
-func toItemResponse(item *queue.Item, tasks []*queue.Task, includeRipSpec bool) ItemResponse {
+// Exported so the CLI's stopped-daemon direct reads render identically.
+func ToItemResponse(item *queue.Item, tasks []*queue.Task, includeRipSpec bool) ItemResponse {
 	resp := ItemResponse{
 		ID:              item.ID,
 		DiscTitle:       item.DiscTitle,

@@ -15,8 +15,9 @@ Reel AV1 target-quality encode, TMDB metadata, OpenSubtitles subtitles synced
 against WhisperX transcripts, ntfy).
 Feature-complete and in a bugfix phase — avoid over-engineering. Break
 forward: no backwards compatibility, no compat layers, no deprecated paths.
-Queue access goes through the daemon HTTP API; the only stopped-daemon
-exception is `queue clear --all` (deletes the transient queue DB files).
+Queue writes go through the daemon HTTP API. Stopped-daemon exceptions:
+`status` / `queue list` / `queue show` fall back to a direct read-only DB
+read, and `queue clear --all` deletes the transient queue DB files.
 
 Related repos: `../reel` (AV1 encoder used as a library),
 `../flyer` (read-only TUI, the HTTP API's one consumer).

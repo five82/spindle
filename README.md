@@ -95,6 +95,9 @@ spindle queue show <id>
 spindle logs --follow --item <id>
 ```
 
+`status`, `queue list`, and `queue show` also work while the daemon is
+stopped: they fall back to a direct read-only view of the queue database.
+
 Use `spindle --help` and `spindle <command> --help` for the current command and
 flag reference.
 
