@@ -49,14 +49,15 @@ type adoptionCheck struct {
 	TimeOverlap       float64
 	SpanCoverage      float64
 	TimingRefined     bool
+	SnappedCues       int
 	Passed            bool
 	FailureReason     string
 }
 
 // Metrics renders the gate measurements for decision logging.
 func (c adoptionCheck) Metrics() string {
-	return fmt.Sprintf("text_similarity=%.3f anchor_cues=%d median_anchor_delta_s=%.2f time_overlap=%.2f span_coverage=%.2f timing_refined=%t",
-		c.TextSimilarity, c.AnchorCues, c.MedianAnchorDelta, c.TimeOverlap, c.SpanCoverage, c.TimingRefined)
+	return fmt.Sprintf("text_similarity=%.3f anchor_cues=%d median_anchor_delta_s=%.2f time_overlap=%.2f span_coverage=%.2f timing_refined=%t snapped_cues=%d",
+		c.TextSimilarity, c.AnchorCues, c.MedianAnchorDelta, c.TimeOverlap, c.SpanCoverage, c.TimingRefined, c.SnappedCues)
 }
 
 // verifyAdoptionCandidate decides whether synced downloaded cues match the
@@ -271,6 +272,17 @@ func medianDelta(pairs []anchorPair) float64 {
 // can be matched across ASR and human transcription; short texts are
 // discarded because they repeat too often to anchor anything.
 func normalizeAnchorText(text string) string {
+	tokens := normalizeTokens(text)
+	if len(tokens) < 4 {
+		return ""
+	}
+	return strings.Join(tokens, " ")
+}
+
+// normalizeTokens lowercases text, strips markup and punctuation, and returns
+// the remaining words, the comparable form shared by cue anchoring and the
+// word-snap pass.
+func normalizeTokens(text string) []string {
 	text = strings.ToLower(stripMarkup(text))
 	var b strings.Builder
 	for _, r := range text {
@@ -281,11 +293,15 @@ func normalizeAnchorText(text string) string {
 			b.WriteByte(' ')
 		}
 	}
-	normalized := strings.Join(strings.Fields(b.String()), " ")
-	if len(strings.Fields(normalized)) < 4 {
-		return ""
+	return strings.Fields(b.String())
+}
+
+// normalizeToken normalizes one transcript word to the same form.
+func normalizeToken(word string) string {
+	if tokens := normalizeTokens(word); len(tokens) == 1 {
+		return tokens[0]
 	}
-	return normalized
+	return ""
 }
 
 func medianAbs(values []float64) float64 {

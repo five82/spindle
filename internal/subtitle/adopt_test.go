@@ -2,6 +2,7 @@ package subtitle
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -128,6 +129,71 @@ func TestProcessSubtitleJobAdoptsVerifiedDownload(t *testing.T) {
 	for _, cue := range cues {
 		if strings.Contains(cue.Text, "OpenSubtitles") {
 			t.Fatalf("spam cue survived adoption: %q", cue.Text)
+		}
+	}
+}
+
+// writeAlignedWordsJSON writes an audio.json whose word stream spreads each
+// cue's words across its interval, as the WhisperX wrapper does.
+func writeAlignedWordsJSON(t *testing.T, path string, cues []srtutil.Cue) {
+	t.Helper()
+	type jsonWord struct {
+		Word  string  `json:"word"`
+		Start float64 `json:"start"`
+		End   float64 `json:"end"`
+	}
+	var words []jsonWord
+	for _, w := range wordsForCues(cues) {
+		words = append(words, jsonWord{Word: w.Text, Start: w.Start, End: w.End})
+	}
+	payload, err := json.Marshal(map[string]any{"segments": []map[string]any{{"words": words}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProcessSubtitleJobSnapsAdoptedCuesToWordOnsets(t *testing.T) {
+	stubAdoptEnvironment(t, "140.0")
+	reference := dialogueCues(12, 10, 10)
+	// The candidate's text matches but every cue leads speech by 0.4s, the
+	// per-cue author lead that ffsubsync's global correction cannot remove.
+	candidate := shiftedCues(reference, 0.4)
+
+	h := &Handler{
+		cfg:      &config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}, Subtitles: config.SubtitlesConfig{Enabled: true}},
+		osClient: emptySearchClient(t),
+	}
+	sess, job := newAdoptSession(t, h, reference, []byte(srtutil.Format(candidate)))
+	root, err := sess.Item.StagingRoot(h.cfg.Paths.StagingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAlignedWordsJSON(t, filepath.Join(root, "transcripts", "s01e01", "audio.json"), reference)
+
+	outcome, err := h.processSubtitleJob(context.Background(), sess, job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != subtitleOutcomeAdopted {
+		t.Fatalf("outcome = %q", outcome)
+	}
+	records := sess.Env.Attributes.SubtitleGenerationResults
+	if len(records) != 1 {
+		t.Fatalf("records = %+v", records)
+	}
+	cues, err := srtutil.ParseFile(records[0].SubtitlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cues) != len(reference) {
+		t.Fatalf("adopted cue count = %d, want %d", len(cues), len(reference))
+	}
+	for i, cue := range cues {
+		if !approxEqual(cue.Start, reference[i].Start) {
+			t.Fatalf("cue %d start = %.3f, want word onset %.3f", i, cue.Start, reference[i].Start)
 		}
 	}
 }

@@ -191,6 +191,7 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 		adopted, err := h.tryAdoptCandidate(ctx, sess, job, candidate, adoptContext{
 			ReferenceSRTPath: reference.SRTPath,
 			ReferenceCues:    referenceCues,
+			ReferenceWords:   loadReferenceWords(logger, reference.JSONPath),
 			VideoSeconds:     videoSeconds,
 			SubtitleDir:      subtitleDir,
 			WorkDir:          workDir,
@@ -209,9 +210,12 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 type adoptContext struct {
 	ReferenceSRTPath string
 	ReferenceCues    []srtutil.Cue
-	VideoSeconds     float64
-	SubtitleDir      string
-	WorkDir          string
+	// ReferenceWords is the transcript's aligned word timestamps for the
+	// word-snap pass; nil (audio.json unavailable) skips the pass.
+	ReferenceWords []transcription.Word
+	VideoSeconds   float64
+	SubtitleDir    string
+	WorkDir        string
 }
 
 // candidateEvaluation is the outcome of cleaning, syncing, and verifying one
@@ -289,6 +293,17 @@ func (h *Handler) evaluateCandidate(ctx context.Context, candidate subtitleCandi
 	if !eval.Check.Passed {
 		eval.RejectReason = fmt.Sprintf("%s (%s)", eval.Check.FailureReason, eval.Check.Metrics())
 		return eval, nil
+	}
+	// The candidate is adopted; restore per-cue precision by snapping cue
+	// starts to the transcript's forced-alignment word onsets, keeping the
+	// result only when it still passes the unchanged gate.
+	if snapped, count := snapCuesToWords(eval.Cues, adopt.ReferenceWords); count > 0 {
+		if recheck := verifyAdoptionCandidate(snapped, adopt.ReferenceCues, adopt.VideoSeconds); recheck.Passed {
+			recheck.TimingRefined = eval.Check.TimingRefined
+			recheck.SnappedCues = count
+			eval.Cues = snapped
+			eval.Check = recheck
+		}
 	}
 	eval.Validation = validateCuesDetailed(eval.Cues, adopt.VideoSeconds)
 	if len(eval.Validation.SevereIssues) > 0 {

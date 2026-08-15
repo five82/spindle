@@ -111,6 +111,7 @@ func (h *Handler) AdoptForFile(ctx context.Context, req AdoptFileRequest) (*Adop
 	adopt := adoptContext{
 		ReferenceSRTPath: transcript.SRTPath,
 		ReferenceCues:    referenceCues,
+		ReferenceWords:   loadReferenceWords(logger, transcript.JSONPath),
 		VideoSeconds:     videoSeconds,
 		WorkDir:          req.WorkDir,
 	}
