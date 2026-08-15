@@ -10,9 +10,7 @@ import (
 )
 
 // Formatting targets from the Netflix English Timed Text Style Guide.
-// Shared by the formatter (display_postprocess.go, stable_ts_formatter.py
-// mirrors them) and the validator; the validator flags anything the
-// formatter failed to enforce.
+// The validator flags adopted tracks that violate them.
 const (
 	maxSubtitleLinesPerCue  = 2
 	maxSubtitleCharsPerLine = 42
@@ -23,17 +21,6 @@ const (
 	minSubtitleCueGap       = 2.0 / 24.0 // two frames at 24 fps
 	unbalancedLineDelta     = 16
 )
-
-// ValidateSRTContent checks SRT content for quality issues. Returns a list of
-// issue strings (empty means passed). Severe issues are handled by the subtitle
-// stage via validateCuesDetailed.
-func ValidateSRTContent(srtPath string, videoSeconds float64) ([]string, error) {
-	cues, err := srtutil.ParseFile(srtPath)
-	if err != nil {
-		return nil, err
-	}
-	return validateCues(cues, videoSeconds), nil
-}
 
 type validationResult struct {
 	Issues       []string
@@ -52,10 +39,6 @@ type subtitleQCStats struct {
 	OverlongLineCues        int
 	UnbalancedLineBreakCues int
 	TooManyLineCues         int
-}
-
-func validateCues(cues []srtutil.Cue, videoSeconds float64) []string {
-	return validateCuesDetailed(cues, videoSeconds).Issues
 }
 
 func validateCuesDetailed(cues []srtutil.Cue, videoSeconds float64) validationResult {

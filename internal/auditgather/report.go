@@ -84,20 +84,20 @@ type StageGate struct {
 // not just the item's. EventsOmitted counts progress events dropped by
 // downsampling.
 type LogAnalysis struct {
-	Paths              []string      `json:"paths"`
-	IsDebug            bool          `json:"is_debug"`
-	LinesScanned       int           `json:"lines_scanned"`
-	InferredDiscSource string        `json:"inferred_disc_source,omitempty"`
-	InferredMediaHint  string        `json:"inferred_media_hint,omitempty"`
+	Paths              []string `json:"paths"`
+	IsDebug            bool     `json:"is_debug"`
+	LinesScanned       int      `json:"lines_scanned"`
+	InferredDiscSource string   `json:"inferred_disc_source,omitempty"`
+	InferredMediaHint  string   `json:"inferred_media_hint,omitempty"`
 	// Decisions feeds analysis but is not serialized: every decision (with
 	// its timestamp) is preserved verbatim in analysis.decision_groups
 	// entries, so emitting the raw list would duplicate ~25% of the report.
-	Decisions []LogDecision `json:"-"`
-	Warnings           []LogEntry    `json:"warnings,omitempty"`
-	Errors             []LogEntry    `json:"errors,omitempty"`
-	Events             []LogEntry    `json:"events,omitempty"`
-	EventsOmitted      int           `json:"events_omitted,omitempty"`
-	Stages             []StageEvent  `json:"stages,omitempty"`
+	Decisions     []LogDecision `json:"-"`
+	Warnings      []LogEntry    `json:"warnings,omitempty"`
+	Errors        []LogEntry    `json:"errors,omitempty"`
+	Events        []LogEntry    `json:"events,omitempty"`
+	EventsOmitted int           `json:"events_omitted,omitempty"`
+	Stages        []StageEvent  `json:"stages,omitempty"`
 }
 
 // LogDecision captures a single decision from the log.
@@ -299,23 +299,21 @@ type SubtitleSummary struct {
 	ValidationPassed      int                     `json:"validation_passed,omitempty"`
 	ValidationNeedsReview int                     `json:"validation_needs_review,omitempty"`
 	ValidationFailed      int                     `json:"validation_failed,omitempty"`
+	Skipped               int                     `json:"skipped,omitempty"`
 	OutputSubtitleTracks  int                     `json:"output_subtitle_tracks,omitempty"`
 	SubtitleLabelsCorrect bool                    `json:"subtitle_labels_correct"`
 }
 
 // SubtitleResultSummary is the actionable part of one subtitle-generation record.
 type SubtitleResultSummary struct {
-	EpisodeKey        string   `json:"episode_key,omitempty"`
-	Source            string   `json:"source,omitempty"`
-	Language          string   `json:"language,omitempty"`
-	Segments          int      `json:"segments,omitempty"`
-	ValidationResult  string   `json:"validation_result,omitempty"`
-	ReviewIssues      []string `json:"review_issues,omitempty"`
-	SevereIssues      []string `json:"severe_issues,omitempty"`
-	QCObservations    []string `json:"qc_observations,omitempty"`
-	AuditResult       string   `json:"audit_result,omitempty"`
-	AuditEditsApplied int      `json:"audit_edits_applied,omitempty"`
-	AuditEditsDropped int      `json:"audit_edits_dropped,omitempty"`
+	EpisodeKey       string   `json:"episode_key,omitempty"`
+	Source           string   `json:"source,omitempty"`
+	Language         string   `json:"language,omitempty"`
+	Segments         int      `json:"segments,omitempty"`
+	ValidationResult string   `json:"validation_result,omitempty"`
+	ReviewIssues     []string `json:"review_issues,omitempty"`
+	SevereIssues     []string `json:"severe_issues,omitempty"`
+	QCObservations   []string `json:"qc_observations,omitempty"`
 }
 
 // RoutingSummary classifies final outputs against configured library/review roots.

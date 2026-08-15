@@ -23,6 +23,9 @@ func (c *Config) Validate() error {
 	if c.Paths.ReviewDir == "" {
 		errs = append(errs, "paths.review_dir is required")
 	}
+	if strings.TrimSpace(c.Library.ShortsDir) == "" {
+		errs = append(errs, "library.shorts_dir is required")
+	}
 
 	// Value ranges.
 	errs = append(errs, ValidateContentID(c.ContentID)...)

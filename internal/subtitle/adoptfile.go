@@ -1,0 +1,154 @@
+package subtitle
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/five82/spindle/internal/logs"
+	"github.com/five82/spindle/internal/srtutil"
+	"github.com/five82/spindle/internal/transcription"
+)
+
+// AdoptFileRequest describes one manual adoption run for an arbitrary file
+// (the `spindle subtitle` command). TMDBID is required; Season/Episode are
+// zero for movies.
+type AdoptFileRequest struct {
+	VideoPath string
+	WorkDir   string
+	TMDBID    int
+	Season    int
+	Episode   int
+	// Transcript, when non-nil, is a pre-computed WhisperX result (batched
+	// multi-file runs) reused as the sync reference instead of transcribing.
+	Transcript *transcription.TranscribeResult
+	Logger     *slog.Logger
+	// OnTranscribeStart/OnTranscribeComplete report sync-reference
+	// transcription for CLI progress; not called when Transcript is reused.
+	OnTranscribeStart    func()
+	OnTranscribeComplete func(*transcription.TranscribeResult)
+}
+
+// AdoptFileResult describes the adopted subtitle written into WorkDir; the
+// caller owns final placement (sidecar copy or mux).
+type AdoptFileResult struct {
+	SubtitlePath       string
+	Language           string
+	Candidate          string
+	Segments           int
+	Validation         string
+	GateMetrics        string
+	RejectedCandidates []string
+}
+
+// AdoptForFile runs the adoption process — search, clean, sync, verify — for
+// one file with an explicit TMDB identity. It returns an error when no
+// candidate passes verification; generating subtitles from scratch is the
+// whisperx-subtitles agent skill's job.
+func (h *Handler) AdoptForFile(ctx context.Context, req AdoptFileRequest) (*AdoptFileResult, error) {
+	if h.osClient == nil {
+		return nil, errors.New("OpenSubtitles is not configured (subtitles.opensubtitles_api_key)")
+	}
+	if req.TMDBID <= 0 {
+		return nil, errors.New("TMDB identity required: pass --tmdb-id or use a path containing [tmdbid-ID]")
+	}
+	if strings.TrimSpace(req.VideoPath) == "" || strings.TrimSpace(req.WorkDir) == "" {
+		return nil, errors.New("adopt subtitle: missing video path or work dir")
+	}
+	if err := os.MkdirAll(req.WorkDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create work dir: %w", err)
+	}
+	logger := logs.Default(req.Logger)
+
+	results, err := h.osClient.Search(ctx, req.TMDBID, req.Season, req.Episode, h.searchLanguages())
+	if err != nil {
+		return nil, fmt.Errorf("opensubtitles search: %w", err)
+	}
+	candidates := rankSearchCandidates(results, req.Season, req.Episode)
+	if len(candidates) == 0 {
+		return nil, errors.New("OpenSubtitles returned no usable candidates")
+	}
+	if len(candidates) > maxSubtitleCandidates {
+		candidates = candidates[:maxSubtitleCandidates]
+	}
+
+	transcript := req.Transcript
+	if transcript == nil {
+		if h.transcriber == nil {
+			return nil, errors.New("transcriber not configured")
+		}
+		selected, err := h.transcriber.SelectPrimaryAudioTrack(ctx, req.VideoPath, "en")
+		if err != nil {
+			return nil, fmt.Errorf("select primary audio: %w", err)
+		}
+		if req.OnTranscribeStart != nil {
+			req.OnTranscribeStart()
+		}
+		transcript, err = h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
+			InputPath:  req.VideoPath,
+			AudioIndex: selected.Index,
+			Language:   selected.Language,
+			OutputDir:  req.WorkDir,
+			Purpose:    "subtitle_sync_reference",
+		})
+		if err != nil {
+			return nil, fmt.Errorf("transcribe sync reference: %w", err)
+		}
+		if req.OnTranscribeComplete != nil {
+			req.OnTranscribeComplete(transcript)
+		}
+	}
+	referenceCues, err := srtutil.ParseFile(transcript.SRTPath)
+	if err != nil {
+		return nil, fmt.Errorf("read sync reference transcript: %w", err)
+	}
+	videoSeconds, _ := resolveSubtitleVideoDuration(ctx, logger, req.VideoPath, transcript.Duration)
+
+	adopt := adoptContext{
+		ReferenceSRTPath: transcript.SRTPath,
+		ReferenceCues:    referenceCues,
+		ReferenceWords:   loadReferenceWords(logger, transcript.JSONPath),
+		VideoSeconds:     videoSeconds,
+		WorkDir:          req.WorkDir,
+	}
+	var rejected []string
+	for _, candidate := range candidates {
+		eval, err := h.evaluateCandidate(ctx, candidate, adopt)
+		if err != nil {
+			return nil, err
+		}
+		if eval.RejectReason != "" {
+			logger.Info("subtitle candidate rejected",
+				"decision_type", logs.DecisionSubtitleSource,
+				"decision_result", "candidate_rejected",
+				"decision_reason", eval.RejectReason,
+				"candidate", candidate.label(),
+			)
+			rejected = append(rejected, candidate.label()+": "+eval.RejectReason)
+			continue
+		}
+
+		language := candidate.Language
+		if language == "" {
+			language = "en"
+		}
+		displayPath := displaySubtitlePath(filepath.Join(req.WorkDir, filepath.Base(req.VideoPath)), language)
+		if err := writeSRTAtomic(displayPath, eval.Cues); err != nil {
+			return nil, fmt.Errorf("write adopted subtitle: %w", err)
+		}
+		return &AdoptFileResult{
+			SubtitlePath:       displayPath,
+			Language:           language,
+			Candidate:          candidate.label(),
+			Segments:           len(eval.Cues),
+			Validation:         subtitleValidationResult(eval.Validation),
+			GateMetrics:        eval.Check.Metrics(),
+			RejectedCandidates: rejected,
+		}, nil
+	}
+	return nil, fmt.Errorf("no downloaded subtitle passed verification:\n  %s", strings.Join(rejected, "\n  "))
+}

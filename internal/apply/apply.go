@@ -171,9 +171,9 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 // applySubtitles places the episode's generated SRT next to the encoded
 // file and muxes it when configured, recording the subtitled asset. A
-// missing or severe-issue generation record means the episode has no
-// subtitle: the generation stage already flagged it for review, so apply
-// just skips it.
+// missing, skipped (Source "none"), or severe-issue generation record means
+// the episode has no subtitle; the subtitle stage already logged why, so
+// apply just skips it.
 func (h *Handler) applySubtitles(ctx context.Context, sess *stage.Session, key, encodedPath string) error {
 	logger := sess.Logger
 	record := findSubtitleGenRecord(sess.Env, key)

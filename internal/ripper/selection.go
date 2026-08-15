@@ -45,7 +45,8 @@ type funnelStep struct {
 	Detail     string
 }
 
-// ChoosePrimaryTitle selects the best title for a movie rip using multi-stage filtering:
+// choosePrimaryTitleTraced selects the best title for a movie rip using
+// multi-stage filtering:
 //  1. Validate candidates (ID >= 0, Duration > 0)
 //  2. Disney 800-series multi-language playlist detection
 //  3. Duration window (within 2s of max)
@@ -55,14 +56,9 @@ type funnelStep struct {
 //  7. Segment count preference (most segments)
 //  8. TitleHash fingerprint frequency (most common hash)
 //  9. Sort by duration desc, ID asc
-func ChoosePrimaryTitle(titles []ripspec.Title) (ripspec.Title, bool) {
-	selection, ok, _ := choosePrimaryTitleTraced(titles)
-	return selection, ok
-}
-
-// choosePrimaryTitleTraced runs the funnel and records every stage that
-// narrowed the field (or declined to, with a reason) so the ripper can log
-// the evidence behind the final pick.
+//
+// It records every stage that narrowed the field (or declined to, with a
+// reason) so the ripper can log the evidence behind the final pick.
 func choosePrimaryTitleTraced(titles []ripspec.Title) (ripspec.Title, bool, []funnelStep) {
 	candidates, _ := partitionValidTitles(titles)
 	if len(candidates) == 0 {

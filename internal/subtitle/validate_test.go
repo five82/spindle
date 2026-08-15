@@ -10,6 +10,16 @@ import (
 	"github.com/five82/spindle/internal/srtutil"
 )
 
+// validateSRTFile parses an SRT file and returns validation issues, mirroring
+// the production path in evaluateAdoptedTrack.
+func validateSRTFile(path string, videoSeconds float64) ([]string, error) {
+	cues, err := srtutil.ParseFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return validateCuesDetailed(cues, videoSeconds).Issues, nil
+}
+
 func TestValidateSRTContent_Valid(t *testing.T) {
 	srt := `1
 00:00:01,000 --> 00:00:03,000
@@ -24,7 +34,7 @@ World
 Test
 `
 	path := writeTempSRT(t, srt)
-	issues, err := ValidateSRTContent(path, 60)
+	issues, err := validateSRTFile(path, 60)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +45,7 @@ Test
 
 func TestValidateSRTContent_EmptyFile(t *testing.T) {
 	path := writeTempSRT(t, "")
-	issues, err := ValidateSRTContent(path, 60)
+	issues, err := validateSRTFile(path, 60)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +65,7 @@ World
 `
 	path := writeTempSRT(t, srt)
 	// Video is 60s but last cue ends at 130s.
-	issues, err := ValidateSRTContent(path, 60)
+	issues, err := validateSRTFile(path, 60)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +81,7 @@ Only cue
 `
 	path := writeTempSRT(t, srt)
 	// 1 cue in 120s video = 0.5 cues/min < 2.
-	issues, err := ValidateSRTContent(path, 120)
+	issues, err := validateSRTFile(path, 120)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +96,7 @@ func TestValidateSRTContent_LateFirstCue(t *testing.T) {
 Late start
 `
 	path := writeTempSRT(t, srt)
-	issues, err := ValidateSRTContent(path, 1800)
+	issues, err := validateSRTFile(path, 1800)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +113,7 @@ Only cue starting very late
 	path := writeTempSRT(t, srt)
 	// Video 120s, last cue at 3000s (duration_mismatch),
 	// 1 cue / 2min (sparse), first cue at 960s (late_first_cue).
-	issues, err := ValidateSRTContent(path, 120)
+	issues, err := validateSRTFile(path, 120)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +125,7 @@ Only cue starting very late
 func TestValidateSRTContent_LineFormattingIssues(t *testing.T) {
 	t.Run("too_many_lines", func(t *testing.T) {
 		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:04,000\nLine one\nLine two\nLine three\n")
-		issues, err := ValidateSRTContent(path, 30)
+		issues, err := validateSRTFile(path, 30)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,7 +136,7 @@ func TestValidateSRTContent_LineFormattingIssues(t *testing.T) {
 
 	t.Run("line_too_long", func(t *testing.T) {
 		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:04,000\nThis line is deliberately written to exceed the configured subtitle width limit.\n")
-		issues, err := ValidateSRTContent(path, 30)
+		issues, err := validateSRTFile(path, 30)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -137,7 +147,7 @@ func TestValidateSRTContent_LineFormattingIssues(t *testing.T) {
 
 	t.Run("unbalanced_line_breaks", func(t *testing.T) {
 		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:04,000\nThis line is much longer than\nshort\n")
-		issues, err := ValidateSRTContent(path, 30)
+		issues, err := validateSRTFile(path, 30)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -148,7 +158,7 @@ func TestValidateSRTContent_LineFormattingIssues(t *testing.T) {
 
 	t.Run("high_reading_speed", func(t *testing.T) {
 		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:01,500\nThis subtitle has far too many characters for half a second.\n")
-		issues, err := ValidateSRTContent(path, 30)
+		issues, err := validateSRTFile(path, 30)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -159,7 +169,7 @@ func TestValidateSRTContent_LineFormattingIssues(t *testing.T) {
 
 	t.Run("cue_duration_issues", func(t *testing.T) {
 		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:01,300\nShort\n\n2\n00:00:05,000 --> 00:00:13,500\nLong enough to flag\n")
-		issues, err := ValidateSRTContent(path, 30)
+		issues, err := validateSRTFile(path, 30)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -173,7 +183,7 @@ func TestValidateSRTContent_LineFormattingIssues(t *testing.T) {
 
 	t.Run("low_information_long_cue", func(t *testing.T) {
 		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:13,500\nall\n")
-		issues, err := ValidateSRTContent(path, 30)
+		issues, err := validateSRTFile(path, 30)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -184,7 +194,7 @@ func TestValidateSRTContent_LineFormattingIssues(t *testing.T) {
 
 	t.Run("overlapping_cues", func(t *testing.T) {
 		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:03,000\nFirst\n\n2\n00:00:02,500 --> 00:00:04,000\nSecond\n")
-		issues, err := ValidateSRTContent(path, 30)
+		issues, err := validateSRTFile(path, 30)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -197,7 +207,7 @@ func TestValidateSRTContent_LineFormattingIssues(t *testing.T) {
 func TestValidateSRTContent_ReadabilityThresholds(t *testing.T) {
 	t.Run("reading_speed_over_20_cps_flagged", func(t *testing.T) {
 		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:02,000\n123456789012345678901\n")
-		issues, err := ValidateSRTContent(path, 30)
+		issues, err := validateSRTFile(path, 30)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -208,7 +218,7 @@ func TestValidateSRTContent_ReadabilityThresholds(t *testing.T) {
 
 	t.Run("reading_speed_at_20_cps_allowed", func(t *testing.T) {
 		path := writeTempSRT(t, "1\n00:00:01,000 --> 00:00:02,000\n12345678901234567890\n")
-		issues, err := ValidateSRTContent(path, 30)
+		issues, err := validateSRTFile(path, 30)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -401,7 +411,7 @@ func TestValidateSRTContent_Boundaries(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := writeTempSRT(t, tt.srt)
-			issues, err := ValidateSRTContent(path, tt.duration)
+			issues, err := validateSRTFile(path, tt.duration)
 			if err != nil {
 				t.Fatal(err)
 			}

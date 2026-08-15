@@ -193,15 +193,6 @@ func (a *HTTPAccess) GetByID(id int64) (*Item, error) {
 	return &resp.Item, nil
 }
 
-// Stats returns item counts grouped by stage via HTTP.
-func (a *HTTPAccess) Stats() (map[queue.Stage]int, error) {
-	status, err := a.Status()
-	if err != nil {
-		return nil, err
-	}
-	return status.Workflow.QueueStats, nil
-}
-
 // Status returns daemon status via HTTP.
 func (a *HTTPAccess) Status() (*Status, error) {
 	var resp httpapi.StatusAPIResponse

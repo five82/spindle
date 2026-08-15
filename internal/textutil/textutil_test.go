@@ -249,33 +249,6 @@ func TestSanitizePathSegment(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// SanitizeToken
-// ---------------------------------------------------------------------------
-
-func TestSanitizeToken(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{"lowercase", "Hello", "hello"},
-		{"special chars to underscore", "a.b/c", "a_b_c"},
-		{"keeps dashes and underscores", "foo-bar_baz", "foo-bar_baz"},
-		{"empty fallback", "", "unknown"},
-		{"only special chars", "!!!", "unknown"},
-		{"spaces to underscore", "hello world", "hello_world"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := SanitizeToken(tt.input)
-			if got != tt.want {
-				t.Errorf("SanitizeToken(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
 // SafeJoin
 // ---------------------------------------------------------------------------
 

@@ -319,6 +319,33 @@ func TestMoveOrCopyWithProgressRenamesOnSameDevice(t *testing.T) {
 	}
 }
 
+func TestSubtitleSkipNoteListsSkippedEpisodes(t *testing.T) {
+	if got := subtitleSkipNote(nil); got != "" {
+		t.Fatalf("nil env note = %q", got)
+	}
+	env := &ripspec.Envelope{Attributes: ripspec.EnvelopeAttributes{
+		SubtitleGenerationResults: []ripspec.SubtitleGenRecord{
+			{EpisodeKey: "s01e01", Source: "opensubtitles"},
+			{EpisodeKey: "s01e02", Source: "none"},
+			{EpisodeKey: "s01e03", Source: "none"},
+		},
+	}}
+	got := subtitleSkipNote(env)
+	want := "\nNo subtitles: s01e02, s01e03 (generate with the whisperx-subtitles skill)"
+	if got != want {
+		t.Fatalf("note = %q, want %q", got, want)
+	}
+
+	movieEnv := &ripspec.Envelope{Attributes: ripspec.EnvelopeAttributes{
+		SubtitleGenerationResults: []ripspec.SubtitleGenRecord{{EpisodeKey: "main", Source: "none"}},
+	}}
+	got = subtitleSkipNote(movieEnv)
+	want = "\nNo subtitles (generate with the whisperx-subtitles skill)"
+	if got != want {
+		t.Fatalf("movie note = %q, want %q", got, want)
+	}
+}
+
 func TestSendTerminalNotificationCleanSuccess(t *testing.T) {
 	var gotTitle, gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

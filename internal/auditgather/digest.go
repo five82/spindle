@@ -524,17 +524,11 @@ func writeDigestSubtitles(b *strings.Builder, r *Report) {
 	}
 	s := r.Analysis.SubtitleSummary
 	fmt.Fprintf(b, "\n## Subtitles\n")
-	fmt.Fprintf(b, "Validation: %d passed, %d needs_review, %d failed | output tracks: %d | labels: %s\n",
-		s.ValidationPassed, s.ValidationNeedsReview, s.ValidationFailed,
+	fmt.Fprintf(b, "Validation: %d passed, %d needs_review, %d failed, %d skipped | output tracks: %d | labels: %s\n",
+		s.ValidationPassed, s.ValidationNeedsReview, s.ValidationFailed, s.Skipped,
 		s.OutputSubtitleTracks, okOrWrong(s.SubtitleLabelsCorrect))
 	for _, res := range s.Results {
 		line := fmt.Sprintf("- %s: %s (%s, %d segments)", res.EpisodeKey, res.ValidationResult, res.Source, res.Segments)
-		if res.AuditResult != "" {
-			line += fmt.Sprintf(" audit=%s", res.AuditResult)
-			if res.AuditEditsApplied > 0 || res.AuditEditsDropped > 0 {
-				line += fmt.Sprintf(" (edits applied=%d dropped=%d)", res.AuditEditsApplied, res.AuditEditsDropped)
-			}
-		}
 		if len(res.SevereIssues) > 0 {
 			line += " | SEVERE: " + strings.Join(res.SevereIssues, "; ")
 		}

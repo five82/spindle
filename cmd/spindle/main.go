@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ var (
 	flagConfig   string
 	flagLogLevel string
 	flagVerbose  bool
+	flagQuiet    bool
 )
 
 // Command group IDs for --help organization.
@@ -139,6 +141,20 @@ func openQueueAccess() (*queueaccess.HTTPAccess, error) {
 	return queueaccess.OpenHTTP(socketPath(), cfg.API.Token)
 }
 
+// commandOutput returns the routine stdout destination for an action command.
+// Quiet commands keep diagnostics on stderr but discard progress and success output.
+func commandOutput(quiet bool) io.Writer {
+	if quiet {
+		return io.Discard
+	}
+	return os.Stdout
+}
+
+// printCommandOutput ignores write errors: rendering must never abort the action.
+func printCommandOutput(out io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(out, format, args...)
+}
+
 // buildLogger creates a structured logger from the global log level flag.
 func buildLogger() *slog.Logger {
 	level := slog.LevelInfo
@@ -149,6 +165,9 @@ func buildLogger() *slog.Logger {
 		level = slog.LevelWarn
 	case "error":
 		level = slog.LevelError
+	}
+	if flagQuiet && level < slog.LevelWarn {
+		level = slog.LevelWarn
 	}
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 }

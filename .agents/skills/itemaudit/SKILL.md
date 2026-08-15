@@ -18,7 +18,7 @@ Comprehensive audit of Spindle queue items through multi-layer artifact analysis
 
 The goal is to **uncover problems that automated code does not detect**. Quick log scans saying "no warnings, no errors" are insufficient. This skill performs deep analysis of the applicable artifacts to find anomalies.
 
-**Subtitle content is out of scope.** Never read, extract, sample, quote, compare, or judge subtitle/transcript cue text, and never evaluate the correctness of individual LLM subtitle-audit edits. Spindle's automated workflow subtitle audit intentionally uses the cost-effective Luna model; its accuracy trade-off is deliberate. Item audits check only subtitle pipeline integrity and metadata (generation status, validation verdicts, routing, assets, muxing, stream format/dispositions/labels). If subtitle wording or edit accuracy is questioned, recommend regenerating it with `spindle subtitle <mkv>`; do not run that modifying command during an item audit.
+**Subtitle content is out of scope.** Never read, extract, sample, quote, compare, or judge subtitle/transcript cue text. The pipeline adopts a verified OpenSubtitles download (cleaned and retimed against the rip's WhisperX transcript) or skips subtitles for that title. Item audits check only subtitle pipeline integrity and metadata (adoption/skip outcome, validation verdicts, routing, assets, muxing, stream format/dispositions/labels). If subtitle wording is questioned, recommend re-running `spindle subtitle <mkv>` (retries adoption; useful after better uploads appear) or the whisperx-subtitles skill; do not run those modifying commands during an item audit.
 
 ## Audit Procedure
 
@@ -67,7 +67,7 @@ The `analysis` object (always present; sub-fields omitted when empty) contains p
 | `title_selection` | Movie titles exist | Feature-length candidates, selected title, selection decision/reason, and similar-runtime candidate count. Prefer this over hand-parsing `envelope.titles`. |
 | `output_media` | Valid probes exist | Compact stream summaries (video/audio/subtitle labels and flags) derived from ffprobe. Prefer this for normal stream checks; use raw `media[]` only for missing details. |
 | `audio_summary` | Audio evidence exists | Primary track, output/excluded/commentary counts, commentary decisions, and commentary label status. |
-| `subtitle_summary` | Subtitle evidence exists | Subtitle pipeline metadata: generation validation counts, output subtitle count, and label status. It is not evidence for auditing subtitle text. |
+| `subtitle_summary` | Subtitle evidence exists | Subtitle pipeline metadata: per-title source (`opensubtitles`/`none`), validation counts, skipped count, output subtitle count, and label status. It is not evidence for auditing subtitle text. |
 | `routing_summary` | Final assets exist | Final output destination classification and expected-vs-actual route per output. |
 | `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_streams with codec/language/is_forced), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. |
 | `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`. |
@@ -140,7 +140,7 @@ Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors
    - `decision_type=commentary_classification` entries
    - `decision_type=tmdb_match` and `decision_type=tmdb_match_preference` entries — verify acceptance thresholds are reasonable
    - Evaluate if confidence levels and reasons make sense for the content
-   - Exclude subtitle-audit edit correctness and subtitle wording from this review; only aggregate subtitle pipeline outcomes belong in this audit
+   - Exclude subtitle wording from this review; only aggregate subtitle pipeline outcomes belong in this audit
 
 5. **TV episode pipeline checks** (TV only, from `analysis.decision_groups`, `logs.warnings`, and stage events):
    - Stage events with `stage=episode_identification` — verify the stage started/completed or identify where it failed
@@ -252,9 +252,9 @@ Analyze the `media` array from the audit output. Each entry contains full ffprob
    - Cross-reference with commentary decisions in `analysis.decision_groups`
 
 4. **Check subtitle streams** (from `media[].probe.streams` where `codec_type=subtitle`):
-   - Verify exactly one generated display subtitle track exists with correct language
+   - Verify exactly one display subtitle track exists with correct language when the title's subtitle was adopted; a skipped title (`source=none`) has none
    - Subtitle title should contain the language name (e.g., "English")
-   - Generated subtitle tracks should not have `disposition.forced=1`
+   - Adopted subtitle tracks should not have `disposition.forced=1`
 
 5. **Parse encoding details** from `encoding.snapshot`:
    - Check `validation.passed` and individual step results
@@ -298,8 +298,9 @@ Analyze crop data from the audit output:
 
 **Pipeline structure note:** the item template is a DAG. After
 `episode_identification`, the ANALYSIS branch (`analysis` stage: per-episode
-commentary detection from RIPPED sources; then `subtitling`: SRT GENERATION
-ONLY, from ripped sources/transcript artifacts into staging) runs
+commentary detection from RIPPED sources; then `subtitling`: SRT ADOPTION
+ONLY — download/clean/retime/verify into staging, never writing encoded
+files) runs
 CONCURRENTLY with `encoding`. The `apply` stage joins both branches and
 performs every write to the encoded files: audio refinement, commentary
 disposition, duration validation, sidecar placement, and subtitle muxing.
@@ -320,33 +321,35 @@ Consequences for audits:
 
 ### Phase 6: Subtitle Pipeline Integrity (when `phase_subtitles` is true)
 
-Analyze only structural subtitle evidence from `media[].probe.streams` (codec_type=subtitle), `analysis.subtitle_summary`, and `envelope.assets.subtitled`. Do not open SRT files, inspect cue text, read transcripts for subtitle quality, compare wording against audio/references, or assess whether LLM edits were correct. Keep this phase compact; title-specific subtitle content review belongs exclusively to the dedicated subtitle audit process.
+Analyze only structural subtitle evidence from `media[].probe.streams` (codec_type=subtitle), `analysis.subtitle_summary`, and `envelope.assets.subtitled`. Do not open SRT files, inspect cue text, read transcripts for subtitle quality, or compare wording against audio/references. Keep this phase compact; subtitle content review is an operator action outside this audit.
 
 **For movies** or **per-episode for TV**:
 
 1. **Verify embedded subtitles** from the ffprobe data in `media[]`:
-   - Exactly one generated display subtitle track should exist per output when subtitles are enabled and muxing succeeded
-   - Check `disposition.default` is not unexpectedly enabled for the generated subtitle
-   - Check `disposition.forced` is not enabled for the generated subtitle
+   - Exactly one display subtitle track should exist per output when a subtitle was adopted (`source=opensubtitles`) and muxing succeeded
+   - A title with `source=none` (skipped) legitimately has NO subtitle stream — cross-check the skip record before flagging a missing track
+   - Check `disposition.default` is not unexpectedly enabled for the adopted subtitle
+   - Check `disposition.forced` is not enabled for the adopted subtitle
    - **Check labeling**: subtitle title should contain the language name (e.g., "English")
 
-2. **Subtitle generation outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `analysis.decision_groups`):
-   - Spindle generates one English display SRT from WhisperX. It does not generate forced/foreign subtitle tracks. Downloaded OpenSubtitles text is audit reference material only and is never used as the output subtitle.
+2. **Subtitle adoption outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `analysis.decision_groups`):
+   - The pipeline downloads the identified title's OpenSubtitles candidates, cleans them, retimes against the rip's WhisperX transcript with ffsubsync, and adopts the first candidate that passes the verification gate. When no candidate verifies (or none exists, or the title is multi-episode), it records `source=none` and the title completes WITHOUT subtitles. Spindle never generates subtitles itself.
+   - `decision_type=subtitle_source` is the core trace: `decision_result=adopted` (reason carries the candidate and gate metrics), `candidate_rejected` per rejected candidate (reason explains which gate failed), and `skipped` (reason explains why nothing was adopted). A skip also emits WARN `event_type=subtitle_skipped` and a pre-flagged warning anomaly ("N title(s) completed without subtitles"). Report a skip as a WARNING with the rejection reasons as evidence — the expected recovery is the whisperx-subtitles skill (or `spindle subtitle` after better uploads appear), not a pipeline retry.
+   - `decision_type=subtitle_duration_source` shows whether the verification gate measured video duration from ffprobe or fell back to the transcript span.
    - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config.
-   - `decision_type=transcription_asset` and `decision_type=transcription_profile` show which asset/profile WhisperX processed. Use `logs.events` entries (`transcription_extract_complete`, `transcription_whisperx_complete`, `transcription_complete`) for transcription timing before falling back to the raw files in `logs.paths`.
-   - `decision_type=subtitle_transcript_source` with `decision_result=artifact_reused` means subtitle generation reused the shared per-episode transcript artifact (`envelope.assets.transcript`) and ran no WhisperX of its own — absent transcription events in the subtitling stage are then expected, not a defect. For TV, verify transcript asset count matches episode count in `analysis.asset_health`.
-   - **LLM subtitle audit telemetry**: inspect only the aggregate `audit_result` and edit counts needed to confirm pipeline outcome/routing. Do not inspect `subtitle_audit_edit` entries, their reasons, or affected text, and do not judge model accuracy. `applied` and `clean` are healthy; `skipped` is expected when no LLM is configured; `failed` is telemetry unless it caused failure/review routing; `rejected` means the removal-cap guardrail routed the item for dedicated subtitle review. Report the status and routing only—do not perform that review here.
-   - Treat additional generated subtitle tracks, forced dispositions, or "Forced" subtitle labels as defects or stale outputs unless there is clear evidence they came from outside the current Spindle subtitle stage.
+   - `decision_type=transcription_asset` and `decision_type=transcription_profile` show which asset/profile WhisperX processed for the sync reference. Use `logs.events` entries (`transcription_extract_complete`, `transcription_whisperx_complete`, `transcription_complete`) for transcription timing before falling back to the raw files in `logs.paths`.
+   - `decision_type=subtitle_transcript_source` with `decision_result=artifact_reused` means the stage reused the shared per-episode transcript artifact (`envelope.assets.transcript`) and ran no WhisperX of its own — absent transcription events in the subtitling stage are then expected, not a defect. For TV, verify transcript asset count matches episode count in `analysis.asset_health`.
+   - Treat additional subtitle tracks, forced dispositions, or "Forced" subtitle labels as defects or stale outputs unless there is clear evidence they came from outside the current Spindle subtitle stage.
 
 3. **Per-episode subtitle asset status** (TV only, from `envelope.assets.subtitled`):
    - Check for `status: "failed"` entries with `error_msg`
    - Verify `subtitles_muxed` flag per episode
    - Check `envelope.attributes["subtitle_generation_results"]` for per-episode details
-   - Treat `validation_result` as the actionable summary: `passed` is clean, `needs_review` is actionable, `failed` means subtitle generation failed
+   - Treat `validation_result` as the actionable summary: `passed` is clean, `needs_review` is actionable, `failed` means the adopted subtitle failed validation, `skipped` accompanies `source=none` and is the no-subtitle outcome, not a failure
    - Treat `qc_observations` as telemetry only. Do not list below-threshold observations (for example `high_reading_speed`, `short_cue_duration`, `long_cue_duration`) as Issues Found unless they also appear in `review_issues`/`severe_issues` or caused review routing.
 
 4. **Cross-episode subtitle consistency** (TV only):
-   - All episodes should have the same subtitle language and the same single-display-subtitle layout
+   - Adopted episodes should share the same subtitle language and single-display-subtitle layout; a mix of adopted and skipped episodes on one disc is possible and each skip should have its own `subtitle_source` trace
 
 ### Phase 7: Commentary Track Validation (when `phase_commentary` is true)
 
@@ -386,10 +389,11 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review using `media[].probe.streams` | Commentary tracks not preserved |
 | Unlabeled commentary | Audio Analysis | Audio stream with `disposition.comment=1` but no "Commentary" in `tags.title` | Jellyfin won't recognize tracks |
 | Stereo downmix kept | Audio Analysis | Extra 2ch audio track in `media[].probe.streams` | Unnecessary audio bloat |
+| Subtitle skipped | Subtitles | `subtitle_generation_results[].source` is `none`; WARN `event_type=subtitle_skipped`; pre-flagged warning anomaly | Title has no subtitles; WARNING not CRITICAL — recovery is the whisperx-subtitles skill or a `spindle subtitle` retry |
 | SRT validation review/failure | Subtitles | `subtitle_generation_results[].validation_result` is `needs_review` or `failed`; `review_issues`/`severe_issues` populated; review routing present | Subtitle pipeline flagged output for separate review; do not inspect its text here |
-| Subtitle duration mismatch | Subtitles | Subtitle stream duration vs video duration delta > 10 minutes | WhisperX timing issue |
-| Extra/forced subtitle generated | Subtitles | More than one generated subtitle stream, `disposition.forced=1`, or "Forced" subtitle labels in current outputs | Stale or incorrect subtitle output; current pipeline should produce one non-forced display SRT |
-| Subtitles not muxed | Subtitles | No subtitle streams in `media[].probe.streams` | Jellyfin may not auto-load |
+| Subtitle duration mismatch | Subtitles | Subtitle stream duration vs video duration delta > 10 minutes | ffsubsync retiming issue or wrong candidate adopted despite the gate |
+| Extra/forced subtitle | Subtitles | More than one display subtitle stream, `disposition.forced=1`, or "Forced" subtitle labels in current outputs | Stale or incorrect subtitle output; current pipeline should produce one non-forced display SRT |
+| Subtitles not muxed | Subtitles | Adopted record (`source=opensubtitles`) but no subtitle streams in `media[].probe.streams` | Jellyfin may not auto-load; a `source=none` title with no subtitle stream is NOT this pattern |
 | Unlabeled subtitles | Subtitles | Missing or incorrect `tags.title` on subtitle stream | Jellyfin display issue |
 | Low episode match confidence | Episode ID | `envelope.episodes[].match_confidence` < 0.70 | Episodes may be mislabeled |
 | Decisive low-similarity episode match | Episode ID | `decision_type=episode_match` with `confidence_quality=decisive_low_similarity` and strong margins | Usually not a defect; explain as lower transcript/reference overlap rather than confusion with another episode |
@@ -457,8 +461,8 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Only expand into detailed comparison when a mismatch is found
 
 **Do not report as findings (these are normal):**
-- Individual subtitle wording, transcription accuracy, or LLM subtitle-audit edit choices — subtitle content is outside this skill's scope
-- The known accuracy trade-offs of the Luna model used by Spindle's automated workflow subtitle audit; title-specific regeneration is an explicit operator action through `spindle subtitle`
+- Individual subtitle wording or transcription accuracy — subtitle content is outside this skill's scope
+- A subtitle skip as CRITICAL — it is a designed no-verified-candidate outcome, already pre-flagged as a warning anomaly; report it once as a WARNING with its recovery path
 - Non-sequential disc title ordering — disc layout varies by manufacturer and is irrelevant once content ID resolves episodes
 - Inconsistent source audio track counts across titles on the same disc — different playlists routinely carry different language sets
 - Audio refinement stripping non-English tracks — that's its job
@@ -537,11 +541,12 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Failed episodes: <count, with details if > 0>
 
 #### Subtitle Pipeline (if phase_subtitles)
+- Source: <per-title adoption outcome from subtitle_generation_results[].source — opensubtitles/none; for skips, the subtitle_source rejection reasons>
 - Tracks: <count and config from media probes>
 - Labels correct: <yes/no>
 - Validation result: <aggregate subtitle_generation_results.validation_result; list structured review_issues/severe_issues only when they affected routing, without inspecting cue text>
-- Subtitle mux/output: <mux status and single-display-subtitle checks>
-- Content audit: <not performed; use `spindle subtitle <mkv>` to regenerate and reference-audit title-specific subtitle content>
+- Subtitle mux/output: <mux status and single-display-subtitle checks; skipped titles legitimately have no subtitle stream>
+- Content review: <not performed; subtitle text is out of scope. For skipped titles recommend the whisperx-subtitles skill or a later `spindle subtitle` retry>
 
 #### Commentary (if phase_commentary)
 - Decisions: <from analysis.decision_groups>
@@ -590,10 +595,10 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] If TV: verified cross-episode audio stream count consistency
 
 ### Post-Subtitling (phase_subtitles)
-- [ ] Verified subtitle tracks in media probes
+- [ ] Verified subtitle tracks in media probes (adopted titles only; reconciled `source=none` skips against missing streams)
 - [ ] Verified subtitle track labels
-- [ ] Checked only aggregate generation/validation/audit outcomes and routing
-- [ ] Did not open, extract, sample, quote, compare, or judge subtitle/transcript content or individual LLM edits
+- [ ] Checked only aggregate adoption/validation outcomes and routing
+- [ ] Did not open, extract, sample, quote, compare, or judge subtitle/transcript content
 - [ ] If TV: checked per-episode subtitle asset status
 
 ### External Validation (phase_external_validation)

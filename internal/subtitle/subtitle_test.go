@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -54,123 +52,6 @@ func TestSubtitlePhasePercent(t *testing.T) {
 	}
 }
 
-type fakeDisplayTranscriber struct {
-	selected transcription.SelectedAudio
-	jsonPath string
-}
-
-func (f fakeDisplayTranscriber) SelectPrimaryAudioTrack(context.Context, string, string) (transcription.SelectedAudio, error) {
-	return f.selected, nil
-}
-
-func (f fakeDisplayTranscriber) Transcribe(_ context.Context, _ transcription.TranscribeRequest, progress ...transcription.ProgressFunc) (*transcription.TranscribeResult, error) {
-	if len(progress) > 0 && progress[0] != nil {
-		progress[0](transcription.PhaseExtract, 0)
-		progress[0](transcription.PhaseExtract, time.Second)
-		progress[0](transcription.PhaseTranscribe, 0)
-		progress[0](transcription.PhaseTranscribe, 2*time.Second)
-	}
-	return &transcription.TranscribeResult{
-		JSONPath:       f.jsonPath,
-		Duration:       90,
-		Segments:       1,
-		ExtractTime:    time.Second,
-		TranscribeTime: 2 * time.Second,
-	}, nil
-}
-
-func TestGenerateDisplaySubtitle(t *testing.T) {
-	origInspect := inspectSubtitleMedia
-	origRun := runStableTS
-	t.Cleanup(func() {
-		inspectSubtitleMedia = origInspect
-		runStableTS = origRun
-	})
-
-	dir := t.TempDir()
-	jsonPath := filepath.Join(dir, "audio.json")
-	payload := whisperXPayload{
-		Language: "en",
-		Segments: []map[string]any{{
-			"start": 1.0,
-			"end":   3.0,
-			"text":  "General Kenobi",
-		}},
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(jsonPath, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	inspectSubtitleMedia = func(context.Context, string, string) (*ffprobe.Result, error) {
-		return &ffprobe.Result{Format: ffprobe.Format{Duration: "123.456"}}, nil
-	}
-	runStableTS = func(_ context.Context, args []string) ([]byte, error) {
-		outputPath := args[6]
-		if err := os.WriteFile(outputPath, []byte("1\n00:00:01,000 --> 00:00:03,000\nGeneral Kenobi\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return []byte("ok"), nil
-	}
-
-	var events []string
-	result, err := GenerateDisplaySubtitle(context.Background(), GenerateDisplaySubtitleRequest{
-		VideoPath:       filepath.Join(dir, "Movie.mkv"),
-		DisplayBasePath: filepath.Join(dir, "work", "Movie.mkv"),
-		WorkDir:         filepath.Join(dir, "work"),
-		Language:        "en",
-		Transcriber: fakeDisplayTranscriber{
-			selected: transcription.SelectedAudio{Index: 2, Language: "eng", Label: "English"},
-			jsonPath: jsonPath,
-		},
-		Progress: func(phase transcription.Phase, elapsed time.Duration) {
-			events = append(events, fmt.Sprintf("progress:%s:%t", phase, elapsed > 0))
-		},
-		OnAudioSelected: func(transcription.SelectedAudio) {
-			events = append(events, "audio")
-		},
-		OnTranscriptionComplete: func(*transcription.TranscribeResult) {
-			events = append(events, "transcription")
-		},
-		OnDurationSelected: func(float64, string, float64) {
-			events = append(events, "duration")
-		},
-		OnFormattingStart: func() {
-			events = append(events, "format-start")
-		},
-		OnFormattingComplete: func(FormatResult) {
-			events = append(events, "format-complete")
-		},
-	})
-	if err != nil {
-		t.Fatalf("GenerateDisplaySubtitle() error = %v", err)
-	}
-	if result.SelectedAudio.Index != 2 || result.VideoSeconds != 123.456 || result.DurationSource != "media_probe" {
-		t.Fatalf("result = %+v", result)
-	}
-	wantPath := filepath.Join(dir, "work", "Movie.en.srt")
-	if result.Formatting.DisplayPath != wantPath {
-		t.Fatalf("display path = %q, want %q", result.Formatting.DisplayPath, wantPath)
-	}
-	wantEvents := []string{
-		"audio",
-		"progress:extract:false",
-		"progress:extract:true",
-		"progress:transcribe:false",
-		"progress:transcribe:true",
-		"transcription",
-		"duration",
-		"format-start",
-		"format-complete",
-	}
-	if fmt.Sprint(events) != fmt.Sprint(wantEvents) {
-		t.Fatalf("events = %v, want %v", events, wantEvents)
-	}
-}
-
 func TestSubtitleValidationResult(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -185,47 +66,6 @@ func TestSubtitleValidationResult(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := subtitleValidationResult(tt.validation); got != tt.want {
 				t.Fatalf("subtitleValidationResult() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestAuditMediaContext(t *testing.T) {
-	tests := []struct {
-		name string
-		meta ripspec.Metadata
-		key  string
-		want string
-	}{
-		{
-			name: "movie with year",
-			meta: ripspec.Metadata{MediaType: "movie", Title: "Air", Year: "2023"},
-			key:  "main",
-			want: `the movie "Air" (2023)`,
-		},
-		{
-			name: "movie without year",
-			meta: ripspec.Metadata{MediaType: "movie", Title: "Air"},
-			key:  "main",
-			want: `the movie "Air"`,
-		},
-		{
-			name: "tv with show title",
-			meta: ripspec.Metadata{MediaType: "tv", ShowTitle: "Breaking Bad", Title: "Breaking Bad"},
-			key:  "s01_001",
-			want: "the TV episode Breaking Bad s01_001",
-		},
-		{
-			name: "tv falls back to title when show title empty",
-			meta: ripspec.Metadata{MediaType: "tv", Title: "Breaking Bad"},
-			key:  "s01_001",
-			want: "the TV episode Breaking Bad s01_001",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := auditMediaContext(tt.meta, tt.key); got != tt.want {
-				t.Fatalf("auditMediaContext() = %q, want %q", got, tt.want)
 			}
 		})
 	}

@@ -38,7 +38,8 @@ Check TMDB (via `spindle disc identify` and a web search of the TMDB entry):
    downmix tracks from both halves; do not pass those redundancies to Reel.
 4. `spindle encode scratch/refined.mkv -o scratch/encoded/` - one encode of
    the full film.
-5. `spindle subtitle` on the encoded file (it is a feature).
+5. `spindle subtitle --tmdb-id ID` on the encoded file (it is a feature);
+   whisperx-subtitles skill if no download verifies.
 6. Place as a normal single movie:
    `Movies/Film (1963) [tmdbid-12345]/Film (1963) [tmdbid-12345].mkv`.
 

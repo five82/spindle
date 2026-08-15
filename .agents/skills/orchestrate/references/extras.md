@@ -30,8 +30,10 @@ immediately; filenames alone won't tell you later.
 Then per file: `spindle encode scratch/ripped/FILE -o scratch/encoded/`.
 
 - **Extras: no subtitles.**
-- **Theatrical shorts: generate subtitles** - `spindle subtitle
-  scratch/encoded/SHORT.mkv` after encoding.
+- **Theatrical shorts: generate subtitles** - `spindle subtitle --tmdb-id ID
+  scratch/encoded/SHORT.mkv` after encoding (shorts have their own TMDB
+  entries). OpenSubtitles coverage for shorts is thin; expect to fall back
+  to the whisperx-subtitles skill.
 - If the movie itself is also wanted and is ordinary, run it through the
   normal pipeline instead (`spindle cache rip` then `spindle cache process`),
   and orchestrate only the extras manually. Do the cache rip while the
@@ -71,11 +73,13 @@ requested and no movie folder exists, create it with the exact
 `Title (Year) [tmdbid-ID]` name from `spindle disc identify` so a future
 feature rip lands in the same folder.
 
-A theatrical short can alternatively be its own library movie (its own
-`Short (Year) [tmdbid-ID]/` folder - most theatrical shorts have their own
-TMDB entry - with subtitles) when the user wants it surfaced as a
-standalone item - ask only if the request is ambiguous; default to
-`shorts/` inside the parent movie.
+Place theatrical shorts as standalone movies in the configured
+`[library] shorts_dir` (under `[paths] library_dir`) when it is set. Use the
+same movie layout there: `Short (Year) [tmdbid-ID]/Short (Year)
+[tmdbid-ID].mkv`; most theatrical shorts have their own TMDB entry, and the
+file must include subtitles. If `shorts_dir` is not set, or the user wants
+the short attached to its parent feature, place it in `shorts/` inside the
+parent movie folder instead.
 
 ## 4. Verify and finish
 

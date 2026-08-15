@@ -116,9 +116,12 @@ type TotalsResponse struct {
 	Final   int `json:"final"`
 }
 
-// SubGenResponse summarizes subtitle generation.
+// SubGenResponse summarizes subtitle generation by source: adopted
+// OpenSubtitles downloads and episodes deliberately skipped with no
+// subtitles.
 type SubGenResponse struct {
-	WhisperX int `json:"whisperx"`
+	OpenSubtitles int `json:"opensubtitles"`
+	Skipped       int `json:"skipped"`
 }
 
 // ContentIDResponse mirrors the envelope's episode-identification summary so
@@ -373,8 +376,11 @@ func populateRipSpecDerived(resp *ItemResponse, env *ripspec.Envelope, activeKey
 	if results := env.Attributes.SubtitleGenerationResults; len(results) > 0 {
 		sg := &SubGenResponse{}
 		for _, rec := range results {
-			if strings.EqualFold(rec.Source, "whisperx") {
-				sg.WhisperX++
+			switch strings.ToLower(rec.Source) {
+			case "opensubtitles":
+				sg.OpenSubtitles++
+			case "none":
+				sg.Skipped++
 			}
 		}
 		resp.SubtitleGeneration = sg

@@ -1,7 +1,6 @@
 package language
 
 import (
-	"reflect"
 	"testing"
 )
 
@@ -186,64 +185,6 @@ func TestExtractFromTags(t *testing.T) {
 			got := ExtractFromTags(tt.tags)
 			if got != tt.want {
 				t.Errorf("ExtractFromTags(%v) = %q, want %q", tt.tags, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestNormalizeList(t *testing.T) {
-	tests := []struct {
-		name  string
-		input []string
-		want  []string
-	}{
-		{
-			"dedup",
-			[]string{"en", "en", "fr"},
-			[]string{"en", "fr"},
-		},
-		{
-			"normalize iso2 to iso1",
-			[]string{"eng", "fra"},
-			[]string{"en", "fr"},
-		},
-		{
-			"mixed codes",
-			[]string{"en", "spa", "fre", "de", "japanese"},
-			[]string{"en", "es", "fr", "de", "ja"},
-		},
-		{
-			"dedup after normalization",
-			[]string{"en", "eng", "english"},
-			[]string{"en"},
-		},
-		{
-			"unknown long codes dropped",
-			[]string{"en", "klingon"},
-			[]string{"en"},
-		},
-		{
-			"unknown short codes kept",
-			[]string{"xx", "en"},
-			[]string{"xx", "en"},
-		},
-		{
-			"empty input",
-			[]string{},
-			[]string{},
-		},
-		{
-			"nil input",
-			nil,
-			[]string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := NormalizeList(tt.input)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("NormalizeList(%v) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}

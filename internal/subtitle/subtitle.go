@@ -1,6 +1,11 @@
-// Package subtitle generates, audits, formats, and validates Jellyfin display
-// SRTs. It never rewrites encoded media; the apply stage owns placement and
-// optional MKV muxing after the pipeline branches join.
+// Package subtitle produces Jellyfin display SRTs by adopting cleaned,
+// retimed OpenSubtitles downloads verified against the rip's WhisperX
+// transcript. The pipeline stage skips the episode (warning, not failure)
+// when no candidate survives verification; the same adoption process backs
+// the manual `spindle subtitle` command via AdoptForFile. WhisperX subtitle
+// generation is not maintained here — the whisperx-subtitles agent skill
+// covers it. The package never rewrites encoded media; the apply stage owns
+// placement and optional MKV muxing after the pipeline branches join.
 package subtitle
 
 import (
@@ -13,7 +18,7 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/config"
-	"github.com/five82/spindle/internal/llm"
+	"github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/opensubtitles"
@@ -29,167 +34,20 @@ var inspectSubtitleMedia = ffprobe.Inspect
 type Handler struct {
 	cfg         *config.Config
 	transcriber *transcription.Service
-	llm         *llm.Client
 	osClient    *opensubtitles.Client
 }
 
 // New creates a subtitle handler.
-func New(cfg *config.Config, transcriber *transcription.Service, llmClient *llm.Client, osClient *opensubtitles.Client) *Handler {
+func New(cfg *config.Config, transcriber *transcription.Service, osClient *opensubtitles.Client) *Handler {
 	return &Handler{
 		cfg:         cfg,
 		transcriber: transcriber,
-		llm:         llmClient,
 		osClient:    osClient,
 	}
 }
 
-// DisplaySubtitleError reports which display-subtitle generation step failed.
-type DisplaySubtitleError struct {
-	Op  string
-	Err error
-}
-
-func (e *DisplaySubtitleError) Error() string { return fmt.Sprintf("%s: %v", e.Op, e.Err) }
-func (e *DisplaySubtitleError) Unwrap() error { return e.Err }
-
-// GenerateDisplaySubtitleRequest describes one display subtitle generation run.
-type GenerateDisplaySubtitleRequest struct {
-	VideoPath       string
-	DisplayBasePath string
-	DisplayPath     string
-	WorkDir         string
-	Language        string
-	ItemID          int64
-	EpisodeKey      string
-	Purpose         string
-	// LLM, when non-nil, audits the formatted display SRT for obvious
-	// WhisperX transcription errors and rewrites it in place before this
-	// call returns. Nil skips the audit.
-	LLM *llm.Client
-	// MediaContext describes the content for the audit prompt, e.g.
-	// `the movie "Air" (2023)` or `the TV episode Breaking Bad s01_001`.
-	MediaContext string
-	// ReferenceTranscript is optional untimed comparison text. It can improve
-	// exact wording but never controls display timing or cue boundaries.
-	ReferenceTranscript string
-	Transcriber         interface {
-		SelectPrimaryAudioTrack(context.Context, string, string) (transcription.SelectedAudio, error)
-		Transcribe(context.Context, transcription.TranscribeRequest, ...transcription.ProgressFunc) (*transcription.TranscribeResult, error)
-	}
-	// Transcript, when non-nil, is a pre-existing canonical WhisperX result
-	// (the shared per-episode transcript artifact) reused instead of running
-	// WhisperX again. Audio selection still runs for language and labeling.
-	Transcript *transcription.TranscribeResult
-	// Logger receives degraded-behavior warnings from the generation run.
-	// Pass an item-scoped logger so warnings carry item_id; nil falls back
-	// to slog.Default().
-	Logger                  *slog.Logger
-	Progress                transcription.ProgressFunc
-	OnAudioSelected         func(transcription.SelectedAudio)
-	OnTranscriptionComplete func(*transcription.TranscribeResult)
-	OnDurationSelected      func(videoSeconds float64, source string, transcriptSeconds float64)
-	OnFormattingStart       func()
-	OnFormattingComplete    func(FormatResult)
-}
-
-// GenerateDisplaySubtitleResult describes the generated primary display SRT.
-type GenerateDisplaySubtitleResult struct {
-	SelectedAudio  transcription.SelectedAudio
-	Formatting     FormatResult
-	VideoSeconds   float64
-	DurationSource string
-	Audit          AuditStats
-}
-
-// GenerateDisplaySubtitle selects primary audio, creates canonical WhisperX
-// artifacts, resolves video duration, and formats the primary display SRT.
-func GenerateDisplaySubtitle(ctx context.Context, req GenerateDisplaySubtitleRequest) (*GenerateDisplaySubtitleResult, error) {
-	if req.Transcriber == nil {
-		return nil, fmt.Errorf("generate display subtitle: nil transcriber")
-	}
-	if strings.TrimSpace(req.VideoPath) == "" {
-		return nil, fmt.Errorf("generate display subtitle: missing video path")
-	}
-	if strings.TrimSpace(req.WorkDir) == "" {
-		return nil, fmt.Errorf("generate display subtitle: missing work dir")
-	}
-
-	preferredLanguage := req.Language
-	if preferredLanguage == "" {
-		preferredLanguage = "en"
-	}
-	selectedAudio, err := req.Transcriber.SelectPrimaryAudioTrack(ctx, req.VideoPath, preferredLanguage)
-	if err != nil {
-		return nil, &DisplaySubtitleError{Op: "select audio", Err: err}
-	}
-	if req.OnAudioSelected != nil {
-		req.OnAudioSelected(selectedAudio)
-	}
-
-	transcript := req.Transcript
-	if transcript == nil {
-		transcript, err = req.Transcriber.Transcribe(ctx, transcription.TranscribeRequest{
-			InputPath:  req.VideoPath,
-			AudioIndex: selectedAudio.Index,
-			Language:   selectedAudio.Language,
-			OutputDir:  req.WorkDir,
-			ItemID:     req.ItemID,
-			EpisodeKey: req.EpisodeKey,
-			Purpose:    req.Purpose,
-		}, req.Progress)
-		if err != nil {
-			return nil, &DisplaySubtitleError{Op: "transcribe", Err: err}
-		}
-	}
-	if req.OnTranscriptionComplete != nil {
-		req.OnTranscriptionComplete(transcript)
-	}
-
-	videoSeconds, durationSource := resolveSubtitleVideoDuration(ctx, logs.Default(req.Logger), req.VideoPath, transcript.Duration)
-	if req.OnDurationSelected != nil {
-		req.OnDurationSelected(videoSeconds, durationSource, transcript.Duration)
-	}
-
-	displayPath := req.DisplayPath
-	if displayPath == "" {
-		displayBasePath := req.DisplayBasePath
-		if displayBasePath == "" {
-			displayBasePath = req.VideoPath
-		}
-		displayPath = displaySubtitlePath(displayBasePath, selectedAudio.Language)
-	}
-	if req.OnFormattingStart != nil {
-		req.OnFormattingStart()
-	}
-	formatting, err := formatSubtitleFromCanonical(ctx, transcriptionArtifacts{JSONPath: transcript.JSONPath}, req.WorkDir, displayPath, videoSeconds, selectedAudio.Language)
-	if err != nil {
-		return nil, &DisplaySubtitleError{Op: "format subtitle", Err: err}
-	}
-
-	// Audit before returning so callers that re-parse formatting.DisplayPath
-	// see the audited cues.
-	audit := auditDisplaySRT(ctx, req.LLM, req.Logger, auditParams{
-		DisplayPath:         formatting.DisplayPath,
-		VideoSeconds:        videoSeconds,
-		MediaContext:        req.MediaContext,
-		EpisodeKey:          req.EpisodeKey,
-		ReferenceTranscript: req.ReferenceTranscript,
-	})
-
-	if req.OnFormattingComplete != nil {
-		req.OnFormattingComplete(formatting)
-	}
-
-	return &GenerateDisplaySubtitleResult{
-		SelectedAudio:  selectedAudio,
-		Formatting:     formatting,
-		VideoSeconds:   videoSeconds,
-		DurationSource: durationSource,
-		Audit:          audit,
-	}, nil
-}
-
-// Run executes the subtitle generation stage.
+// Run executes the subtitle stage: each pending episode either adopts a
+// verified OpenSubtitles download or is skipped with a warning.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	logger := sess.Logger
 	logger.Debug("subtitle stage started", "event_type", "stage_start", "stage", "subtitling")
@@ -211,24 +69,47 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	)
 	h.logSkippedSubtitleJobs(logger, skippedCompleted)
 
-	summary, err := h.processSubtitleJobs(ctx, sess, jobs)
-	if err != nil {
-		return err
+	var summary subtitleRunSummary
+	for _, job := range jobs {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		summary.attempted++
+		outcome, err := h.processSubtitleJob(ctx, sess, job)
+		if err != nil {
+			return err
+		}
+		switch outcome {
+		case subtitleOutcomeAdopted:
+			summary.adopted++
+		case subtitleOutcomeSkipped:
+			summary.skipped++
+		default:
+			summary.failed++
+		}
 	}
 
 	return h.finishSubtitleStage(sess, summary)
 }
 
+const (
+	subtitleOutcomeAdopted = "adopted"
+	subtitleOutcomeSkipped = "skipped"
+	subtitleOutcomeFailed  = "failed"
+)
+
 type subtitleRunSummary struct {
 	attempted int
-	succeeded int
+	adopted   int
+	skipped   int
 	failed    int
 }
 
 func (h *Handler) planSubtitleJobs(sess *stage.Session) ([]stage.AssetJob, []string) {
 	jobs, skipped := sess.PendingKeyedAssetJobs(ripspec.AssetKindRipped, ripspec.AssetKindSubtitled)
 	// Also skip keys that already have a clean generation record (resume
-	// after a retry that recompiled the analysis branch).
+	// after a retry that recompiled the analysis branch). Skip records
+	// (Source "none") count: the skip decision was already made and warned.
 	var pending []stage.AssetJob
 	for _, job := range jobs {
 		if rec := findGenRecord(sess.Env, job.Key); rec != nil && len(rec.SevereIssues) == 0 {
@@ -261,77 +142,280 @@ func (h *Handler) logSkippedSubtitleJobs(logger *slog.Logger, skippedCompleted [
 	}
 }
 
-func (h *Handler) processSubtitleJobs(ctx context.Context, sess *stage.Session, jobs []stage.AssetJob) (subtitleRunSummary, error) {
-	var summary subtitleRunSummary
-	for _, job := range jobs {
-		if ctx.Err() != nil {
-			return summary, ctx.Err()
-		}
-
-		summary.attempted++
-		succeeded, err := h.processSubtitleJob(ctx, sess, job)
-		if err != nil {
-			return summary, err
-		}
-		if succeeded {
-			summary.succeeded++
-		} else {
-			summary.failed++
-		}
-	}
-	return summary, nil
-}
-
-func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, job stage.AssetJob) (bool, error) {
+// processSubtitleJob adopts the best verified OpenSubtitles candidate for one
+// episode, or records a skip. Returned errors are persistence/context
+// failures that abort the stage; candidate problems never fail the job.
+func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, job stage.AssetJob) (string, error) {
 	logger := sess.Logger
 	key := job.Key
 
 	h.startSubtitleJob(sess, job)
 
-	result, err := h.generateDisplaySubtitle(ctx, sess, job)
-	if err != nil {
-		h.recordSubtitleFailure(logger, sess, key, err.Error())
-		return false, nil
+	candidates, skipReason := h.listSubtitleCandidates(ctx, sess, key)
+	if len(candidates) == 0 {
+		return subtitleOutcomeSkipped, h.recordSubtitleSkip(sess, key, skipReason)
 	}
-	h.applySubtitleAuditReviewIssue(logger, sess, key, result.Audit)
 
-	record, err := h.createDisplaySubtitleRecord(sess, job, result)
+	stagingRoot, err := sess.Item.StagingRoot(h.cfg.Paths.StagingDir)
 	if err != nil {
-		h.recordSubtitleFailure(logger, sess, key, err.Error())
-		return false, nil
+		return subtitleOutcomeFailed, err
 	}
-	if len(record.SevereIssues) > 0 {
-		severeReason := strings.Join(record.SevereIssues, ", ")
-		if mergeErr := sess.MergeSave(func(env *ripspec.Envelope) error {
-			upsertSubtitleGenRecord(&env.Attributes.SubtitleGenerationResults, record)
-			return nil
-		}); mergeErr != nil {
-			return false, mergeErr
+	// Adopted SRTs land in staging; the apply stage places them next to the
+	// encoded output and muxes them after the encoding branch joins.
+	subtitleDir := filepath.Join(stagingRoot, "subtitles")
+	workDir := filepath.Join(subtitleDir, job.Key+".work")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		return subtitleOutcomeFailed, fmt.Errorf("create subtitles work dir: %w", err)
+	}
+
+	reference, err := h.ensureSyncReference(ctx, sess, job)
+	if err != nil {
+		h.recordSubtitleFailure(logger, sess, key, fmt.Sprintf("sync reference transcript: %v", err))
+		return subtitleOutcomeFailed, nil
+	}
+	referenceCues, err := srtutil.ParseFile(reference.SRTPath)
+	if err != nil {
+		h.recordSubtitleFailure(logger, sess, key, fmt.Sprintf("read sync reference transcript: %v", err))
+		return subtitleOutcomeFailed, nil
+	}
+	videoSeconds, durationSource := resolveSubtitleVideoDuration(ctx, logger, job.Input.Path, reference.Duration)
+	logger.Info("subtitle duration selected",
+		"decision_type", "subtitle_duration_source",
+		"decision_result", durationSource,
+		"decision_reason", fmt.Sprintf("video_seconds=%.3f transcript_seconds=%.3f", videoSeconds, reference.Duration),
+		"episode_key", key,
+	)
+
+	_ = sess.Progress(job.Percent(92), job.PhaseMessage("Syncing subtitles ("+key+")"))
+	for _, candidate := range candidates {
+		adopted, err := h.tryAdoptCandidate(ctx, sess, job, candidate, adoptContext{
+			ReferenceSRTPath: reference.SRTPath,
+			ReferenceCues:    referenceCues,
+			ReferenceWords:   loadReferenceWords(logger, reference.JSONPath),
+			VideoSeconds:     videoSeconds,
+			SubtitleDir:      subtitleDir,
+			WorkDir:          workDir,
+		})
+		if err != nil {
+			return subtitleOutcomeFailed, err
 		}
-		logger.Warn("subtitle validation failed",
-			"decision_type", logs.DecisionSRTValidation,
-			"decision_result", "failed",
-			"decision_reason", severeReason,
+		if adopted {
+			return subtitleOutcomeAdopted, nil
+		}
+	}
+	return subtitleOutcomeSkipped, h.recordSubtitleSkip(sess, key, "no downloaded subtitle passed verification")
+}
+
+// adoptContext carries the per-job inputs candidate adoption needs.
+type adoptContext struct {
+	ReferenceSRTPath string
+	ReferenceCues    []srtutil.Cue
+	// ReferenceWords is the transcript's aligned word timestamps for the
+	// word-snap pass; nil (audio.json unavailable) skips the pass.
+	ReferenceWords []transcription.Word
+	VideoSeconds   float64
+	SubtitleDir    string
+	WorkDir        string
+}
+
+// candidateEvaluation is the outcome of cleaning, syncing, and verifying one
+// candidate. A non-empty RejectReason means the caller should try the next
+// candidate.
+type candidateEvaluation struct {
+	Cues         []srtutil.Cue
+	Check        adoptionCheck
+	Validation   validationResult
+	Clean        cleanStats
+	RejectReason string
+}
+
+// evaluateCandidate fetches, cleans, syncs, and verifies one candidate
+// against the reference transcript. Errors are hard failures (I/O,
+// cancellation); every candidate-quality problem lands in RejectReason.
+func (h *Handler) evaluateCandidate(ctx context.Context, candidate subtitleCandidate, adopt adoptContext) (candidateEvaluation, error) {
+	var eval candidateEvaluation
+
+	localPath, err := h.fetchCandidate(ctx, candidate)
+	if err != nil {
+		eval.RejectReason = fmt.Sprintf("download failed: %v", err)
+		return eval, nil
+	}
+	data, err := os.ReadFile(localPath)
+	if err != nil {
+		eval.RejectReason = fmt.Sprintf("unreadable candidate file: %v", err)
+		return eval, nil
+	}
+	eval.Cues, eval.Clean = cleanDownloadedSubtitle(data)
+	if len(eval.Cues) == 0 {
+		eval.RejectReason = "no cues remain after cleanup"
+		return eval, nil
+	}
+	// Pre-sync span sanity: ffsubsync can stretch a wrong-length subtitle far
+	// enough to fool the post-sync checks, so a candidate whose raw span is
+	// nowhere near the video length is rejected before sync ever runs.
+	if adopt.VideoSeconds > 0 {
+		rawSpan := eval.Cues[len(eval.Cues)-1].End - eval.Cues[0].Start
+		if rawSpan < adoptMinSpanCoverage*adopt.VideoSeconds {
+			eval.RejectReason = fmt.Sprintf("candidate spans %.0fs of the %.0fs video before sync; likely wrong content or a different cut", rawSpan, adopt.VideoSeconds)
+			return eval, nil
+		}
+	}
+
+	cleanedPath := filepath.Join(adopt.WorkDir, fmt.Sprintf("%d.cleaned.srt", candidate.FileID))
+	if err := writeSRTAtomic(cleanedPath, eval.Cues); err != nil {
+		return eval, fmt.Errorf("write cleaned candidate: %w", err)
+	}
+	syncedPath := filepath.Join(adopt.WorkDir, fmt.Sprintf("%d.synced.srt", candidate.FileID))
+	if err := syncSubtitleToReference(ctx, adopt.ReferenceSRTPath, cleanedPath, syncedPath); err != nil {
+		if ctx.Err() != nil {
+			return eval, ctx.Err()
+		}
+		eval.RejectReason = fmt.Sprintf("sync failed: %v", err)
+		return eval, nil
+	}
+	if eval.Cues, err = srtutil.ParseFile(syncedPath); err != nil {
+		eval.RejectReason = fmt.Sprintf("unreadable synced output: %v", err)
+		return eval, nil
+	}
+
+	eval.Check = verifyAdoptionCandidate(eval.Cues, adopt.ReferenceCues, adopt.VideoSeconds)
+	if !eval.Check.Passed && eval.Check.TextSimilarity >= adoptRefineMinSimilarity {
+		// The text proves this is the right subtitle; give its timing one
+		// deterministic repair (constant offset + linear drift) and re-gate.
+		if refined, ok := refineCueTiming(eval.Cues, adopt.ReferenceCues); ok {
+			if recheck := verifyAdoptionCandidate(refined, adopt.ReferenceCues, adopt.VideoSeconds); recheck.Passed {
+				recheck.TimingRefined = true
+				eval.Cues = refined
+				eval.Check = recheck
+			}
+		}
+	}
+	if !eval.Check.Passed {
+		eval.RejectReason = fmt.Sprintf("%s (%s)", eval.Check.FailureReason, eval.Check.Metrics())
+		return eval, nil
+	}
+	// The candidate is adopted; restore per-cue precision by snapping cue
+	// starts to the transcript's forced-alignment word onsets, keeping the
+	// result only when it still passes the unchanged gate.
+	if snapped, count := snapCuesToWords(eval.Cues, adopt.ReferenceWords); count > 0 {
+		if recheck := verifyAdoptionCandidate(snapped, adopt.ReferenceCues, adopt.VideoSeconds); recheck.Passed {
+			recheck.TimingRefined = eval.Check.TimingRefined
+			recheck.SnappedCues = count
+			eval.Cues = snapped
+			eval.Check = recheck
+		}
+	}
+	eval.Validation = validateCuesDetailed(eval.Cues, adopt.VideoSeconds)
+	if len(eval.Validation.SevereIssues) > 0 {
+		eval.RejectReason = "severe validation: " + strings.Join(eval.Validation.SevereIssues, ", ")
+		return eval, nil
+	}
+	for i := range eval.Cues {
+		eval.Cues[i].Index = i + 1
+	}
+	return eval, nil
+}
+
+// tryAdoptCandidate evaluates one candidate and (on success) records it as
+// the episode's display subtitle. A false return with nil error means the
+// candidate was rejected and the caller should try the next one.
+func (h *Handler) tryAdoptCandidate(ctx context.Context, sess *stage.Session, job stage.AssetJob, candidate subtitleCandidate, adopt adoptContext) (bool, error) {
+	logger := sess.Logger
+	key := job.Key
+
+	eval, err := h.evaluateCandidate(ctx, candidate, adopt)
+	if err != nil {
+		return false, err
+	}
+	logger.Debug("subtitle candidate cleaned",
+		"event_type", "subtitle_candidate_cleaned",
+		"episode_key", key,
+		"candidate", candidate.label(),
+		"original_cues", eval.Clean.OriginalCues,
+		"cleaned_cues", eval.Clean.CleanedCues,
+		"spam_cues", eval.Clean.SpamCues,
+		"emptied_cues", eval.Clean.EmptiedCues,
+	)
+	if eval.RejectReason != "" {
+		logger.Info("subtitle candidate rejected",
+			"decision_type", logs.DecisionSubtitleSource,
+			"decision_result", "candidate_rejected",
+			"decision_reason", eval.RejectReason,
 			"episode_key", key,
-			"impact", "subtitle job failed; mux skipped",
+			"candidate", candidate.label(),
 		)
-		h.recordSubtitleFailure(logger, sess, key, "severe subtitle validation: "+severeReason)
 		return false, nil
 	}
 
+	synced := eval.Cues
+	validation := eval.Validation
+	check := eval.Check
+	language := candidate.Language
+	if language == "" {
+		language = "en"
+	}
+	displayPath := displaySubtitlePath(filepath.Join(adopt.SubtitleDir, key+".mkv"), language)
+	if err := writeSRTAtomic(displayPath, synced); err != nil {
+		return false, fmt.Errorf("write adopted subtitle: %w", err)
+	}
+
+	h.logSubtitleValidation(logger, key, validation)
+	h.applySubtitleReviewIssues(logger, sess, key, validation)
+
+	record := ripspec.SubtitleGenRecord{
+		EpisodeKey:       key,
+		Source:           "opensubtitles",
+		SubtitlePath:     displayPath,
+		Segments:         len(synced),
+		DurationSec:      adopt.VideoSeconds,
+		Language:         language,
+		ValidationResult: subtitleValidationResult(validation),
+		QCObservations:   validation.Issues,
+		ReviewIssues:     validation.ReviewIssues,
+	}
 	if err := sess.MergeSave(func(env *ripspec.Envelope) error {
 		upsertSubtitleGenRecord(&env.Attributes.SubtitleGenerationResults, record)
 		return nil
 	}); err != nil {
 		return false, err
 	}
-	logger.Info("subtitle generated",
-		"event_type", "subtitle_generated",
+
+	logger.Info("subtitle adopted from download",
+		"decision_type", logs.DecisionSubtitleSource,
+		"decision_result", subtitleOutcomeAdopted,
+		"decision_reason", fmt.Sprintf("verified against WhisperX transcript (%s)", check.Metrics()),
 		"episode_key", key,
-		"subtitle_path", record.SubtitlePath,
-		"segments", record.Segments,
+		"candidate", candidate.label(),
+		"subtitle_path", displayPath,
+		"segments", len(synced),
 	)
 	return true, nil
+}
+
+// recordSubtitleSkip records the no-subtitle outcome for an episode. The item
+// completes normally; the warning is the operator's cue to run the manual
+// `spindle subtitle` command, and itemaudit surfaces it as an anomaly.
+func (h *Handler) recordSubtitleSkip(sess *stage.Session, key, reason string) error {
+	sess.Logger.Warn("subtitle generation skipped",
+		"event_type", "subtitle_skipped",
+		"error_hint", reason,
+		"impact", "title has no subtitles; generate them with the whisperx-subtitles agent skill",
+		"episode_key", key,
+	)
+	sess.Logger.Info("subtitle source decision",
+		"decision_type", logs.DecisionSubtitleSource,
+		"decision_result", subtitleOutcomeSkipped,
+		"decision_reason", reason,
+		"episode_key", key,
+	)
+	return sess.MergeSave(func(env *ripspec.Envelope) error {
+		upsertSubtitleGenRecord(&env.Attributes.SubtitleGenerationResults, ripspec.SubtitleGenRecord{
+			EpisodeKey:       key,
+			Source:           "none",
+			ValidationResult: "skipped",
+		})
+		return nil
+	})
 }
 
 func (h *Handler) startSubtitleJob(sess *stage.Session, job stage.AssetJob) {
@@ -345,82 +429,70 @@ func (h *Handler) startSubtitleJob(sess *stage.Session, job stage.AssetJob) {
 		"path", job.Input.Path,
 	)
 
-	logger.Info(job.PhaseMessage("Generating subtitles ("+key+")"),
+	logger.Info(job.PhaseMessage("Preparing subtitles ("+key+")"),
 		"event_type", "subtitle_start",
 	)
+	_ = sess.Progress(job.Percent(5), job.PhaseMessage("Preparing subtitles ("+key+")"))
 }
 
-func (h *Handler) generateDisplaySubtitle(ctx context.Context, sess *stage.Session, job stage.AssetJob) (*GenerateDisplaySubtitleResult, error) {
-	item := sess.Item
-	asset := job.Input
-	key := job.Key
-	workDir := filepath.Join(os.TempDir(), fmt.Sprintf("spindle-subtitle-%s-%s", item.DiscFingerprint, key))
-
-	// Generated SRTs land in staging; the apply stage places them next to
-	// the encoded output and muxes them after the encoding branch joins.
-	stagingRoot, err := item.StagingRoot(h.cfg.Paths.StagingDir)
+// ensureSyncReference returns the episode's canonical WhisperX transcript,
+// reusing the shared artifact when one exists and transcribing the ripped
+// asset once (recording the artifact) when it does not.
+func (h *Handler) ensureSyncReference(ctx context.Context, sess *stage.Session, job stage.AssetJob) (*transcription.TranscribeResult, error) {
+	if result := transcriptArtifact(sess, job.Key); result != nil {
+		return result, nil
+	}
+	if h.transcriber == nil {
+		return nil, fmt.Errorf("transcriber not configured")
+	}
+	stagingRoot, err := sess.Item.StagingRoot(h.cfg.Paths.StagingDir)
 	if err != nil {
 		return nil, err
 	}
-	subtitleDir := filepath.Join(stagingRoot, "subtitles")
-	if err := os.MkdirAll(subtitleDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create subtitles dir: %w", err)
+	outDir := filepath.Join(stagingRoot, "transcripts", job.Key)
+	selected, err := h.transcriber.SelectPrimaryAudioTrack(ctx, job.Input.Path, "en")
+	if err != nil {
+		return nil, fmt.Errorf("select audio: %w", err)
 	}
-
-	referenceTranscript := h.auditReferenceTranscript(ctx, sess, key)
-
-	return GenerateDisplaySubtitle(ctx, GenerateDisplaySubtitleRequest{
-		VideoPath:           asset.Path,
-		DisplayBasePath:     filepath.Join(subtitleDir, key+".mkv"),
-		WorkDir:             workDir,
-		Language:            "en",
-		ItemID:              item.ID,
-		EpisodeKey:          key,
-		Purpose:             "subtitle_generation",
-		Transcript:          transcriptArtifact(sess, key),
-		Transcriber:         h.transcriber,
-		LLM:                 h.llm,
-		MediaContext:        auditMediaContext(sess.Env.Metadata, key),
-		ReferenceTranscript: referenceTranscript,
-		Logger:              sess.Logger,
-		Progress: func(phase transcription.Phase, elapsed time.Duration) {
-			message := sess.Task.ProgressMessage
-			switch phase {
-			case transcription.PhaseExtract:
-				if elapsed == 0 {
-					message = job.PhaseMessage("Extracting audio (" + key + ")")
-				}
-			case transcription.PhaseTranscribe:
-				if elapsed == 0 {
-					message = job.PhaseMessage("Transcribing audio (" + key + ")")
-				}
+	result, err := h.transcriber.Transcribe(ctx, transcription.TranscribeRequest{
+		InputPath:  job.Input.Path,
+		AudioIndex: selected.Index,
+		Language:   selected.Language,
+		OutputDir:  outDir,
+		ItemID:     sess.Item.ID,
+		EpisodeKey: job.Key,
+		Purpose:    "subtitle_sync_reference",
+	}, func(phase transcription.Phase, elapsed time.Duration) {
+		message := sess.Task.ProgressMessage
+		switch phase {
+		case transcription.PhaseExtract:
+			if elapsed == 0 {
+				message = job.PhaseMessage("Extracting audio (" + job.Key + ")")
 			}
-			_ = sess.Progress(job.Percent(subtitlePhasePercent(phase, elapsed)), message)
-		},
-		OnTranscriptionComplete: func(result *transcription.TranscribeResult) {
-			sess.Logger.Info("transcription complete",
-				"event_type", "transcription_complete",
-				"episode_key", key,
-				"segments", result.Segments,
-				"content_duration_s", result.Duration,
-				"extract_time_ms", result.ExtractTime.Milliseconds(),
-				"transcribe_time_ms", result.TranscribeTime.Milliseconds(),
-			)
-		},
-		OnDurationSelected: func(videoSeconds float64, source string, transcriptSeconds float64) {
-			sess.Logger.Info("subtitle duration selected",
-				"decision_type", "subtitle_duration_source",
-				"decision_result", source,
-				"decision_reason", fmt.Sprintf("video_seconds=%.3f transcript_seconds=%.3f", videoSeconds, transcriptSeconds),
-				"episode_key", key,
-			)
-		},
+		case transcription.PhaseTranscribe:
+			if elapsed == 0 {
+				message = job.PhaseMessage("Transcribing audio (" + job.Key + ")")
+			}
+		}
+		_ = sess.Progress(job.Percent(subtitlePhasePercent(phase, elapsed)), message)
 	})
+	if err != nil {
+		return nil, err
+	}
+	if err := sess.SaveAssetSuccess(ripspec.AssetKindTranscript, ripspec.Asset{
+		EpisodeKey: job.Key,
+		TitleID:    job.Input.TitleID,
+		Path:       result.SRTPath,
+		Status:     ripspec.AssetStatusCompleted,
+	}); err != nil {
+		return nil, fmt.Errorf("record transcript asset: %w", err)
+	}
+	return result, nil
 }
 
 // transcriptArtifact returns the episode's shared WhisperX transcript
 // artifact (recorded by episode identification, or commentary analysis for
-// movies) when both its SRT and JSON still exist, so subtitle generation can
+// movies) when both its SRT and JSON still exist, so the subtitle stage can
 // skip its own WhisperX pass. Returns nil when there is no usable artifact.
 func transcriptArtifact(sess *stage.Session, key string) *transcription.TranscribeResult {
 	asset, ok := sess.Env.Assets.FindAsset(ripspec.AssetKindTranscript, key)
@@ -458,66 +530,12 @@ func transcriptArtifact(sess *stage.Session, key string) *transcription.Transcri
 	}
 }
 
-func (h *Handler) createDisplaySubtitleRecord(sess *stage.Session, job stage.AssetJob, result *GenerateDisplaySubtitleResult) (ripspec.SubtitleGenRecord, error) {
-	logger := sess.Logger
-	key := job.Key
-	formatting := result.Formatting
-
-	h.logSubtitleFormatting(logger, key, formatting)
-
-	formattedCues, readErr := srtutil.ParseFile(formatting.DisplayPath)
-	if readErr != nil {
-		return ripspec.SubtitleGenRecord{}, fmt.Errorf("read formatted subtitle: %w", readErr)
-	}
-	if len(formattedCues) == 0 {
-		return ripspec.SubtitleGenRecord{}, fmt.Errorf("formatted subtitle produced zero cues")
-	}
-
-	validation := validateCuesDetailed(formattedCues, result.VideoSeconds)
-	h.logSubtitleValidation(logger, key, validation, formatting)
-	h.applySubtitleReviewIssues(logger, sess, key, validation)
-
-	record := ripspec.SubtitleGenRecord{
-		EpisodeKey:        key,
-		Source:            "whisperx",
-		SubtitlePath:      formatting.DisplayPath,
-		Segments:          len(formattedCues),
-		DurationSec:       result.VideoSeconds,
-		Language:          result.SelectedAudio.Language,
-		ValidationResult:  subtitleValidationResult(validation),
-		QCObservations:    validation.Issues,
-		ReviewIssues:      validation.ReviewIssues,
-		SevereIssues:      validation.SevereIssues,
-		AuditResult:       result.Audit.Result,
-		AuditEditsApplied: result.Audit.Applied,
-		AuditEditsDropped: result.Audit.Dropped,
-	}
-
-	return record, nil
-}
-
-func (h *Handler) logSubtitleFormatting(logger *slog.Logger, key string, formatting FormatResult) {
-	logger.Info("subtitle formatting complete",
-		"decision_type", logs.DecisionSubtitleFormatting,
-		"decision_result", "formatted",
-		"decision_reason", fmt.Sprintf("original_segments=%d filtered_segments=%d text_rules_removed=%d heuristic_removed=%d split_cues=%d merged_cues=%d wrapped_cues=%d retimed_cues=%d", formatting.OriginalSegments, formatting.FilteredSegments, formatting.RemovedByTextRules, formatting.RemovedBySegmentHeuristics, formatting.SplitCues, formatting.MergedCues, formatting.WrappedCues, formatting.RetimedCues),
-		"episode_key", key,
-		"subtitle_file", formatting.DisplayPath,
-	)
-	logger.Info("hallucination filter applied",
-		"decision_type", logs.DecisionHallucinationFilter,
-		"decision_result", "filtered",
-		"decision_reason", fmt.Sprintf("original=%d filtered=%d text_rules_removed=%d heuristic_removed=%d", formatting.OriginalSegments, formatting.FilteredSegments, formatting.RemovedByTextRules, formatting.RemovedBySegmentHeuristics),
-		"episode_key", key,
-	)
-}
-
-func (h *Handler) logSubtitleValidation(logger *slog.Logger, key string, validation validationResult, formatting FormatResult) {
+func (h *Handler) logSubtitleValidation(logger *slog.Logger, key string, validation validationResult) {
 	stats := validation.Stats
 	logger.Info("SRT validation QC summary",
 		"decision_type", logs.DecisionSRTValidation,
 		"decision_result", "qc_summary",
-		"decision_reason", fmt.Sprintf("cue_count=%d max_cps=%.2f p95_cps=%.2f high_cps_cues=%d short_duration_cues=%d long_duration_cues=%d overlong_line_cues=%d unbalanced_line_break_cues=%d split_cues=%d merged_cues=%d wrapped_cues=%d retimed_cues=%d", stats.CueCount, stats.MaxCPS, stats.P95CPS, stats.HighCPSCues, stats.ShortDurationCues, stats.LongDurationCues, stats.OverlongLineCues, stats.UnbalancedLineBreakCues, formatting.SplitCues, formatting.MergedCues, formatting.WrappedCues, formatting.RetimedCues),
+		"decision_reason", fmt.Sprintf("cue_count=%d max_cps=%.2f p95_cps=%.2f high_cps_cues=%d short_duration_cues=%d long_duration_cues=%d overlong_line_cues=%d unbalanced_line_break_cues=%d", stats.CueCount, stats.MaxCPS, stats.P95CPS, stats.HighCPSCues, stats.ShortDurationCues, stats.LongDurationCues, stats.OverlongLineCues, stats.UnbalancedLineBreakCues),
 		"episode_key", key,
 		"cue_count", stats.CueCount,
 		"max_cps", stats.MaxCPS,
@@ -528,10 +546,6 @@ func (h *Handler) logSubtitleValidation(logger *slog.Logger, key string, validat
 		"overlong_line_cues", stats.OverlongLineCues,
 		"unbalanced_line_break_cues", stats.UnbalancedLineBreakCues,
 		"too_many_line_cues", stats.TooManyLineCues,
-		"split_cues", formatting.SplitCues,
-		"merged_cues", formatting.MergedCues,
-		"wrapped_cues", formatting.WrappedCues,
-		"retimed_cues", formatting.RetimedCues,
 	)
 }
 
@@ -586,20 +600,8 @@ func (h *Handler) persistReviewReason(logger *slog.Logger, sess *stage.Session, 
 	}
 }
 
-// applySubtitleAuditReviewIssue flags the episode for review when the
-// subtitle audit rejected its edits under the removal-cap guardrail. Every
-// other audit outcome (applied, clean, skipped, or failed) is non-fatal and
-// does not route to review; the unaudited subtitle remains usable.
-func (h *Handler) applySubtitleAuditReviewIssue(logger *slog.Logger, sess *stage.Session, key string, audit AuditStats) {
-	if audit.Result != "rejected" {
-		return
-	}
-	reason := "subtitle audit rejected (removal cap): " + key
-	h.persistReviewReason(logger, sess, key, reason, reason)
-}
-
 func (h *Handler) finishSubtitleStage(sess *stage.Session, summary subtitleRunSummary) error {
-	if summary.attempted > 0 && summary.succeeded == 0 && summary.failed > 0 {
+	if summary.attempted > 0 && summary.failed == summary.attempted {
 		return fmt.Errorf("all %d subtitle job(s) failed", summary.attempted)
 	}
 
@@ -607,7 +609,8 @@ func (h *Handler) finishSubtitleStage(sess *stage.Session, summary subtitleRunSu
 		"event_type", "stage_complete",
 		"stage", "subtitling",
 		"attempted", summary.attempted,
-		"succeeded", summary.succeeded,
+		"adopted", summary.adopted,
+		"skipped", summary.skipped,
 		"failed", summary.failed,
 	)
 	return nil
@@ -711,20 +714,40 @@ func subtitleValidationResult(validation validationResult) string {
 	}
 }
 
-// auditMediaContext builds the MediaContext string passed to the subtitle
-// audit LLM prompt: `the movie "Title" (Year)` for movies (year omitted when
-// empty), or `the TV episode ShowTitle episodeKey` for TV, using the
-// pipeline's episode/job key as the episode marker.
-func auditMediaContext(meta ripspec.Metadata, episodeKey string) string {
-	if meta.MediaType == "movie" {
-		if meta.Year == "" {
-			return fmt.Sprintf("the movie %q", meta.Title)
-		}
-		return fmt.Sprintf("the movie %q (%s)", meta.Title, meta.Year)
+// displaySubtitlePath derives the sidecar SRT path for a video path and
+// subtitle language, e.g. movie.mkv -> movie.en.srt.
+func displaySubtitlePath(videoPath, subtitleLanguage string) string {
+	base := strings.TrimSuffix(videoPath, filepath.Ext(videoPath))
+	lang := language.ToISO2(subtitleLanguage)
+	if lang == "" {
+		lang = "en"
 	}
-	show := meta.ShowTitle
-	if show == "" {
-		show = meta.Title
+	return base + "." + lang + ".srt"
+}
+
+// writeSRTAtomic renders cues and writes them to path atomically via a
+// temp file in the same directory followed by rename.
+func writeSRTAtomic(path string, cues []srtutil.Cue) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".subtitle-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
 	}
-	return fmt.Sprintf("the TV episode %s %s", show, episodeKey)
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.WriteString(srtutil.Format(cues)); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	_ = os.Chmod(tmpPath, 0o644)
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename temp file: %w", err)
+	}
+	return nil
 }

@@ -546,6 +546,7 @@ func (h *Handler) sendTerminalNotification(ctx context.Context, logger *slog.Log
 		if reason := item.ReviewSummary(2); reason != "" {
 			msg += "\nReason: " + reason
 		}
+		msg += subtitleSkipNote(sess.Env)
 		_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventReviewRequired, title, msg,
 			"library_count", libraryCount,
 			"review_count", reviewCount,
@@ -555,9 +556,33 @@ func (h *Handler) sendTerminalNotification(ctx context.Context, logger *slog.Log
 
 	title := "Imported: " + displayTitle
 	msg := fmt.Sprintf("Imported %s to the library.", itemCount(libraryCount))
+	msg += subtitleSkipNote(sess.Env)
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventPipelineComplete, title, msg,
 		"library_count", libraryCount,
 	)
+}
+
+// subtitleSkipNote lists episodes that completed without subtitles so the
+// operator knows to generate them with the whisperx-subtitles agent skill.
+func subtitleSkipNote(env *ripspec.Envelope) string {
+	if env == nil {
+		return ""
+	}
+	var keys []string
+	for _, record := range env.Attributes.SubtitleGenerationResults {
+		if strings.EqualFold(record.Source, "none") {
+			keys = append(keys, record.EpisodeKey)
+		}
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	// A movie's single "main" key is noise in a notification; only episode
+	// lists are worth enumerating.
+	if len(keys) == 1 && strings.EqualFold(keys[0], "main") {
+		return "\nNo subtitles (generate with the whisperx-subtitles skill)"
+	}
+	return "\nNo subtitles: " + strings.Join(keys, ", ") + " (generate with the whisperx-subtitles skill)"
 }
 
 func itemCount(count int) string {

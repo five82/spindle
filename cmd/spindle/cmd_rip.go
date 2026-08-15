@@ -46,6 +46,7 @@ compete for the optical drive.`,
 		GroupID: groupDisc,
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			out := commandOutput(flagQuiet)
 			if daemonctl.IsRunning(lockPath(), socketPath()) {
 				return fmt.Errorf("daemon is running; stop it first with 'spindle stop'")
 			}
@@ -72,7 +73,7 @@ compete for the optical drive.`,
 			ctx := context.Background()
 			logger := buildLogger()
 
-			fmt.Printf("Scanning disc on %s...\n", device)
+			printCommandOutput(out, "Scanning disc on %s...\n", device)
 			info, err := makemkv.Scan(ctx, device,
 				time.Duration(cfg.MakeMKV.InfoTimeout)*time.Second, minLength, logger)
 			if err != nil {
@@ -100,15 +101,15 @@ compete for the optical drive.`,
 				return fmt.Errorf("no titles to rip (disc reported %d titles at min-length %ds)", len(info.Titles), minLength)
 			}
 
-			fmt.Printf("\nRipping %d title(s) from %q to %s:\n", len(targets), info.Name, outputDir)
+			printCommandOutput(out, "\nRipping %d title(s) from %q to %s:\n", len(targets), info.Name, outputDir)
 			for _, t := range targets {
-				fmt.Printf("  Title %d: %s (%s, %d chapters, %s)\n",
+				printCommandOutput(out, "  Title %d: %s (%s, %d chapters, %s)\n",
 					t.ID, t.Name, formatTitleDuration(t.Duration), t.Chapters, formatBytes(t.SizeBytes))
 			}
 
 			var ripped []string
 			for i, t := range targets {
-				fmt.Printf("\nPhase %d/%d - Ripping title %d\n", i+1, len(targets), t.ID)
+				printCommandOutput(out, "\nPhase %d/%d - Ripping title %d\n", i+1, len(targets), t.ID)
 				before := snapshotMKVNames(outputDir)
 				lastPercent := -10.0
 				err := makemkv.Rip(ctx, device, t.ID, outputDir,
@@ -118,7 +119,7 @@ compete for the optical drive.`,
 							return
 						}
 						lastPercent = p.Percent
-						fmt.Printf("  %5.1f%%\n", p.Percent)
+						printCommandOutput(out, "  %5.1f%%\n", p.Percent)
 					}, logger)
 				if err != nil {
 					return fmt.Errorf("rip title %d: %w", t.ID, err)
@@ -129,12 +130,12 @@ compete for the optical drive.`,
 				}
 				path := filepath.Join(outputDir, newFile)
 				ripped = append(ripped, path)
-				fmt.Printf("  %s %s\n", successStyle("Ripped:"), path)
+				printCommandOutput(out, "  %s %s\n", successStyle("Ripped:"), path)
 			}
 
-			fmt.Printf("\n%s\n", successStyle(fmt.Sprintf("Ripped %d title(s)", len(ripped))))
+			printCommandOutput(out, "\n%s\n", successStyle(fmt.Sprintf("Ripped %d title(s)", len(ripped))))
 			for _, p := range ripped {
-				fmt.Printf("  %s\n", p)
+				printCommandOutput(out, "  %s\n", p)
 			}
 			return nil
 		},
@@ -143,6 +144,7 @@ compete for the optical drive.`,
 	cmd.Flags().BoolVar(&allTitles, "all", false, "Rip every title on the disc")
 	cmd.Flags().StringVarP(&outputDir, "output-dir", "o", ".", "Directory for ripped files")
 	cmd.Flags().IntVar(&minLength, "min-length", 0, "Minimum title length in seconds (must match the scan that produced the title IDs)")
+	cmd.Flags().BoolVarP(&flagQuiet, "quiet", "q", false, "Suppress progress and success output")
 	return cmd
 }
 

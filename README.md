@@ -2,7 +2,7 @@
 
 Spindle turns optical discs into a Jellyfin-ready library. Insert a disc and
 the daemon handles identification with TMDB, ripping with MakeMKV, AV1 encoding
-with Reel, optional WhisperX subtitles and commentary detection, organization,
+with Reel, optional subtitles and commentary detection, organization,
 Jellyfin refreshes, and notifications.
 
 A single Go binary provides both the operator CLI and daemon.
@@ -34,9 +34,10 @@ Requirements:
 - Reel's native libraries: SVT-AV1, FFmpeg libraries, libopusenc, and libvship
 - A TMDB API key
 
-Optional tools and services include `uvx`/WhisperX, `bd_info`, OpenSubtitles,
-OpenRouter, Jellyfin, and ntfy. `spindle status` reports the
-locally required command and library checks.
+Optional tools and services include `uvx` (which runs WhisperX, stable-ts,
+and ffsubsync on demand), `bd_info`, OpenSubtitles, OpenRouter, Jellyfin, and
+ntfy. `spindle status` reports the locally required command and library
+checks.
 
 ## Configure
 
@@ -111,13 +112,18 @@ to the configured review area instead of being silently accepted. Clean TV
 episodes may reach the library while only unresolved episodes go to review.
 
 Final Jellyfin-facing display subtitles are SRT. They are muxed into the MKV by
-default or kept as sidecars when muxing is disabled or fails. The best-effort
-LLM audit uses the identified episode's downloaded OpenSubtitles text as an
-untimed reference transcript when available; movie references are selected by
-TMDB ID and cached. Reference failure falls back to the WhisperX-only audit.
-`spindle subtitle` also reads Jellyfin's TMDB provider marker from a
-library path and downloads the corresponding movie or episode reference before
-regenerating the subtitle.
+default or kept as sidecars when muxing is disabled or fails. The pipeline
+downloads the identified title's OpenSubtitles track, cleans promo lines and
+SDH annotation from it, retimes it against the rip's WhisperX transcript with
+ffsubsync, and adopts it only when it verifies against that transcript. When
+no candidate verifies, the title completes without subtitles: the skip is
+logged as a warning, flagged by `spindle audit`, and listed in the completion
+notification. `spindle subtitle` runs the same adoption process manually for
+any file — it reads the `[tmdbid-ID]` marker from library paths (or takes
+`--tmdb-id`, with `--season`/`--episode` for TV) — useful for orchestrated
+discs and for retrying after better uploads appear. Spindle no longer
+generates WhisperX subtitles itself; the `whisperx-subtitles` agent skill in
+`.agents/skills/` covers titles nothing on OpenSubtitles matches.
 
 ## Manual orchestration
 

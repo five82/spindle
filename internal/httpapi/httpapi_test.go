@@ -213,10 +213,15 @@ func newProjectionEnvelope(t *testing.T) string {
 			SubtitleGenerationResults: []ripspec.SubtitleGenRecord{
 				{
 					EpisodeKey:       "s01_001",
-					Source:           "whisperx",
+					Source:           "opensubtitles",
 					Language:         "en",
 					ValidationResult: "passed",
 					ReviewIssues:     []string{"short segment near credits"},
+				},
+				{
+					EpisodeKey:       "s01_003",
+					Source:           "none",
+					ValidationResult: "skipped",
 				},
 			},
 			ContentID: &ripspec.ContentIDSummary{
@@ -318,6 +323,9 @@ func TestQueueResponsesProjectTasksAndEnvelope(t *testing.T) {
 	}
 	if got.ContentID == nil || got.ContentID.Method != "transcript_match" || !got.ContentID.Completed {
 		t.Fatalf("contentId not projected: %+v", got.ContentID)
+	}
+	if sg := got.SubtitleGeneration; sg == nil || sg.OpenSubtitles != 1 || sg.Skipped != 1 {
+		t.Fatalf("subtitleGeneration not projected: %+v", got.SubtitleGeneration)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/queue/%d", item.ID), nil)
