@@ -41,7 +41,7 @@ forgotten stop fails loudly rather than corrupting anything.
 | `spindle disc identify` | Disc label, fingerprint, TMDB match candidates (human-readable but parseable) |
 | `spindle rip --title 2,5 -o DIR` | Rip specific titles to a directory (`--all` for everything). Use the same `--min-length` as the scan that produced the IDs (default 0 for both) |
 | `spindle encode FILE -o DIR` | Reel AV1 target-quality encode of one file. Exits non-zero if validation fails. Unlike the daemon workflow, this does not run the apply-stage audio refinement afterward. |
-| `spindle subtitle FILE` | Generate a WhisperX English SRT and mux it into the file (or `--external` for a sidecar) |
+| `spindle subtitle FILE` | Download, sync, and verify an OpenSubtitles English SRT and mux it into the file (or `--external` for a sidecar). Needs TMDB identity: a `[tmdbid-ID]` path marker or `--tmdb-id` (plus `--season`/`--episode` for TV). If no download passes verification, generate with the whisperx-subtitles skill instead |
 | `spindle cache rip` / `spindle cache process N` | Route a disc's *main feature* through the normal automated pipeline (rip to cache, then queue it) |
 | `spindle debug crop FILE` / `spindle debug commentary FILE` | Crop and commentary diagnostics for a single file |
 | `spindle jellyfin refresh` | Trigger a Jellyfin library scan after manual placement |
@@ -64,12 +64,15 @@ staging_dir`, plus `[library] movies_dir / tv_dir`.
   `Title (Year) [tmdbid-ID]` (TV: `Show (Year) [tmdbid-ID]/Season NN/`).
   This is what the automated pipeline produces, and Spindle tooling depends
   on it - `spindle subtitle` reads the `[tmdbid-ID]` marker from
-  library paths to fetch reference transcripts. Get the ID from
-  `spindle disc identify` or TMDB directly. Extras files inside the named
-  subfolders do not need the marker; the feature file and its folder do.
+  library paths to identify the title on OpenSubtitles (pre-placement files
+  need `--tmdb-id` instead). Get the ID from `spindle disc identify` or TMDB
+  directly. Extras files inside the named subfolders do not need the marker;
+  the feature file and its folder do.
 - **Subtitles:** none for extras (featurettes, deleted scenes, interviews,
   trailers). Yes for theatrical shorts (Pixar, Looney Tunes, etc.) and for
-  every feature-length cut - run `spindle subtitle` on the encoded file.
+  every feature-length cut - run `spindle subtitle --tmdb-id ID` on the
+  encoded file. When no OpenSubtitles download passes verification (common
+  for shorts and alternate cuts), fall back to the whisperx-subtitles skill.
 - **Audio:** final files keep only the primary track and confirmed commentary
   tracks, matching Spindle's apply stage. Before encoding, inspect the ripped
   or joined source with `ffprobe`; when it has multiple audio streams, run

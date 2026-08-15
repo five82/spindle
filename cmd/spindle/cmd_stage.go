@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -19,7 +18,6 @@ import (
 	"github.com/five82/spindle/internal/fingerprint"
 	"github.com/five82/spindle/internal/identify"
 	"github.com/five82/spindle/internal/keydb"
-	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
@@ -196,44 +194,40 @@ func newGensubtitleCmd() *cobra.Command {
 		output   string
 		workDir  string
 		external bool
+		tmdbID   int
+		season   int
+		episode  int
 	)
 	cmd := &cobra.Command{
-		Use:   "subtitle <encoded-file>",
-		Short: "Regenerate a WhisperX display subtitle for an encoded file",
-		Long: "Regenerate and replace an encoded file's display subtitle. " +
-			"For Jellyfin library paths containing [tmdbid-ID], the LLM audit downloads an untimed OpenSubtitles reference transcript.",
+		Use:   "subtitle <encoded-file>...",
+		Short: "Download, sync, and verify an OpenSubtitles display subtitle",
+		Long: "Download the identified title's OpenSubtitles track, clean it, retime it against a WhisperX " +
+			"transcript of the file with ffsubsync, verify the match, and mux it (or --external for a sidecar). " +
+			"TMDB identity comes from a [tmdbid-ID] marker in the path (with SxxEyy for TV library layouts) " +
+			"or from --tmdb-id/--season/--episode. When no download passes verification, generate subtitles " +
+			"with the whisperx-subtitles agent skill instead. Multiple files share one batched WhisperX run.",
 		GroupID: groupDisc,
-		Args:    cobra.ExactArgs(1),
+		Args:    cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			file := args[0]
-			if _, err := os.Stat(file); err != nil {
-				return fmt.Errorf("file not found: %s", file)
+			files := make([]string, 0, len(args))
+			for _, file := range args {
+				if _, err := os.Stat(file); err != nil {
+					return fmt.Errorf("file not found: %s", file)
+				}
+				if absFile, err := filepath.Abs(file); err == nil {
+					file = absFile
+				}
+				files = append(files, file)
 			}
 			ctx := context.Background()
 
-			cleanupWorkDir := false
 			if workDir == "" {
-				var err error
-				workDir, err = os.MkdirTemp("", "spindle-gensubtitle-*")
+				tmpDir, err := os.MkdirTemp("", "spindle-gensubtitle-*")
 				if err != nil {
 					return fmt.Errorf("create work dir: %w", err)
 				}
-				cleanupWorkDir = true
-				defer func() {
-					if cleanupWorkDir {
-						_ = os.RemoveAll(workDir)
-					}
-				}()
-			}
-
-			if absFile, err := filepath.Abs(file); err == nil {
-				file = absFile
-			}
-			if output == "" {
-				output = filepath.Dir(file)
-			}
-			if err := os.MkdirAll(output, 0o755); err != nil {
-				return fmt.Errorf("create output dir: %w", err)
+				workDir = tmpDir
+				defer func() { _ = os.RemoveAll(tmpDir) }()
 			}
 			sidecarMode := external || !cfg.Subtitles.MuxIntoMKV
 
@@ -242,180 +236,178 @@ func newGensubtitleCmd() *cobra.Command {
 				cmdLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 			}
 
+			identities := make([]subtitle.PathIdentity, len(files))
+			for i, file := range files {
+				identity, err := resolveSubtitleIdentity(file, tmdbID, season, episode)
+				if err != nil {
+					return fmt.Errorf("%s: %w", filepath.Base(file), err)
+				}
+				identities[i] = identity
+			}
+
 			svc := transcription.New(transcription.Params{
 				Model:       cfg.Subtitles.WhisperXModel,
 				CUDAEnabled: cfg.Subtitles.WhisperXCUDAEnabled,
 				VADMethod:   cfg.Subtitles.WhisperXVADMethod,
 				HFToken:     cfg.Subtitles.WhisperXHFToken,
 			}, cmdLogger)
+			osClient := opensubtitles.New(opensubtitles.Params{
+				APIKey:    cfg.Subtitles.OpenSubtitlesAPIKey,
+				UserAgent: cfg.Subtitles.OpenSubtitlesUserAgent,
+				UserToken: cfg.Subtitles.OpenSubtitlesUserToken,
+			}, cmdLogger)
+			handler := subtitle.New(cfg, svc, osClient)
 
-			fmt.Printf("Preparing subtitles for %s...\n", filepath.Base(file))
-			if flagVerbose {
-				model, device, vad := svc.Config()
-				fmt.Printf("  %s %s\n", labelStyle("Model:   "), model)
-				fmt.Printf("  %s %s\n", labelStyle("Device:  "), device)
-				fmt.Printf("  %s %s\n", labelStyle("VAD:     "), vad)
-				fmt.Printf("  %s en\n", labelStyle("Language:"))
-			}
-
-			llmClient := llm.New(cfg.LLM, cmdLogger)
-			mediaContext := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
-			var referenceTranscript string
-			if llmClient != nil {
-				osClient := opensubtitles.New(opensubtitles.Params{
-					APIKey:    cfg.Subtitles.OpenSubtitlesAPIKey,
-					UserAgent: cfg.Subtitles.OpenSubtitlesUserAgent,
-					UserToken: cfg.Subtitles.OpenSubtitlesUserToken,
-				}, cmdLogger)
-				var found bool
-				var refErr error
-				referenceTranscript, found, refErr = subtitle.ReferenceTranscriptForPath(ctx, cfg, osClient, file)
-				decisionLogger := cmdLogger
-				if decisionLogger == nil {
-					decisionLogger = slog.Default()
+			// Batch transcription pays uvx startup and model load once for
+			// the whole file list.
+			transcripts := make([]*transcription.TranscribeResult, len(files))
+			if len(files) > 1 {
+				fmt.Printf("Transcribing %d files (batched)...\n", len(files))
+				reqs := make([]transcription.TranscribeRequest, len(files))
+				for i, file := range files {
+					selected, err := svc.SelectPrimaryAudioTrack(ctx, file, "en")
+					if err != nil {
+						return fmt.Errorf("select primary audio (%s): %w", filepath.Base(file), err)
+					}
+					reqs[i] = transcription.TranscribeRequest{
+						InputPath:  file,
+						AudioIndex: selected.Index,
+						Language:   selected.Language,
+						OutputDir:  filepath.Join(workDir, fmt.Sprintf("file%02d", i)),
+						Purpose:    "subtitle_sync_reference",
+					}
 				}
-				switch {
-				case refErr != nil:
-					decisionLogger.Warn("subtitle reference unavailable",
-						"event_type", "subtitle_audit_reference_unavailable",
-						"error_hint", refErr.Error(),
-						"impact", "subtitle audit continues without external reference text",
-					)
-					fmt.Fprintf(os.Stderr, "%s reference transcript unavailable; continuing without it: %v\n", warnStyle("Warning:"), refErr)
-					referenceTranscript = ""
-				case found:
-					decisionLogger.Info("subtitle reference selected",
-						"decision_type", "subtitle_audit_reference",
-						"decision_result", "reference_assisted",
-						"decision_reason", "Jellyfin TMDB provider ID found in media path",
-					)
-					fmt.Println("Reference transcript ready.")
-				default:
-					decisionLogger.Info("subtitle reference unavailable",
-						"decision_type", "subtitle_audit_reference",
-						"decision_result", "whisperx_only",
-						"decision_reason", "media path has no Jellyfin TMDB provider ID",
-					)
-				}
-			}
-
-			selectedLanguage := "en"
-			var formatStart time.Time
-			result, err := subtitle.GenerateDisplaySubtitle(ctx, subtitle.GenerateDisplaySubtitleRequest{
-				VideoPath:           file,
-				DisplayBasePath:     filepath.Join(workDir, filepath.Base(file)),
-				WorkDir:             workDir,
-				Language:            "en",
-				Transcriber:         svc,
-				LLM:                 llmClient,
-				MediaContext:        mediaContext,
-				ReferenceTranscript: referenceTranscript,
-				Logger:              cmdLogger,
-				Progress: func(phase transcription.Phase, elapsed time.Duration) {
-					switch {
-					case phase == transcription.PhaseExtract && elapsed == 0:
-						fmt.Println("  Extracting audio...")
-					case phase == transcription.PhaseExtract && elapsed > 0:
-						fmt.Printf("  Extracting audio %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
-					case phase == transcription.PhaseTranscribe && elapsed == 0:
-						fmt.Println("  Running WhisperX...")
-					case phase == transcription.PhaseTranscribe && elapsed > 0:
-						fmt.Printf("  Running WhisperX %s (%s)\n", successStyle("done"), formatPhaseDuration(elapsed))
-					}
-				},
-				OnAudioSelected: func(selectedAudio transcription.SelectedAudio) {
-					selectedLanguage = selectedAudio.Language
-					if flagVerbose {
-						fmt.Printf("  %s %s (stream 0:a:%d)\n", labelStyle("Audio:   "), selectedAudio.Label, selectedAudio.Index)
-					}
-				},
-				OnTranscriptionComplete: func(transcript *transcription.TranscribeResult) {
-					fmt.Printf("Canonical transcript ready: %d segments", transcript.Segments)
-					if transcript.Duration > 0 {
-						fmt.Printf(", %s", formatContentDuration(transcript.Duration))
-					}
-					fmt.Println()
-				},
-				OnFormattingStart: func() {
-					fmt.Print("  Formatting subtitles...")
-					formatStart = time.Now()
-				},
-				OnFormattingComplete: func(formatted subtitle.FormatResult) {
-					fmt.Printf("%s (%d -> %d segments, split %d, merged %d, wrapped %d, retimed %d, %s)\n", successStyle("done"), formatted.OriginalSegments, formatted.FilteredSegments, formatted.SplitCues, formatted.MergedCues, formatted.WrappedCues, formatted.RetimedCues, formatPhaseDuration(time.Since(formatStart)))
-				},
-			})
-			if err != nil {
-				return standaloneDisplaySubtitleError(err)
-			}
-			printSubtitleAuditSummary(result.Audit)
-
-			displayPath := result.Formatting.DisplayPath
-			if sidecarMode {
-				finalSidecarPath := apply.DisplaySubtitlePath(filepath.Join(output, filepath.Base(file)), selectedLanguage)
-				data, err := os.ReadFile(displayPath)
+				results, err := svc.TranscribeBatch(ctx, reqs)
 				if err != nil {
-					return fmt.Errorf("read formatted srt: %w", err)
+					return fmt.Errorf("transcription: %w", err)
 				}
-				if err := os.WriteFile(finalSidecarPath, data, 0o644); err != nil {
-					return fmt.Errorf("write formatted srt: %w", err)
-				}
-				fmt.Printf("Saved sidecar: %s\n", finalSidecarPath)
-				return nil
+				copy(transcripts, results)
 			}
 
-			if apply.MKVHasSubtitleTrack(ctx, file) {
-				fmt.Print("Replacing existing subtitle tracks...")
-			} else {
-				fmt.Print("Muxing subtitle into MKV...")
+			failures := 0
+			for i, file := range files {
+				if err := adoptStandaloneSubtitle(ctx, handler, standaloneAdoptParams{
+					file:        file,
+					identity:    identities[i],
+					transcript:  transcripts[i],
+					workDir:     filepath.Join(workDir, fmt.Sprintf("file%02d", i)),
+					outputDir:   output,
+					sidecarMode: sidecarMode,
+				}); err != nil {
+					failures++
+					fmt.Fprintf(os.Stderr, "%s %s: %v\n", warnStyle("No subtitle:"), filepath.Base(file), err)
+				}
 			}
-			track := apply.MuxTrack{Path: displayPath, Language: selectedLanguage}
-			if _, err := apply.MuxSubtitleTrack(ctx, apply.MuxRequest{VideoPath: file, OutputPath: file, Track: track, ReplaceExisting: true}); err != nil {
-				return err
+			if failures > 0 {
+				return fmt.Errorf("%d of %d file(s) got no subtitles; generate them with the whisperx-subtitles agent skill", failures, len(files))
 			}
-			fmt.Println(successStyle("done"))
 			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output directory")
 	cmd.Flags().StringVar(&workDir, "work-dir", "", "Working directory")
 	cmd.Flags().BoolVar(&external, "external", false, "Create external SRT sidecar instead of muxing")
+	cmd.Flags().IntVar(&tmdbID, "tmdb-id", 0, "TMDB ID (overrides the [tmdbid-ID] path marker)")
+	cmd.Flags().IntVar(&season, "season", 0, "TV season number (with --tmdb-id)")
+	cmd.Flags().IntVar(&episode, "episode", 0, "TV episode number (with --tmdb-id)")
 	return cmd
 }
 
-// printSubtitleAuditSummary prints one line summarizing the LLM subtitle
-// audit outcome, consistent with the subtitle command's other status lines.
-func printSubtitleAuditSummary(audit subtitle.AuditStats) {
-	switch audit.Result {
-	case "applied":
-		fmt.Printf("  Subtitle audit: %d edit(s) applied, %d dropped\n", audit.Applied, audit.Dropped)
-	case "clean":
-		fmt.Println("  Subtitle audit: clean")
-	case "rejected":
-		fmt.Printf("  Subtitle audit: rejected (%s)\n", audit.FailureReason)
-	default:
-		fmt.Printf("  Subtitle audit: skipped (%s)\n", audit.FailureReason)
+// resolveSubtitleIdentity picks the TMDB identity for one file: explicit
+// flags win, then the Jellyfin path markers.
+func resolveSubtitleIdentity(file string, tmdbID, season, episode int) (subtitle.PathIdentity, error) {
+	if tmdbID > 0 {
+		return subtitle.PathIdentity{TMDBID: tmdbID, Season: season, Episode: episode, EpisodeEnd: episode}, nil
 	}
+	identity, found, err := subtitle.ParseLibraryPathIdentity(file)
+	if err != nil {
+		return subtitle.PathIdentity{}, err
+	}
+	if !found {
+		return subtitle.PathIdentity{}, errors.New("no [tmdbid-ID] marker in path; pass --tmdb-id (and --season/--episode for TV)")
+	}
+	if identity.EpisodeEnd > identity.Episode {
+		return subtitle.PathIdentity{}, errors.New("multi-episode file has no single-episode subtitle source")
+	}
+	return identity, nil
 }
 
-func standaloneDisplaySubtitleError(err error) error {
-	var displayErr *subtitle.DisplaySubtitleError
-	if !errors.As(err, &displayErr) {
-		return err
-	}
-	switch displayErr.Op {
-	case "select audio":
-		return fmt.Errorf("select primary audio: %w", displayErr.Err)
-	case "transcribe":
-		return fmt.Errorf("transcription: %w", displayErr.Err)
-	case "format subtitle":
-		return fmt.Errorf("format subtitles: %w", displayErr.Err)
-	default:
-		return err
-	}
+type standaloneAdoptParams struct {
+	file        string
+	identity    subtitle.PathIdentity
+	transcript  *transcription.TranscribeResult // nil when not batch-transcribed
+	workDir     string
+	outputDir   string
+	sidecarMode bool
 }
 
-// formatPhaseDuration formats a time.Duration for phase timing display.
-// Uses "1.2s" for < 1 minute, "1m30s" for >= 1 minute.
+// adoptStandaloneSubtitle runs the adoption process for one file and places
+// the result as a sidecar or muxed track.
+func adoptStandaloneSubtitle(ctx context.Context, handler *subtitle.Handler, p standaloneAdoptParams) error {
+	file := p.file
+	fmt.Printf("Preparing subtitles for %s...\n", filepath.Base(file))
+
+	var transcribeStart time.Time
+	result, err := handler.AdoptForFile(ctx, subtitle.AdoptFileRequest{
+		VideoPath:  file,
+		WorkDir:    p.workDir,
+		TMDBID:     p.identity.TMDBID,
+		Season:     p.identity.Season,
+		Episode:    p.identity.Episode,
+		Transcript: p.transcript,
+		OnTranscribeStart: func() {
+			fmt.Print("  Transcribing sync reference...")
+			transcribeStart = time.Now()
+		},
+		OnTranscribeComplete: func(transcript *transcription.TranscribeResult) {
+			fmt.Printf("%s (%d segments, %s)\n", successStyle("done"), transcript.Segments, formatPhaseDuration(time.Since(transcribeStart)))
+		},
+	})
+	if err != nil {
+		return err
+	}
+	for _, rejectedCandidate := range result.RejectedCandidates {
+		fmt.Printf("  Rejected %s\n", rejectedCandidate)
+	}
+	fmt.Printf("  Adopted %s (%d segments, validation %s)\n", result.Candidate, result.Segments, result.Validation)
+	if flagVerbose {
+		fmt.Printf("  %s %s\n", labelStyle("Gate:    "), result.GateMetrics)
+	}
+
+	outputDir := p.outputDir
+	if outputDir == "" {
+		outputDir = filepath.Dir(file)
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return fmt.Errorf("create output dir: %w", err)
+	}
+
+	if p.sidecarMode {
+		finalSidecarPath := apply.DisplaySubtitlePath(filepath.Join(outputDir, filepath.Base(file)), result.Language)
+		data, err := os.ReadFile(result.SubtitlePath)
+		if err != nil {
+			return fmt.Errorf("read adopted srt: %w", err)
+		}
+		if err := os.WriteFile(finalSidecarPath, data, 0o644); err != nil {
+			return fmt.Errorf("write adopted srt: %w", err)
+		}
+		fmt.Printf("Saved sidecar: %s\n", finalSidecarPath)
+		return nil
+	}
+
+	if apply.MKVHasSubtitleTrack(ctx, file) {
+		fmt.Print("Replacing existing subtitle tracks...")
+	} else {
+		fmt.Print("Muxing subtitle into MKV...")
+	}
+	track := apply.MuxTrack{Path: result.SubtitlePath, Language: result.Language}
+	if _, err := apply.MuxSubtitleTrack(ctx, apply.MuxRequest{VideoPath: file, OutputPath: file, Track: track, ReplaceExisting: true}); err != nil {
+		return err
+	}
+	fmt.Println(successStyle("done"))
+	return nil
+}
+
 func formatPhaseDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%.1fs", d.Seconds())
@@ -423,11 +415,6 @@ func formatPhaseDuration(d time.Duration) string {
 	mins := int(d.Minutes())
 	secs := int(d.Seconds()) % 60
 	return fmt.Sprintf("%dm%02ds", mins, secs)
-}
-
-// formatContentDuration formats a duration in seconds as "1h38m12s".
-func formatContentDuration(secs float64) string {
-	return time.Duration(secs * float64(time.Second)).Truncate(time.Second).String()
 }
 
 func newTestNotifyCmd() *cobra.Command {

@@ -11,7 +11,8 @@
 ## Project
 
 Personal single-operator tool: optical disc -> Jellyfin library (MakeMKV rip,
-Reel AV1 target-quality encode, TMDB metadata, WhisperX subtitles, ntfy).
+Reel AV1 target-quality encode, TMDB metadata, OpenSubtitles subtitles synced
+against WhisperX transcripts, ntfy).
 Feature-complete and in a bugfix phase — avoid over-engineering. Break
 forward: no backwards compatibility, no compat layers, no deprecated paths.
 Queue access goes through the daemon HTTP API; the only stopped-daemon

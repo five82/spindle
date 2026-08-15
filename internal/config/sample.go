@@ -64,7 +64,10 @@ api_key = ""
 # request_timeout = 10
 
 [subtitles]
-# Enable subtitle generation pipeline
+# Enable the subtitle pipeline: adopt a cleaned OpenSubtitles download
+# verified against the rip's WhisperX transcript, or skip the episode.
+# Skipped episodes can get WhisperX subtitles via the whisperx-subtitles
+# agent skill.
 # enabled = false
 
 # Embed subtitles in MKV container
@@ -138,8 +141,8 @@ api_key = ""
 # Encoding uses Reel target-quality mode with Reel defaults.
 
 [llm]
-# OpenRouter is used for ambiguous episode verification, commentary detection,
-# and best-effort subtitle audit. An empty key disables those LLM operations.
+# OpenRouter is used for ambiguous episode verification and commentary
+# detection. An empty key disables those LLM operations.
 # OpenRouter API key (or set OPENROUTER_API_KEY env var)
 # api_key = ""
 

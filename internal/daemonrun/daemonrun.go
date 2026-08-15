@@ -182,7 +182,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	contentidHandler := contentid.New(cfg, llmClient, osClient, tmdbClient, transcriber)
 	encoderHandler := encoder.New(cfg)
 	analysisHandler := audioanalysis.New(cfg, llmClient, transcriber)
-	subtitleHandler := subtitle.New(cfg, transcriber, llmClient, osClient)
+	subtitleHandler := subtitle.New(cfg, transcriber, osClient)
 	applyHandler := apply.New(cfg)
 	organizerHandler := organizer.New(cfg, jfClient, notifier)
 
@@ -192,6 +192,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		{Name: "ffmpeg", Command: "ffmpeg", Description: "FFmpeg media processor", Optional: false},
 		{Name: "ffprobe", Command: "ffprobe", Description: "FFprobe media analyzer", Optional: false},
 		{Name: "mkvmerge", Command: "mkvmerge", Description: "MKVToolNix merge tool", Optional: false},
+		{Name: "uvx", Command: "uvx", Description: "uv tool runner (WhisperX, ffsubsync)", Optional: false},
 		{Name: "libSvtAv1Enc", Command: "libSvtAv1Enc.so", Description: "Reel SVT-AV1 encoder library", Optional: false, Library: true},
 		{Name: "libavformat", Command: "libavformat.so", Description: "Reel FFmpeg format library", Optional: false, Library: true},
 		{Name: "libavcodec", Command: "libavcodec.so", Description: "Reel FFmpeg codec library", Optional: false, Library: true},

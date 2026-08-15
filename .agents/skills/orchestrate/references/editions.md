@@ -23,7 +23,9 @@ cut plus its own extras.
 
 Both cuts are features: rip with `spindle rip`, encode with
 `spindle encode`, and **generate subtitles for each cut** with
-`spindle subtitle` on each encoded file. Commentary tracks are worth
+`spindle subtitle --tmdb-id ID` on each encoded file. An alternate cut
+often fails download verification (different runtime) - use the
+whisperx-subtitles skill for that cut. Commentary tracks are worth
 preserving on special editions - check `spindle debug commentary` on the
 ripped file if the release is known for one, and note the finding in the
 report.

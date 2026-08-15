@@ -2,6 +2,7 @@ package auditgather
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/five82/spindle/internal/media/ffprobe"
@@ -223,8 +224,8 @@ func TestComputeOutputMediaSummarizesStreamsAndLabels(t *testing.T) {
 func TestComputeSubtitleSummarySeparatesValidationResults(t *testing.T) {
 	r := &Report{
 		Envelope: &ripspec.Envelope{Attributes: ripspec.EnvelopeAttributes{SubtitleGenerationResults: []ripspec.SubtitleGenRecord{
-			{EpisodeKey: "main", Source: "whisperx", Language: "en", Segments: 10, ValidationResult: "passed", QCObservations: []string{"high_reading_speed"}, AuditResult: "applied", AuditEditsApplied: 7, AuditEditsDropped: 1},
-			{EpisodeKey: "s01e02", Source: "whisperx", Language: "en", Segments: 8, ValidationResult: "needs_review", ReviewIssues: []string{"bad timing"}},
+			{EpisodeKey: "main", Source: "opensubtitles", Language: "en", Segments: 10, ValidationResult: "passed", QCObservations: []string{"high_reading_speed"}},
+			{EpisodeKey: "s01e02", Source: "opensubtitles", Language: "en", Segments: 8, ValidationResult: "needs_review", ReviewIssues: []string{"bad timing"}},
 		}}},
 	}
 
@@ -237,9 +238,6 @@ func TestComputeSubtitleSummarySeparatesValidationResults(t *testing.T) {
 	}
 	if len(summary.Results) != 2 || len(summary.Results[1].ReviewIssues) != 1 {
 		t.Fatalf("unexpected results: %+v", summary.Results)
-	}
-	if summary.Results[0].AuditResult != "applied" || summary.Results[0].AuditEditsApplied != 7 || summary.Results[0].AuditEditsDropped != 1 {
-		t.Fatalf("audit fields not carried into summary: %+v", summary.Results[0])
 	}
 }
 
@@ -342,6 +340,28 @@ func TestComputeEpisodeStats_Unresolved(t *testing.T) {
 	}
 	if !stats.PlaceholderOnly {
 		t.Error("expected placeholder_only for unresolved placeholder manifest")
+	}
+}
+
+func TestDetectAnomalies_SkippedSubtitles(t *testing.T) {
+	r := &Report{
+		Item: ItemSummary{},
+		Envelope: &ripspec.Envelope{Attributes: ripspec.EnvelopeAttributes{
+			SubtitleGenerationResults: []ripspec.SubtitleGenRecord{
+				{EpisodeKey: "s01e01", Source: "opensubtitles", ValidationResult: "passed"},
+				{EpisodeKey: "s01e02", Source: "none", ValidationResult: "skipped"},
+			},
+		}},
+	}
+	anomalies := detectAnomalies(r, &Analysis{})
+	found := false
+	for _, a := range anomalies {
+		if a.Category == "subtitles" && strings.Contains(a.Message, "1 title(s) completed without subtitles") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no skipped-subtitle anomaly in %+v", anomalies)
 	}
 }
 

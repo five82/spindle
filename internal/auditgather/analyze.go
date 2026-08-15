@@ -261,7 +261,7 @@ func selectNotableDecisions(decisions []LogDecision) []LogDecision {
 		logs.DecisionCommentaryClassification: true,
 		logs.DecisionCommentaryRemapping:      true,
 		logs.DecisionCommentaryDisposition:    true,
-		logs.DecisionSubtitleFormatting:       true,
+		logs.DecisionSubtitleSource:           true,
 		logs.DecisionSRTValidation:            true,
 		logs.DecisionSourceStageSelection:     true,
 		logs.DecisionEpisodeIDSkip:            true,
@@ -568,17 +568,14 @@ func computeSubtitleSummary(r *Report, outputMedia []MediaSummary) *SubtitleSumm
 	summary := &SubtitleSummary{SubtitleLabelsCorrect: true}
 	for _, rec := range r.Envelope.Attributes.SubtitleGenerationResults {
 		summary.Results = append(summary.Results, SubtitleResultSummary{
-			EpisodeKey:        rec.EpisodeKey,
-			Source:            rec.Source,
-			Language:          rec.Language,
-			Segments:          rec.Segments,
-			ValidationResult:  rec.ValidationResult,
-			ReviewIssues:      rec.ReviewIssues,
-			SevereIssues:      rec.SevereIssues,
-			QCObservations:    rec.QCObservations,
-			AuditResult:       rec.AuditResult,
-			AuditEditsApplied: rec.AuditEditsApplied,
-			AuditEditsDropped: rec.AuditEditsDropped,
+			EpisodeKey:       rec.EpisodeKey,
+			Source:           rec.Source,
+			Language:         rec.Language,
+			Segments:         rec.Segments,
+			ValidationResult: rec.ValidationResult,
+			ReviewIssues:     rec.ReviewIssues,
+			SevereIssues:     rec.SevereIssues,
+			QCObservations:   rec.QCObservations,
 		})
 		switch rec.ValidationResult {
 		case "passed":
@@ -587,6 +584,9 @@ func computeSubtitleSummary(r *Report, outputMedia []MediaSummary) *SubtitleSumm
 			summary.ValidationNeedsReview++
 		case "failed":
 			summary.ValidationFailed++
+		}
+		if strings.EqualFold(rec.Source, "none") {
+			summary.Skipped++
 		}
 	}
 	for _, media := range outputMedia {
@@ -1120,6 +1120,19 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 	}
 
 	if r.Envelope != nil {
+		subtitleSkips := 0
+		for _, rec := range r.Envelope.Attributes.SubtitleGenerationResults {
+			if strings.EqualFold(rec.Source, "none") {
+				subtitleSkips++
+			}
+		}
+		if subtitleSkips > 0 {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "warning",
+				Category: "subtitles",
+				Message:  fmt.Sprintf("%d title(s) completed without subtitles; generate them with the whisperx-subtitles skill", subtitleSkips),
+			})
+		}
 		reviewCount := 0
 		for _, ep := range r.Envelope.Episodes {
 			if ep.NeedsReview {

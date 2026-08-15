@@ -30,8 +30,10 @@ immediately; filenames alone won't tell you later.
 Then per file: `spindle encode scratch/ripped/FILE -o scratch/encoded/`.
 
 - **Extras: no subtitles.**
-- **Theatrical shorts: generate subtitles** - `spindle subtitle
-  scratch/encoded/SHORT.mkv` after encoding.
+- **Theatrical shorts: generate subtitles** - `spindle subtitle --tmdb-id ID
+  scratch/encoded/SHORT.mkv` after encoding (shorts have their own TMDB
+  entries). OpenSubtitles coverage for shorts is thin; expect to fall back
+  to the whisperx-subtitles skill.
 - If the movie itself is also wanted and is ordinary, run it through the
   normal pipeline instead (`spindle cache rip` then `spindle cache process`),
   and orchestrate only the extras manually. Do the cache rip while the
