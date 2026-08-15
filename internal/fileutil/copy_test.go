@@ -151,7 +151,7 @@ func TestCopyFileVerified(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := CopyFileVerified(src, dst); err != nil {
+			if err := CopyFileVerifiedWithProgress(src, dst, nil); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
@@ -175,7 +175,7 @@ func TestCopyFileVerified(t *testing.T) {
 
 	t.Run("missing source", func(t *testing.T) {
 		dir := t.TempDir()
-		err := CopyFileVerified(filepath.Join(dir, "missing"), filepath.Join(dir, "dst"))
+		err := CopyFileVerifiedWithProgress(filepath.Join(dir, "missing"), filepath.Join(dir, "dst"), nil)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}

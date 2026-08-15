@@ -55,15 +55,10 @@ func CopyFileMode(src, dst string, mode os.FileMode) error {
 	return nil
 }
 
-// CopyFileVerified copies src to dst with simultaneous SHA-256 hashing and size
-// verification. On mismatch the destination file is removed and an error is returned.
-// Uses 0o644 permissions.
-func CopyFileVerified(src, dst string) error {
-	return CopyFileVerifiedWithProgress(src, dst, nil)
-}
-
-// CopyFileVerifiedWithProgress is like CopyFileVerified but reports byte progress
-// during the copy.
+// CopyFileVerifiedWithProgress copies src to dst with simultaneous SHA-256
+// hashing and size verification, reporting byte progress during the copy. On
+// mismatch the destination file is removed and an error is returned. Uses
+// 0o644 permissions.
 func CopyFileVerifiedWithProgress(src, dst string, progress ProgressFunc) error {
 	srcFile, err := os.Open(src)
 	if err != nil {

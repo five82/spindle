@@ -12,7 +12,7 @@ func TestChoosePrimaryTitlePrefersMPLSWithSegments(t *testing.T) {
 		{ID: 2, Duration: 10480, Chapters: 60, Playlist: "00800.mpls", SegmentCount: 70},
 		{ID: 1, Duration: 10480, Chapters: 60, Playlist: "00700.mpls", SegmentCount: 60},
 	}
-	selection, ok := ChoosePrimaryTitle(titles)
+	selection, ok, _ := choosePrimaryTitleTraced(titles)
 	if !ok {
 		t.Fatalf("ChoosePrimaryTitle returned false")
 	}
@@ -27,7 +27,7 @@ func TestChoosePrimaryTitleUsesHashWhenTied(t *testing.T) {
 		{ID: 1, Duration: 5400, Chapters: 40, Playlist: "00101.mpls", SegmentCount: 10, TitleHash: "bbb"},
 		{ID: 2, Duration: 5400, Chapters: 40, Playlist: "00102.mpls", SegmentCount: 10, TitleHash: "aaa"},
 	}
-	selection, ok := ChoosePrimaryTitle(titles)
+	selection, ok, _ := choosePrimaryTitleTraced(titles)
 	if !ok {
 		t.Fatalf("ChoosePrimaryTitle returned false")
 	}
@@ -45,7 +45,7 @@ func TestChoosePrimaryTitleDisneyMultiLanguage(t *testing.T) {
 		{ID: 1, Duration: 7205, Chapters: 20, Playlist: "00801.mpls", SegmentCount: 20}, // 5s longer (French credits)
 		{ID: 2, Duration: 7203, Chapters: 20, Playlist: "00802.mpls", SegmentCount: 20}, // 3s longer (Spanish credits)
 	}
-	selection, ok := ChoosePrimaryTitle(titles)
+	selection, ok, _ := choosePrimaryTitleTraced(titles)
 	if !ok {
 		t.Fatalf("ChoosePrimaryTitle returned false")
 	}
@@ -61,7 +61,7 @@ func TestChoosePrimaryTitleDifferentCutsNotDisneyPattern(t *testing.T) {
 		{ID: 0, Duration: 6783, Chapters: 17, Playlist: "00800.mpls", SegmentCount: 17}, // Theatrical: 113m 3s
 		{ID: 1, Duration: 6991, Chapters: 17, Playlist: "00801.mpls", SegmentCount: 17}, // Director's: 116m 31s
 	}
-	selection, ok := ChoosePrimaryTitle(titles)
+	selection, ok, _ := choosePrimaryTitleTraced(titles)
 	if !ok {
 		t.Fatalf("ChoosePrimaryTitle returned false")
 	}
@@ -79,7 +79,7 @@ func TestChoosePrimaryTitleRuntimeThreshold(t *testing.T) {
 		{ID: 0, Duration: 7200, Chapters: 20, Playlist: "00800.mpls", SegmentCount: 20},
 		{ID: 1, Duration: 7230, Chapters: 20, Playlist: "00801.mpls", SegmentCount: 20}, // Exactly 30s longer
 	}
-	selection, ok := ChoosePrimaryTitle(titles)
+	selection, ok, _ := choosePrimaryTitleTraced(titles)
 	if !ok {
 		t.Fatalf("ChoosePrimaryTitle returned false")
 	}
@@ -92,7 +92,7 @@ func TestChoosePrimaryTitleRuntimeThreshold(t *testing.T) {
 		{ID: 0, Duration: 7200, Chapters: 20, Playlist: "00800.mpls", SegmentCount: 20},
 		{ID: 1, Duration: 7231, Chapters: 20, Playlist: "00801.mpls", SegmentCount: 20}, // 31s longer
 	}
-	selection, ok = ChoosePrimaryTitle(titles)
+	selection, ok, _ = choosePrimaryTitleTraced(titles)
 	if !ok {
 		t.Fatalf("ChoosePrimaryTitle returned false")
 	}
@@ -109,7 +109,7 @@ func TestChoosePrimaryTitleDisneyUHDMultiLanguage(t *testing.T) {
 		{ID: 1, Duration: 6181, Chapters: 20, Playlist: "47", SegmentMap: "00802.mpls", SegmentCount: 20},
 		{ID: 3, Duration: 6181, Chapters: 20, Playlist: "47", SegmentMap: "00801.mpls", SegmentCount: 20},
 	}
-	selection, ok := ChoosePrimaryTitle(titles)
+	selection, ok, _ := choosePrimaryTitleTraced(titles)
 	if !ok {
 		t.Fatalf("ChoosePrimaryTitle returned false")
 	}
@@ -124,7 +124,7 @@ func TestChoosePrimaryTitleIgnoresCommaSegmentMap(t *testing.T) {
 		{ID: 0, Duration: 7200, Chapters: 20, Playlist: "10", SegmentMap: "00800.mpls,00801.mpls", SegmentCount: 20},
 		{ID: 1, Duration: 7200, Chapters: 20, Playlist: "11", SegmentMap: "00802.mpls,00803.mpls", SegmentCount: 20},
 	}
-	selection, ok := ChoosePrimaryTitle(titles)
+	selection, ok, _ := choosePrimaryTitleTraced(titles)
 	if !ok {
 		t.Fatalf("ChoosePrimaryTitle returned false")
 	}

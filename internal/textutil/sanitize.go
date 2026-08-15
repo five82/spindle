@@ -8,7 +8,6 @@ import (
 var (
 	controlCharRe  = regexp.MustCompile(`[\x00-\x1f\x7f]`)
 	collapseSpaceRe = regexp.MustCompile(`\s{2,}`)
-	notAlnumDashRe = regexp.MustCompile(`[^a-z0-9_-]`)
 	multiHyphenRe  = regexp.MustCompile(`-{2,}`)
 	multiSpaceRe   = regexp.MustCompile(`\s+`)
 )
@@ -53,18 +52,6 @@ func SanitizePathSegment(name string) string {
 	s = strings.Trim(s, "-_")
 	if s == "" {
 		return "queue"
-	}
-	return s
-}
-
-// SanitizeToken lowercases the input, keeps [a-z0-9_-], and replaces everything
-// else with underscores. Returns "unknown" for empty input.
-func SanitizeToken(value string) string {
-	s := strings.ToLower(value)
-	s = notAlnumDashRe.ReplaceAllString(s, "_")
-	s = strings.Trim(s, "_")
-	if s == "" {
-		return "unknown"
 	}
 	return s
 }

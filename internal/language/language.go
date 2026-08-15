@@ -116,29 +116,3 @@ func ExtractFromTags(tags map[string]string) string {
 	}
 	return ""
 }
-
-// NormalizeList deduplicates and normalizes a slice of language codes to
-// ISO 639-1. Codes longer than two characters are converted via ToISO2; codes
-// that cannot be resolved are dropped. Order is preserved (first occurrence
-// wins).
-func NormalizeList(languages []string) []string {
-	seen := make(map[string]struct{}, len(languages))
-	out := make([]string, 0, len(languages))
-	for _, raw := range languages {
-		var code string
-		if len(strings.TrimSpace(raw)) > 2 {
-			code = ToISO2(raw)
-		} else {
-			code = strings.ToLower(strings.TrimSpace(raw))
-		}
-		if code == "" {
-			continue
-		}
-		if _, dup := seen[code]; dup {
-			continue
-		}
-		seen[code] = struct{}{}
-		out = append(out, code)
-	}
-	return out
-}
