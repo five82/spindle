@@ -32,10 +32,14 @@ Check TMDB (via `spindle disc identify` and a web search of the TMDB entry):
    film). Verify the joined duration equals the sum of the parts and plays
    across the seam (`ffprobe`, and spot-check a few seconds around the join
    point with ffmpeg if in doubt).
-3. `spindle encode scratch/joined.mkv -o scratch/encoded/` - one encode of
+3. Apply the skill's audio rule to the joined source: run `ffprobe` and
+   `spindle debug commentary`, then remux it to the primary track plus only
+   confirmed commentary tracks. Joining can expose identical lossless/core or
+   downmix tracks from both halves; do not pass those redundancies to Reel.
+4. `spindle encode scratch/refined.mkv -o scratch/encoded/` - one encode of
    the full film.
-4. `spindle subtitle` on the encoded file (it is a feature).
-5. Place as a normal single movie:
+5. `spindle subtitle` on the encoded file (it is a feature).
+6. Place as a normal single movie:
    `Movies/Film (1963) [tmdbid-12345]/Film (1963) [tmdbid-12345].mkv`.
 
 If the halves genuinely will not concatenate (different resolutions or

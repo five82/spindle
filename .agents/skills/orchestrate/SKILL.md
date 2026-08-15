@@ -40,7 +40,7 @@ forgotten stop fails loudly rather than corrupting anything.
 | `spindle disc scan --json` | Raw MakeMKV title inventory (id, runtime, chapters, size, playlist). Defaults to `--min-length 0` so short extras show up. **These IDs are what `spindle rip` takes** |
 | `spindle disc identify` | Disc label, fingerprint, TMDB match candidates (human-readable but parseable) |
 | `spindle rip --title 2,5 -o DIR` | Rip specific titles to a directory (`--all` for everything). Use the same `--min-length` as the scan that produced the IDs (default 0 for both) |
-| `spindle encode FILE -o DIR` | Reel AV1 target-quality encode of one file, same encode path as the daemon. Exits non-zero if validation fails |
+| `spindle encode FILE -o DIR` | Reel AV1 target-quality encode of one file. Exits non-zero if validation fails. Unlike the daemon workflow, this does not run the apply-stage audio refinement afterward. |
 | `spindle subtitle FILE` | Generate a WhisperX English SRT and mux it into the file (or `--external` for a sidecar) |
 | `spindle cache rip` / `spindle cache process N` | Route a disc's *main feature* through the normal automated pipeline (rip to cache, then queue it) |
 | `spindle debug crop FILE` / `spindle debug commentary FILE` | Crop and commentary diagnostics for a single file |
@@ -70,9 +70,23 @@ staging_dir`, plus `[library] movies_dir / tv_dir`.
 - **Subtitles:** none for extras (featurettes, deleted scenes, interviews,
   trailers). Yes for theatrical shorts (Pixar, Looney Tunes, etc.) and for
   every feature-length cut - run `spindle subtitle` on the encoded file.
-- **Verify before placing.** `ffprobe` every encoded file: AV1 video, expected
-  audio streams, duration within ~2s of the ripped source. `spindle encode`
-  already validates, but confirm anything you renamed or remuxed yourself.
+- **Audio:** final files keep only the primary track and confirmed commentary
+  tracks, matching Spindle's apply stage. Before encoding, inspect the ripped
+  or joined source with `ffprobe`; when it has multiple audio streams, run
+  `spindle debug commentary FILE`. Remux to a new scratch file containing the
+  selected primary first plus only tracks classified as commentary. Drop
+  lossy cores duplicated from a lossless primary, stereo downmixes, descriptive
+  audio, alternate languages, isolated music/effects, and every other
+  non-commentary track. Do this before `spindle encode`, because the standalone
+  command transcodes every input audio stream and does not run apply-stage
+  refinement. Make the primary track default. Label retained commentary tracks
+  `Commentary` and set their `comment` disposition.
+- **Verify before placing.** `ffprobe` every encoded file: AV1 video, exactly
+  the primary audio plus any confirmed and correctly labeled commentary,
+  duration within ~2s of the ripped source, and only expected SRT subtitles.
+  `spindle encode` already validates codecs and duration, but does not enforce
+  the daemon's final audio policy; confirm anything you renamed or remuxed
+  yourself.
 - **Work in a scratch directory** (e.g. under the configured staging dir or a
   temp dir), move files into the library only as the final step, and delete
   the scratch area when done. Never leave partial files in the library.
@@ -112,12 +126,15 @@ Every scenario follows the same skeleton:
    with runtimes; TMDB for runtimes/editions) and map titles to content by
    runtime.
 4. Rip the selected titles with `spindle rip` into a scratch directory.
-5. Encode each with `spindle encode`.
-6. Subtitle where the rules above say so.
-7. Verify with ffprobe.
-8. Name and place into the library per the reference file's conventions.
-9. `spindle jellyfin refresh`, clean scratch, `spindle start`.
-10. Report what was produced: each output path, what it is, and how each
+5. Join or otherwise assemble sources when the scenario requires it.
+6. Run commentary detection and remux each source to primary audio plus only
+   confirmed commentary tracks.
+7. Encode each refined source with `spindle encode`.
+8. Subtitle where the rules above say so.
+9. Verify video, audio policy, SRT subtitles, and duration with `ffprobe`.
+10. Name and place into the library per the reference file's conventions.
+11. `spindle jellyfin refresh`, clean scratch, `spindle start`.
+12. Report what was produced: each output path, what it is, and how each
     disc title was identified (runtime match, web source).
 
 When the user's request doesn't fit any reference, apply this skeleton with
