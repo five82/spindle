@@ -60,6 +60,7 @@ type JellyfinConfig struct {
 type LibraryConfig struct {
 	MoviesDir         string `toml:"movies_dir"`
 	TVDir             string `toml:"tv_dir"`
+	ShortsDir         string `toml:"shorts_dir"`
 	OverwriteExisting bool   `toml:"overwrite_existing"`
 }
 

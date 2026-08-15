@@ -50,6 +50,9 @@ func TestLoadNoConfigReturnsDefaults(t *testing.T) {
 	if cfg.Logging.RetentionDays != 60 {
 		t.Errorf("expected default retention days 60, got %d", cfg.Logging.RetentionDays)
 	}
+	if cfg.Library.ShortsDir != "shorts" {
+		t.Errorf("expected shorts directory %q, got %q", "shorts", cfg.Library.ShortsDir)
+	}
 	if cfg.LLM.Model != "openai/gpt-5.6-luna" {
 		t.Errorf("expected default LLM model openai/gpt-5.6-luna, got %q", cfg.LLM.Model)
 	}
@@ -85,6 +88,22 @@ func TestLoadUsesXDGConfigHome(t *testing.T) {
 	}
 	if cfg.SourcePath != configPath || cfg.TMDB.APIKey != "from-xdg" {
 		t.Fatalf("loaded source=%q key=%q, want %q and from-xdg", cfg.SourcePath, cfg.TMDB.APIKey, configPath)
+	}
+}
+
+func TestLoadShortsDir(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	content := "[tmdb]\napi_key = \"test-key\"\n[library]\nshorts_dir = \"theatrical-shorts\"\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Library.ShortsDir != "theatrical-shorts" {
+		t.Fatalf("ShortsDir = %q, want %q", cfg.Library.ShortsDir, "theatrical-shorts")
 	}
 }
 
@@ -181,6 +200,17 @@ func TestValidatePassesWithRequiredFields(t *testing.T) {
 	err := cfg.Validate()
 	if err != nil {
 		t.Fatalf("Validate should pass with all required fields set, got: %v", err)
+	}
+}
+
+func TestValidateShortsDir(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.TMDB.APIKey = "test-key"
+	cfg.Library.ShortsDir = " "
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "library.shorts_dir") {
+		t.Fatalf("Validate should reject an empty shorts directory, got: %v", err)
 	}
 }
 
@@ -283,6 +313,9 @@ func TestEnsureDirectoriesCreates(t *testing.T) {
 
 func TestSampleConfigIsValidTOML(t *testing.T) {
 	sample := SampleConfig()
+	if !strings.Contains(sample, `# shorts_dir = "shorts"`) {
+		t.Fatal("SampleConfig missing library.shorts_dir")
+	}
 	var parsed map[string]any
 	err := toml.Unmarshal([]byte(sample), &parsed)
 	if err != nil {

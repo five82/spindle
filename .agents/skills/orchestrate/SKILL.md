@@ -49,7 +49,9 @@ forgotten stop fails loudly rather than corrupting anything.
 
 Library, review, and staging paths come from the config file
 (`~/.config/spindle/config.toml`): `[paths] library_dir / review_dir /
-staging_dir`, plus `[library] movies_dir / tv_dir`.
+staging_dir`, plus `[library] movies_dir / tv_dir / shorts_dir`. `shorts_dir`
+is used by this skill for standalone theatrical shorts; automated Spindle
+workflows do not write there.
 
 ## Hard rules
 

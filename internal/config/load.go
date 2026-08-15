@@ -118,6 +118,7 @@ func defaultConfig() *Config {
 		Library: LibraryConfig{
 			MoviesDir: "movies",
 			TVDir:     "tv",
+			ShortsDir: "shorts",
 		},
 		Notifications: NotificationsConfig{
 			RequestTimeout: 10,

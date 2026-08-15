@@ -53,6 +53,9 @@ api_key = ""
 # Subdirectory under library_dir for TV shows
 # tv_dir = "tv"
 
+# Subdirectory under library_dir for theatrical shorts (orchestrate skill only)
+# shorts_dir = "shorts"
+
 # Overwrite files already in library
 # overwrite_existing = false
 
