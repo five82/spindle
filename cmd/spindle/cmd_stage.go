@@ -209,6 +209,7 @@ func newGensubtitleCmd() *cobra.Command {
 		GroupID: groupDisc,
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			out := commandOutput(flagQuiet)
 			files := make([]string, 0, len(args))
 			for _, file := range args {
 				if _, err := os.Stat(file); err != nil {
@@ -232,7 +233,7 @@ func newGensubtitleCmd() *cobra.Command {
 			sidecarMode := external || !cfg.Subtitles.MuxIntoMKV
 
 			var cmdLogger *slog.Logger
-			if !flagVerbose {
+			if !flagVerbose || flagQuiet {
 				cmdLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 			}
 
@@ -262,7 +263,7 @@ func newGensubtitleCmd() *cobra.Command {
 			// the whole file list.
 			transcripts := make([]*transcription.TranscribeResult, len(files))
 			if len(files) > 1 {
-				fmt.Printf("Transcribing %d files (batched)...\n", len(files))
+				printCommandOutput(out, "Transcribing %d files (batched)...\n", len(files))
 				reqs := make([]transcription.TranscribeRequest, len(files))
 				for i, file := range files {
 					selected, err := svc.SelectPrimaryAudioTrack(ctx, file, "en")
@@ -293,6 +294,7 @@ func newGensubtitleCmd() *cobra.Command {
 					workDir:     filepath.Join(workDir, fmt.Sprintf("file%02d", i)),
 					outputDir:   output,
 					sidecarMode: sidecarMode,
+					out:         out,
 				}); err != nil {
 					failures++
 					fmt.Fprintf(os.Stderr, "%s %s: %v\n", warnStyle("No subtitle:"), filepath.Base(file), err)
@@ -310,6 +312,7 @@ func newGensubtitleCmd() *cobra.Command {
 	cmd.Flags().IntVar(&tmdbID, "tmdb-id", 0, "TMDB ID (overrides the [tmdbid-ID] path marker)")
 	cmd.Flags().IntVar(&season, "season", 0, "TV season number (with --tmdb-id)")
 	cmd.Flags().IntVar(&episode, "episode", 0, "TV episode number (with --tmdb-id)")
+	cmd.Flags().BoolVarP(&flagQuiet, "quiet", "q", false, "Suppress progress and success output")
 	return cmd
 }
 
@@ -339,13 +342,14 @@ type standaloneAdoptParams struct {
 	workDir     string
 	outputDir   string
 	sidecarMode bool
+	out         io.Writer
 }
 
 // adoptStandaloneSubtitle runs the adoption process for one file and places
 // the result as a sidecar or muxed track.
 func adoptStandaloneSubtitle(ctx context.Context, handler *subtitle.Handler, p standaloneAdoptParams) error {
 	file := p.file
-	fmt.Printf("Preparing subtitles for %s...\n", filepath.Base(file))
+	printCommandOutput(p.out, "Preparing subtitles for %s...\n", filepath.Base(file))
 
 	var transcribeStart time.Time
 	result, err := handler.AdoptForFile(ctx, subtitle.AdoptFileRequest{
@@ -356,22 +360,22 @@ func adoptStandaloneSubtitle(ctx context.Context, handler *subtitle.Handler, p s
 		Episode:    p.identity.Episode,
 		Transcript: p.transcript,
 		OnTranscribeStart: func() {
-			fmt.Print("  Transcribing sync reference...")
+			printCommandOutput(p.out, "  Transcribing sync reference...")
 			transcribeStart = time.Now()
 		},
 		OnTranscribeComplete: func(transcript *transcription.TranscribeResult) {
-			fmt.Printf("%s (%d segments, %s)\n", successStyle("done"), transcript.Segments, formatPhaseDuration(time.Since(transcribeStart)))
+			printCommandOutput(p.out, "%s (%d segments, %s)\n", successStyle("done"), transcript.Segments, formatPhaseDuration(time.Since(transcribeStart)))
 		},
 	})
 	if err != nil {
 		return err
 	}
 	for _, rejectedCandidate := range result.RejectedCandidates {
-		fmt.Printf("  Rejected %s\n", rejectedCandidate)
+		printCommandOutput(p.out, "  Rejected %s\n", rejectedCandidate)
 	}
-	fmt.Printf("  Adopted %s (%d segments, validation %s)\n", result.Candidate, result.Segments, result.Validation)
+	printCommandOutput(p.out, "  Adopted %s (%d segments, validation %s)\n", result.Candidate, result.Segments, result.Validation)
 	if flagVerbose {
-		fmt.Printf("  %s %s\n", labelStyle("Gate:    "), result.GateMetrics)
+		printCommandOutput(p.out, "  %s %s\n", labelStyle("Gate:    "), result.GateMetrics)
 	}
 
 	outputDir := p.outputDir
@@ -391,20 +395,20 @@ func adoptStandaloneSubtitle(ctx context.Context, handler *subtitle.Handler, p s
 		if err := os.WriteFile(finalSidecarPath, data, 0o644); err != nil {
 			return fmt.Errorf("write adopted srt: %w", err)
 		}
-		fmt.Printf("Saved sidecar: %s\n", finalSidecarPath)
+		printCommandOutput(p.out, "Saved sidecar: %s\n", finalSidecarPath)
 		return nil
 	}
 
 	if apply.MKVHasSubtitleTrack(ctx, file) {
-		fmt.Print("Replacing existing subtitle tracks...")
+		printCommandOutput(p.out, "Replacing existing subtitle tracks...")
 	} else {
-		fmt.Print("Muxing subtitle into MKV...")
+		printCommandOutput(p.out, "Muxing subtitle into MKV...")
 	}
 	track := apply.MuxTrack{Path: result.SubtitlePath, Language: result.Language}
 	if _, err := apply.MuxSubtitleTrack(ctx, apply.MuxRequest{VideoPath: file, OutputPath: file, Track: track, ReplaceExisting: true}); err != nil {
 		return err
 	}
-	fmt.Println(successStyle("done"))
+	printCommandOutput(p.out, "%s\n", successStyle("done"))
 	return nil
 }
 

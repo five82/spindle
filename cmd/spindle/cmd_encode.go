@@ -32,6 +32,7 @@ compete for encoding resources.`,
 		GroupID: groupDisc,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			out := commandOutput(flagQuiet)
 			if daemonctl.IsRunning(lockPath(), socketPath()) {
 				return fmt.Errorf("daemon is running; stop it first with 'spindle stop'")
 			}
@@ -43,21 +44,21 @@ compete for encoding resources.`,
 				return fmt.Errorf("create output dir: %w", err)
 			}
 
-			result, err := encoder.RunConsole(context.Background(), input, outputDir, os.Stdout)
+			result, err := encoder.RunConsole(context.Background(), input, outputDir, os.Stdout, flagQuiet)
 			if err != nil {
 				return fmt.Errorf("encode failed: %w", err)
 			}
 
-			fmt.Printf("\n%s\n", successStyle("Encode complete"))
-			fmt.Printf("%s %s\n", labelStyle("Output:    "), result.OutputFile)
-			fmt.Printf("%s %s -> %s (%.1f%% smaller)\n", labelStyle("Size:      "),
+			printCommandOutput(out, "\n%s\n", successStyle("Encode complete"))
+			printCommandOutput(out, "%s %s\n", labelStyle("Output:    "), result.OutputFile)
+			printCommandOutput(out, "%s %s -> %s (%.1f%% smaller)\n", labelStyle("Size:      "),
 				formatBytes(int64(result.OriginalSize)), formatBytes(int64(result.EncodedSize)),
 				result.SizeReductionPercent)
 			validation := successStyle("passed")
 			if !result.ValidationPassed {
 				validation = failStyle("FAILED")
 			}
-			fmt.Printf("%s %s\n", labelStyle("Validation:"), validation)
+			printCommandOutput(out, "%s %s\n", labelStyle("Validation:"), validation)
 			if !result.ValidationPassed {
 				return fmt.Errorf("encode validation failed for %s", result.OutputFile)
 			}
@@ -65,5 +66,6 @@ compete for encoding resources.`,
 		},
 	}
 	cmd.Flags().StringVarP(&outputDir, "output-dir", "o", ".", "Directory for the encoded output")
+	cmd.Flags().BoolVarP(&flagQuiet, "quiet", "q", false, "Suppress progress and success output")
 	return cmd
 }

@@ -64,6 +64,7 @@ func newCacheRipCmd() *cobra.Command {
   spindle cache rip --choose      # pick the title interactively`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			out := commandOutput(flagQuiet)
 			lp, sp := lockPath(), socketPath()
 			if daemonctl.IsRunning(lp, sp) {
 				return fmt.Errorf("cannot rip while daemon is running")
@@ -101,7 +102,7 @@ func newCacheRipCmd() *cobra.Command {
 			// Check if already cached.
 			ripCacheStore := ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
 			if ripCacheStore.HasCache(fp) {
-				fmt.Printf("Disc already cached (fingerprint: %s)\n", truncate(fp, 12))
+				printCommandOutput(out, "Disc already cached (fingerprint: %s)\n", truncate(fp, 12))
 				return nil
 			}
 
@@ -180,7 +181,7 @@ func newCacheRipCmd() *cobra.Command {
 			}
 
 			// Run identification stage.
-			fmt.Printf("Identifying disc on %s...\n", device)
+			printCommandOutput(out, "Identifying disc on %s...\n", device)
 			identifyHandler := identify.New(cfg, tmdbClient, nil, discIDStore, keydbCat)
 			if err := executeOneShotStage(identifyHandler); err != nil {
 				return fmt.Errorf("identification: %w", err)
@@ -222,7 +223,7 @@ func newCacheRipCmd() *cobra.Command {
 				case len(candidates) == 1:
 					titleOverride = candidates[0].ID
 					dur := time.Duration(candidates[0].Duration) * time.Second
-					fmt.Printf("Only one candidate title: %d (%s)\n", candidates[0].ID, dur.Truncate(time.Second))
+					printCommandOutput(out, "Only one candidate title: %d (%s)\n", candidates[0].ID, dur.Truncate(time.Second))
 				default:
 					if !stdinIsTTY() {
 						return fmt.Errorf("--choose needs an interactive terminal; use --title <id> instead (valid IDs: %v)", ids)
@@ -252,7 +253,7 @@ func newCacheRipCmd() *cobra.Command {
 					}
 					titleOverride = chosen
 				}
-				fmt.Println()
+				printCommandOutput(out, "\n")
 			}
 
 			// Advance to ripping stage.
@@ -261,7 +262,7 @@ func newCacheRipCmd() *cobra.Command {
 			}
 
 			// Run ripping stage.
-			fmt.Printf("Ripping disc...\n")
+			printCommandOutput(out, "Ripping disc...\n")
 			ripperHandler := ripper.New(cfg, nil, ripCacheStore, nil, titleOverride)
 			if err := executeOneShotStage(ripperHandler); err != nil {
 				return fmt.Errorf("ripping: %w", err)
@@ -272,13 +273,14 @@ func newCacheRipCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "%s cache prune failed: %v\n", warnStyle("Warning:"), pruneErr)
 			}
 
-			fmt.Printf("\n%s\n", successStyle(fmt.Sprintf("Cached disc: %s", item.DiscTitle)))
-			fmt.Printf("%s %s\n", labelStyle("Fingerprint:"), dimStyle(fp))
+			printCommandOutput(out, "\n%s\n", successStyle(fmt.Sprintf("Cached disc: %s", item.DiscTitle)))
+			printCommandOutput(out, "%s %s\n", labelStyle("Fingerprint:"), dimStyle(fp))
 			return nil
 		},
 	}
 	cmd.Flags().IntVar(&titleID, "title", -1, "Rip only this title ID")
 	cmd.Flags().BoolVar(&chooseTitle, "choose", false, "Interactively select which title to rip")
+	cmd.Flags().BoolVarP(&flagQuiet, "quiet", "q", false, "Suppress progress and success output")
 	return cmd
 }
 

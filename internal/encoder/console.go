@@ -15,12 +15,12 @@ import (
 // sibling of RunWorker: the same encode path, but console rendering instead
 // of the JSON wire (no worker subprocess -- a crash takes down only the CLI
 // invocation that asked for it).
-func RunConsole(ctx context.Context, input, outputDir string, out io.Writer) (*reel.Result, error) {
+func RunConsole(ctx context.Context, input, outputDir string, out io.Writer, quiet bool) (*reel.Result, error) {
 	enc, err := reel.New(reel.WithQualityMode("target"))
 	if err != nil {
 		return nil, fmt.Errorf("create reel encoder: %w", err)
 	}
-	return enc.EncodeWithReporter(ctx, input, outputDir, &consoleReporter{out: out})
+	return enc.EncodeWithReporter(ctx, input, outputDir, &consoleReporter{out: out, quiet: quiet})
 }
 
 // consoleReporter prints reporter callbacks as plain lines. Output is
@@ -29,6 +29,7 @@ func RunConsole(ctx context.Context, input, outputDir string, out io.Writer) (*r
 type consoleReporter struct {
 	reel.NullReporter
 	out         io.Writer
+	quiet       bool
 	lastPercent float32
 	lastPrint   time.Time
 }
@@ -39,6 +40,9 @@ func (r *consoleReporter) printf(format string, args ...any) {
 }
 
 func (r *consoleReporter) Initialization(s reel.InitializationSummary) {
+	if r.quiet {
+		return
+	}
 	r.printf("Input:      %s\n", s.InputFile)
 	r.printf("Source:     %s | %s | %s\n", s.Duration, s.Resolution, s.DynamicRange)
 	if s.AudioDescription != "" {
@@ -47,17 +51,23 @@ func (r *consoleReporter) Initialization(s reel.InitializationSummary) {
 }
 
 func (r *consoleReporter) CropResult(s reel.CropSummary) {
-	if s.Message != "" {
+	if !r.quiet && s.Message != "" {
 		r.printf("Crop:       %s\n", s.Message)
 	}
 }
 
 func (r *consoleReporter) EncodingConfig(s reel.EncodingConfigSummary) {
+	if r.quiet {
+		return
+	}
 	r.printf("Encoder:    %s preset %s tune %s (%s) | audio %s\n",
 		s.Encoder, s.Preset, s.Tune, s.Quality, s.AudioCodec)
 }
 
 func (r *consoleReporter) EncodingProgress(p reel.ProgressSnapshot) {
+	if r.quiet {
+		return
+	}
 	now := time.Now()
 	if p.Percent-r.lastPercent < 5 && now.Sub(r.lastPrint) < 30*time.Second {
 		return
@@ -79,7 +89,9 @@ func (r *consoleReporter) EncodingProgress(p reel.ProgressSnapshot) {
 
 func (r *consoleReporter) ValidationComplete(s reel.ValidationSummary) {
 	if s.Passed {
-		r.printf("Validation: passed\n")
+		if !r.quiet {
+			r.printf("Validation: passed\n")
+		}
 		return
 	}
 	var failed []string
