@@ -28,6 +28,8 @@ func TestWireRoundTrip(t *testing.T) {
 
 	rep.Initialization(reel.InitializationSummary{InputFile: "in.mkv", Resolution: "1920x1080", DynamicRange: "SDR"})
 	rep.EncodingConfig(reel.EncodingConfigSummary{Encoder: "svt-av1", Preset: "6", Quality: "target", AudioCodec: "opus"})
+	rep.CropResult(reel.CropSummary{Crop: "crop=1920:800:0:140", Required: true})
+	rep.StageProgress(reel.StageProgress{Stage: "Chunking", Message: "Detecting shot cuts"})
 	rep.EncodingStarted(1234)
 	rep.EncodingProgress(reel.ProgressSnapshot{Percent: 42.5, FPS: 60, ETA: 90 * time.Second, CurrentFrame: 524, TotalFrames: 1234})
 	rep.Warning("test warning")
@@ -57,6 +59,7 @@ func TestWireRoundTrip(t *testing.T) {
 	daemonRep.now = func() time.Time { return time.Now().Add(time.Hour) } // defeat throttle
 
 	var result *reel.Result
+	var sawChunking bool
 	scanner := bufio.NewScanner(&buf)
 	for scanner.Scan() {
 		var ev wireEvent
@@ -73,8 +76,25 @@ func TestWireRoundTrip(t *testing.T) {
 		if res != nil {
 			result = res
 		}
+		if ev.Event == wireStageProgress {
+			got, getErr := store.GetByID(item.ID)
+			if getErr != nil {
+				t.Fatalf("get after stage progress: %v", getErr)
+			}
+			snap, snapErr := encodingstate.Unmarshal(got.EncodingDetailsJSON)
+			if snapErr != nil {
+				t.Fatalf("snapshot after stage progress: %v", snapErr)
+			}
+			if snap.Substage != "chunking" {
+				t.Fatalf("substage after stage progress = %q, want chunking", snap.Substage)
+			}
+			sawChunking = true
+		}
 	}
 
+	if !sawChunking {
+		t.Fatal("stage progress event not delivered")
+	}
 	if result == nil {
 		t.Fatal("result event not delivered")
 	}
@@ -90,8 +110,8 @@ func TestWireRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	if snap.InputFile != "in.mkv" || snap.Resolution != "1920x1080" {
-		t.Fatalf("initialization not applied: %+v", snap)
+	if snap.InputFile != "in.mkv" || snap.Resolution != "1920x800" {
+		t.Fatalf("initialization or crop not applied: %+v", snap)
 	}
 	if snap.Encoder != "svt-av1" || snap.AudioCodec != "opus" {
 		t.Fatalf("config not applied: %+v", snap)

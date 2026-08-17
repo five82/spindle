@@ -506,6 +506,10 @@ func (r *spindleReporter) Initialization(s reel.InitializationSummary) {
 }
 
 func (r *spindleReporter) StageProgress(s reel.StageProgress) {
+	r.updateSnapshot(func(snap *encodingstate.Snapshot) {
+		snap.Substage = strings.ToLower(strings.TrimSpace(s.Stage))
+	}, "progress persistence failed", "encoding substage not persisted to queue", "encoding progress not reflected in queue")
+
 	attrs := []any{
 		"event_type", "encoding_substage",
 		"episode_key", r.episodeKey,
