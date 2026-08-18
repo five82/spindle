@@ -39,6 +39,17 @@ and ffsubsync on demand), `bd_info`, OpenSubtitles, OpenRouter, Jellyfin, and
 ntfy. `spindle status` reports the locally required command and library
 checks.
 
+To deploy a source checkout on the machine running Spindle:
+
+```bash
+./check-ci.sh
+./deploy.sh
+```
+
+The deploy script builds the working tree, keeps the previous binary beside the
+installed one, and preserves daemon state: a running daemon is restarted while
+a stopped daemon remains stopped.
+
 ## Configure
 
 Generate the complete commented configuration:
