@@ -75,6 +75,32 @@ func TestVerifyAdoptionCandidateRejectsShortSpan(t *testing.T) {
 	}
 }
 
+func TestVerifyAdoptionCandidateRejectsMissingEndingDespiteHighSpanCoverage(t *testing.T) {
+	// Forrest Gump's candidate covered 93% of a long reference but ended more
+	// than ten minutes before its final spoken cue.
+	reference := dialogueCues(100, 10, 85)
+	candidate := reference[:92]
+
+	check := verifyAdoptionCandidate(candidate, reference, 8528)
+	if check.Passed || !strings.Contains(check.FailureReason, "before the spoken reference") {
+		t.Fatalf("check = %+v", check)
+	}
+	if check.SpanCoverage < 0.9 {
+		t.Fatalf("span coverage %.3f does not exercise the proportional-coverage bug", check.SpanCoverage)
+	}
+	if check.ReferenceTailGap <= adoptMaxReferenceTailGapSeconds {
+		t.Fatalf("reference tail gap = %.1fs", check.ReferenceTailGap)
+	}
+}
+
+func TestVerifyAdoptionCandidateAllowsLongCreditsAfterReferenceTail(t *testing.T) {
+	reference := dialogueCues(20, 10, 10)
+	check := verifyAdoptionCandidate(reference, reference, 1000)
+	if !check.Passed {
+		t.Fatalf("matching spoken tails rejected because of video credits: %+v", check)
+	}
+}
+
 func TestVerifyAdoptionCandidateRejectsCuesPastVideoEnd(t *testing.T) {
 	reference := dialogueCues(20, 10, 10)
 	candidate := shiftedCues(reference, 0)

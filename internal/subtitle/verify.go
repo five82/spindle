@@ -32,6 +32,10 @@ const (
 	adoptMinSegmentAnchors = 6
 	adoptMinTimeOverlap    = 0.5
 	adoptMinSpanCoverage   = 0.6
+	// An absolute tail bound prevents high proportional span coverage on long
+	// movies from hiding a substantially missing ending. Compare against the
+	// spoken reference rather than video duration so long credits remain valid.
+	adoptMaxReferenceTailGapSeconds = 10 * 60
 	// adoptRefineMinSimilarity gates the anchor-based timing refinement: only
 	// a candidate whose text already proves it is this title's subtitle may
 	// have its timing repaired and re-verified.
@@ -48,6 +52,7 @@ type adoptionCheck struct {
 	MedianAnchorDelta float64
 	TimeOverlap       float64
 	SpanCoverage      float64
+	ReferenceTailGap  float64
 	TimingRefined     bool
 	SnappedCues       int
 	Passed            bool
@@ -56,8 +61,8 @@ type adoptionCheck struct {
 
 // Metrics renders the gate measurements for decision logging.
 func (c adoptionCheck) Metrics() string {
-	return fmt.Sprintf("text_similarity=%.3f anchor_cues=%d median_anchor_delta_s=%.2f time_overlap=%.2f span_coverage=%.2f timing_refined=%t snapped_cues=%d",
-		c.TextSimilarity, c.AnchorCues, c.MedianAnchorDelta, c.TimeOverlap, c.SpanCoverage, c.TimingRefined, c.SnappedCues)
+	return fmt.Sprintf("text_similarity=%.3f anchor_cues=%d median_anchor_delta_s=%.2f time_overlap=%.2f span_coverage=%.2f reference_tail_gap_s=%.1f timing_refined=%t snapped_cues=%d",
+		c.TextSimilarity, c.AnchorCues, c.MedianAnchorDelta, c.TimeOverlap, c.SpanCoverage, c.ReferenceTailGap, c.TimingRefined, c.SnappedCues)
 }
 
 // verifyAdoptionCandidate decides whether synced downloaded cues match the
@@ -115,6 +120,11 @@ func verifyAdoptionCandidate(candidate, reference []srtutil.Cue, videoSeconds fl
 			check.FailureReason = fmt.Sprintf("candidate spans %.0f%% of the reference; likely a different cut", check.SpanCoverage*100)
 			return check
 		}
+	}
+	check.ReferenceTailGap = reference[len(reference)-1].End - candidate[len(candidate)-1].End
+	if check.ReferenceTailGap > adoptMaxReferenceTailGapSeconds {
+		check.FailureReason = fmt.Sprintf("candidate ends %.0fs before the spoken reference; exceeds %ds", check.ReferenceTailGap, adoptMaxReferenceTailGapSeconds)
+		return check
 	}
 	if videoSeconds > 0 && candidate[len(candidate)-1].End > videoSeconds+adoptDurationSlackSeconds {
 		check.FailureReason = fmt.Sprintf("last cue at %.0fs runs past the %.0fs video", candidate[len(candidate)-1].End, videoSeconds)
