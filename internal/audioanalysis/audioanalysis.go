@@ -162,9 +162,9 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 }
 
 // detectCommentary examines non-primary audio tracks for commentary content.
-// For each candidate, it first checks stereo similarity against the primary
-// track. Tracks that pass the similarity threshold are excluded as downmixes.
-// Remaining candidates are transcribed and classified via LLM.
+// Every candidate is classified before transcript similarity may exclude it:
+// commentary often contains enough program dialogue to resemble the primary,
+// so similarity alone cannot prove that a track is a downmix.
 //
 // Commentary detection is non-fatal: failures are logged and the track is
 // conservatively preserved as commentary.
@@ -318,34 +318,21 @@ func (h *Handler) detectCommentary(
 		candidateNumber := i + 1
 		text, transcribed := candidateText[c.audioIndex]
 
-		// Stereo similarity filter: compare transcript fingerprints so a
-		// stereo downmix of the primary is excluded before LLM classification.
+		var similarity float64
+		similarityMeasured := false
 		if transcribed && primaryFP != nil {
 			if fp := textutil.NewFingerprint(text); fp != nil {
-				sim := textutil.CosineSimilarity(primaryFP, fp)
+				similarity = textutil.CosineSimilarity(primaryFP, fp)
+				similarityMeasured = true
 				logger.Info("stereo similarity check completed",
 					"decision_type", logs.DecisionCommentaryStereoFilter,
 					"decision_result", "measured",
-					"decision_reason", fmt.Sprintf("similarity %.3f", sim),
+					"decision_reason", fmt.Sprintf("similarity %.3f", similarity),
 					"episode_key", epKey,
 					"primary_audio_index", primaryAudioIdx,
 					"candidate_audio_index", c.audioIndex,
-					"similarity", sim,
+					"similarity", similarity,
 				)
-				if sim >= h.cfg.Commentary.SimilarityThreshold {
-					logger.Info("track excluded as stereo downmix",
-						"decision_type", logs.DecisionCommentaryStereoFilter,
-						"decision_result", "excluded",
-						"decision_reason", fmt.Sprintf("similarity %.3f >= threshold %.3f", sim, h.cfg.Commentary.SimilarityThreshold),
-						"audio_index", c.audioIndex,
-					)
-					excluded = append(excluded, ripspec.ExcludedTrackRef{
-						Index:      c.audioIndex,
-						Reason:     "stereo downmix of primary",
-						Similarity: sim,
-					})
-					continue
-				}
 			}
 		}
 
@@ -359,6 +346,19 @@ func (h *Handler) detectCommentary(
 		if ref != nil {
 			comms = append(comms, *ref)
 		}
+		if similarityMeasured && shouldExcludeAsDownmix(similarity, h.cfg.Commentary.SimilarityThreshold, ref) {
+			logger.Info("track excluded as stereo downmix",
+				"decision_type", logs.DecisionCommentaryStereoFilter,
+				"decision_result", "excluded",
+				"decision_reason", fmt.Sprintf("classified as non-commentary and similarity %.3f >= threshold %.3f", similarity, h.cfg.Commentary.SimilarityThreshold),
+				"audio_index", c.audioIndex,
+			)
+			excluded = append(excluded, ripspec.ExcludedTrackRef{
+				Index:      c.audioIndex,
+				Reason:     "stereo downmix of primary",
+				Similarity: similarity,
+			})
+		}
 	}
 
 	logger.Info("commentary detection complete",
@@ -368,6 +368,12 @@ func (h *Handler) detectCommentary(
 		"excluded_tracks", len(excluded),
 	)
 	return comms, excluded
+}
+
+// shouldExcludeAsDownmix enforces that similarity can only corroborate a
+// non-commentary classification; it can never override a commentary result.
+func shouldExcludeAsDownmix(similarity, threshold float64, commentary *ripspec.CommentaryTrackRef) bool {
+	return commentary == nil && similarity >= threshold
 }
 
 // primaryFingerprint returns the transcript fingerprint of the primary audio

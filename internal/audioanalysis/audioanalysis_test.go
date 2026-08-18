@@ -95,6 +95,21 @@ func TestAllowedAudioLanguageKeepsEnglishAndUnknown(t *testing.T) {
 	}
 }
 
+func TestShouldExcludeAsDownmixRequiresNonCommentaryClassification(t *testing.T) {
+	const (
+		forrestGumpSimilarity = 0.9322
+		threshold             = 0.920
+	)
+	commentary := &ripspec.CommentaryTrackRef{Index: 5, Confidence: 0.99}
+
+	if shouldExcludeAsDownmix(forrestGumpSimilarity, threshold, commentary) {
+		t.Fatal("high transcript similarity overrode commentary classification")
+	}
+	if !shouldExcludeAsDownmix(forrestGumpSimilarity, threshold, nil) {
+		t.Fatal("high-similarity non-commentary track was not identified as a downmix")
+	}
+}
+
 func TestBuildCommentaryUserPrompt_WithTitle(t *testing.T) {
 	stream := ffprobe.Stream{
 		Tags: map[string]string{"title": "Director Commentary"},
