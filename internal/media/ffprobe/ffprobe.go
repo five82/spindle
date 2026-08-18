@@ -40,6 +40,7 @@ type Stream struct {
 	CodecType      string            `json:"codec_type"`
 	CodecTag       string            `json:"codec_tag_string"`
 	CodecLong      string            `json:"codec_long_name"`
+	StartTime      string            `json:"start_time"`
 	Duration       string            `json:"duration"`
 	BitRate        string            `json:"bit_rate"`
 	Width          int               `json:"width"`

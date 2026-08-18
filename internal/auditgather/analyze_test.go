@@ -2,6 +2,7 @@ package auditgather
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 
@@ -218,6 +219,42 @@ func TestComputeOutputMediaSummarizesStreamsAndLabels(t *testing.T) {
 	}
 	if len(summary[0].Subtitles) != 1 || !summary[0].Subtitles[0].LabelCorrect {
 		t.Fatalf("expected correctly labeled subtitle: %+v", summary[0].Subtitles)
+	}
+}
+
+func TestCompareAVSyncDetectsChangedPrimaryAudioOffset(t *testing.T) {
+	probe := func(audioStart string) *ffprobe.Result {
+		return &ffprobe.Result{Streams: []ffprobe.Stream{
+			{Index: 0, CodecType: "video", StartTime: "0.000000"},
+			{Index: 1, CodecType: "audio", StartTime: audioStart, Disposition: map[string]int{"default": 1}},
+		}}
+	}
+
+	entry := compareAVSync(AVSyncEntry{EpisodeKey: "main", OutputPath: "/movie.mkv"}, probe("0.501000"), probe("0.000000"), 0)
+	if entry.Passed {
+		t.Fatal("A/V sync comparison passed a 501ms timing change")
+	}
+	if math.Abs(entry.DriftMilliseconds-(-501)) > 0.001 {
+		t.Fatalf("drift = %.3fms, want -501ms", entry.DriftMilliseconds)
+	}
+	anomalies := detectAVSyncAnomalies(&AVSyncSummary{Entries: []AVSyncEntry{entry}, Failed: 1})
+	if len(anomalies) != 1 || anomalies[0].Severity != "critical" {
+		t.Fatalf("anomalies = %+v, want one critical", anomalies)
+	}
+}
+
+func TestCompareAVSyncAcceptsPreservedOffset(t *testing.T) {
+	source := &ffprobe.Result{Streams: []ffprobe.Stream{
+		{CodecType: "video", StartTime: "0"},
+		{CodecType: "audio", StartTime: "0.501", Disposition: map[string]int{"default": 1}},
+	}}
+	output := &ffprobe.Result{Streams: []ffprobe.Stream{
+		{CodecType: "video", StartTime: "0"},
+		{CodecType: "audio", StartTime: "0.5005", Disposition: map[string]int{"default": 1}},
+	}}
+	entry := compareAVSync(AVSyncEntry{}, source, output, 0)
+	if !entry.Passed || math.Abs(entry.DriftMilliseconds-(-0.5)) > 0.001 {
+		t.Fatalf("entry = %+v, want passed with -0.5ms drift", entry)
 	}
 }
 

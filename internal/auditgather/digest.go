@@ -2,6 +2,7 @@ package auditgather
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ func RenderDigest(r *Report, jsonPath string) string {
 	writeDigestTitleSelection(&b, r)
 	writeDigestEpisodeID(&b, r)
 	writeDigestEncoding(&b, r)
+	writeDigestAVSync(&b, r)
 	writeDigestOutputMedia(&b, r)
 	writeDigestAudio(&b, r)
 	writeDigestSubtitles(&b, r)
@@ -412,6 +414,35 @@ func cropOrNil(r *Report) *CropAnalysis {
 		return nil
 	}
 	return r.Analysis.CropAnalysis
+}
+
+func writeDigestAVSync(b *strings.Builder, r *Report) {
+	if r.Analysis == nil || r.Analysis.AVSync == nil {
+		return
+	}
+	fmt.Fprintln(b, "\n## Audio/video sync (independent source comparison)")
+	for _, entry := range r.Analysis.AVSync.Entries {
+		name := entry.EpisodeKey
+		if name == "" {
+			name = filepath.Base(entry.OutputPath)
+		}
+		if entry.Error != "" {
+			fmt.Fprintf(b, "- %s: UNAVAILABLE (%s)\n", name, entry.Error)
+			continue
+		}
+		status := "PASSED"
+		if !entry.Passed {
+			status = "FAILED"
+		}
+		drift := entry.DriftMilliseconds
+		direction := "later"
+		if drift < 0 {
+			drift = -drift
+			direction = "earlier"
+		}
+		fmt.Fprintf(b, "- %s: %s | source offset %+.0fms -> output %+.0fms | audio %.0fms %s\n",
+			name, status, entry.SourceAudioOffsetSec*1000, entry.OutputAudioOffsetSec*1000, drift, direction)
+	}
 }
 
 func writeDigestOutputMedia(b *strings.Builder, r *Report) {

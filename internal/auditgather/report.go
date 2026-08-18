@@ -175,6 +175,7 @@ type Analysis struct {
 	SourceSummary      *SourceSummary         `json:"source_summary,omitempty"`
 	TitleSelection     *TitleSelectionSummary `json:"title_selection,omitempty"`
 	OutputMedia        []MediaSummary         `json:"output_media,omitempty"`
+	AVSync             *AVSyncSummary         `json:"av_sync,omitempty"`
 	AudioSummary       *AudioSummary          `json:"audio_summary,omitempty"`
 	SubtitleSummary    *SubtitleSummary       `json:"subtitle_summary,omitempty"`
 	RoutingSummary     *RoutingSummary        `json:"routing_summary,omitempty"`
@@ -262,6 +263,30 @@ type AudioStreamSummary struct {
 	Default      bool   `json:"default,omitempty"`
 	Commentary   bool   `json:"commentary,omitempty"`
 	LabelCorrect bool   `json:"label_correct"`
+}
+
+// AVSyncSummary independently compares source and output primary-audio timing.
+type AVSyncSummary struct {
+	Entries     []AVSyncEntry `json:"entries,omitempty"`
+	Passed      int           `json:"passed,omitempty"`
+	Failed      int           `json:"failed,omitempty"`
+	Unavailable int           `json:"unavailable,omitempty"`
+}
+
+// AVSyncEntry records one source-to-output A/V start-offset comparison.
+type AVSyncEntry struct {
+	EpisodeKey           string  `json:"episode_key,omitempty"`
+	SourcePath           string  `json:"source_path,omitempty"`
+	OutputPath           string  `json:"output_path"`
+	SourceVideoStartSec  float64 `json:"source_video_start_sec"`
+	SourceAudioStartSec  float64 `json:"source_audio_start_sec"`
+	SourceAudioOffsetSec float64 `json:"source_audio_offset_sec"`
+	OutputVideoStartSec  float64 `json:"output_video_start_sec"`
+	OutputAudioStartSec  float64 `json:"output_audio_start_sec"`
+	OutputAudioOffsetSec float64 `json:"output_audio_offset_sec"`
+	DriftMilliseconds    float64 `json:"drift_milliseconds"`
+	Passed               bool    `json:"passed"`
+	Error                string  `json:"error,omitempty"`
 }
 
 // SubtitleStreamSummary describes a single output subtitle stream.

@@ -103,6 +103,99 @@ func detectTVRoutingAnomalies(r *Report) []Anomaly {
 	return anomalies
 }
 
+const avSyncDriftThresholdMilliseconds = 100.0
+
+func compareAVSync(entry AVSyncEntry, source, output *ffprobe.Result, sourceAudioIndex int) AVSyncEntry {
+	sourceVideo, sourceAudio, err := primaryAVStartTimes(source, sourceAudioIndex)
+	if err != nil {
+		entry.Error = "source: " + err.Error()
+		return entry
+	}
+	outputVideo, outputAudio, err := primaryAVStartTimes(output, -1)
+	if err != nil {
+		entry.Error = "output: " + err.Error()
+		return entry
+	}
+
+	entry.SourceVideoStartSec = sourceVideo
+	entry.SourceAudioStartSec = sourceAudio
+	entry.SourceAudioOffsetSec = sourceAudio - sourceVideo
+	entry.OutputVideoStartSec = outputVideo
+	entry.OutputAudioStartSec = outputAudio
+	entry.OutputAudioOffsetSec = outputAudio - outputVideo
+	entry.DriftMilliseconds = (entry.OutputAudioOffsetSec - entry.SourceAudioOffsetSec) * 1000
+	entry.Passed = math.Abs(entry.DriftMilliseconds) <= avSyncDriftThresholdMilliseconds
+	return entry
+}
+
+func primaryAVStartTimes(result *ffprobe.Result, audioIndex int) (float64, float64, error) {
+	if result == nil {
+		return 0, 0, fmt.Errorf("probe unavailable")
+	}
+	var video *ffprobe.Stream
+	var audio, firstAudio, defaultAudio *ffprobe.Stream
+	audioOrdinal := 0
+	for i := range result.Streams {
+		stream := &result.Streams[i]
+		switch stream.CodecType {
+		case "video":
+			if video == nil {
+				video = stream
+			}
+		case "audio":
+			if firstAudio == nil {
+				firstAudio = stream
+			}
+			if defaultAudio == nil && stream.Disposition["default"] == 1 {
+				defaultAudio = stream
+			}
+			if audioOrdinal == audioIndex {
+				audio = stream
+			}
+			audioOrdinal++
+		}
+	}
+	if video == nil {
+		return 0, 0, fmt.Errorf("video stream unavailable")
+	}
+	if audioIndex < 0 {
+		audio = defaultAudio
+		if audio == nil {
+			audio = firstAudio
+		}
+	}
+	if audio == nil {
+		return 0, 0, fmt.Errorf("primary audio stream unavailable")
+	}
+	videoStart, err := strconv.ParseFloat(video.StartTime, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("video start time unavailable")
+	}
+	audioStart, err := strconv.ParseFloat(audio.StartTime, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("primary audio start time unavailable")
+	}
+	return videoStart, audioStart, nil
+}
+
+func detectAVSyncAnomalies(summary *AVSyncSummary) []Anomaly {
+	if summary == nil || summary.Failed == 0 {
+		return nil
+	}
+	maxDrift := 0.0
+	for _, entry := range summary.Entries {
+		if drift := math.Abs(entry.DriftMilliseconds); drift > maxDrift {
+			maxDrift = drift
+		}
+	}
+	return []Anomaly{{
+		Severity: "critical",
+		Category: "av_sync",
+		Message: fmt.Sprintf("%d output(s) changed primary-audio timing relative to source (maximum drift %.0fms; limit %.0fms)",
+			summary.Failed, maxDrift, avSyncDriftThresholdMilliseconds),
+	}}
+}
+
 func detectDefaultAudioLanguageAnomalies(r *Report) []Anomaly {
 	if r == nil {
 		return nil

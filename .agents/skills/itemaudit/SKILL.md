@@ -66,6 +66,7 @@ The `analysis` object (always present; sub-fields omitted when empty) contains p
 | `source_summary` | Source/output traits known | Disc source, UHD-likely flag, input/output resolution, input codecs, output codec, HDR/dynamic range. |
 | `title_selection` | Movie titles exist | Feature-length candidates, selected title, selection decision/reason, and similar-runtime candidate count. Prefer this over hand-parsing `envelope.titles`. |
 | `output_media` | Valid probes exist | Compact stream summaries (video/audio/subtitle labels and flags) derived from ffprobe. Prefer this for normal stream checks; use raw `media[]` only for missing details. |
+| `av_sync` | Encoded output and ripped source are probeable | Independent source-to-output primary-audio timing comparison. Per-output entries carry source/output video and audio starts, relative A/V offsets, signed drift in milliseconds, and pass/fail at 100 ms. This is independent of Reel's persisted validation verdict. |
 | `audio_summary` | Audio evidence exists | Primary track, output/excluded/commentary counts, commentary decisions, and commentary label status. |
 | `subtitle_summary` | Subtitle evidence exists | Subtitle pipeline metadata: per-title source (`opensubtitles`/`none`), validation counts, skipped count, output subtitle count, and label status. It is not evidence for auditing subtitle text. |
 | `routing_summary` | Final assets exist | Final output destination classification and expected-vs-actual route per output. |
@@ -227,36 +228,42 @@ Analyze the actual final routing outcome, not just item-level review flags:
 
 Analyze the `media` array from the audit output. Each entry contains full ffprobe results.
 
-**TV note:** The encoding snapshot only contains data for the last episode encoded (the snapshot is overwritten per-episode during encoding). The `media[]` array is compressed for TV: only the representative probe (matching the majority profile, marked `representative: true`), deviation probes, and error probes are included. Use `media_omitted` to see how many clean probes were dropped. The representative probe is sufficient for stream-level checks (items 1-6 below); `analysis.episode_consistency` confirms all omitted episodes match the same profile. The snapshot is still useful for crop detection, encoding config, and validation results (which are consistent across episodes from the same disc).
+**TV note:** The encoding snapshot only contains data for the last episode encoded (the snapshot is overwritten per-episode during encoding). The `media[]` array is compressed for TV: only the representative probe (matching the majority profile, marked `representative: true`), deviation probes, and error probes are included. Use `media_omitted` to see how many clean probes were dropped. The representative probe is sufficient for stream-level checks (items 2-6 below); `analysis.av_sync` still checks every output before probe compression, and `analysis.episode_consistency` confirms all omitted episodes match the same profile. The snapshot is still useful for crop detection, encoding config, and validation results (which are consistent across episodes from the same disc).
 
 **For movies** (single entry) or **the representative probe for TV**:
 
-1. **Verify video stream** (from `media[].probe.streams` where `codec_type=video`):
+1. **Verify A/V sync independently** from `analysis.av_sync`:
+   - Require every available entry to pass. The audit compares the primary audio's offset relative to video in the ripped source against the final output; absolute drift over 100 ms is CRITICAL.
+   - This check is separate from Reel's persisted `encoding.snapshot.validation` result. Never accept the Reel validation line as proof of sync by itself.
+   - A negative `drift_milliseconds` means output audio moved earlier; positive means it moved later.
+   - Investigate `unavailable` entries rather than silently claiming sync is valid. The source normally comes from the rip cache after staging cleanup.
+
+2. **Verify video stream** (from `media[].probe.streams` where `codec_type=video`):
    - Resolution matches expected (SD/HD/4K)
    - Codec is AV1 (`av1`) from Reel's SVT-AV1 (libsvtav1) encoder; libaom-av1 cannot occur
    - Duration matches source within tolerance (~1-2 seconds)
    - Static HDR signaling present if expected (`color_primaries`, transfer characteristics, and mastering metadata)
    - Reel intentionally does not preserve HDR10+ dynamic metadata (SMPTE ST 2094-40) because the target playback environment does not consume it. An HDR10+ source producing a static-HDR AV1 output is expected; do not flag missing HDR10+ side data or an external HDR10+ vs output static-HDR difference.
 
-2. **Verify audio streams** (from `media[].probe.streams` where `codec_type=audio`):
+3. **Verify audio streams** (from `media[].probe.streams` where `codec_type=audio`):
    - Primary audio is first and has `disposition.default=1`
    - Commentary tracks have `disposition.comment=1` AND title contains "Commentary"
    - Track count matches expected (primary + commentary tracks)
    - No unexpected stereo downmix tracks
 
-3. **Check commentary labeling** (recent bug area):
+4. **Check commentary labeling** (recent bug area):
    - For each audio stream with `disposition.comment=1`:
      - Stream `tags.title` exists and contains "Commentary" (case-insensitive)
      - If original title was blank, it should now be exactly "Commentary"
      - If original title existed without "commentary", it should have " (Commentary)" appended
    - Cross-reference with commentary decisions in `analysis.decision_groups`
 
-4. **Check subtitle streams** (from `media[].probe.streams` where `codec_type=subtitle`):
+5. **Check subtitle streams** (from `media[].probe.streams` where `codec_type=subtitle`):
    - Verify exactly one display subtitle track exists with correct language when the title's subtitle was adopted; a skipped title (`source=none`) has none
    - Subtitle title should contain the language name (e.g., "English")
    - Adopted subtitle tracks should not have `disposition.forced=1`
 
-5. **Parse encoding details** from `encoding.snapshot`:
+6. **Parse encoding details** from `encoding.snapshot`:
    - Check `validation.passed` and individual step results
    - Review crop detection from `crop` fields
    - Check for `warning` or `error` in snapshot
@@ -267,15 +274,15 @@ Analyze the `media` array from the audit output. Each entry contains full ffprob
    - Check `decision_type=encoding_validation` for per-episode validation results
    - `decision_type=validation_failure_route` with `decision_result=flagged_for_review` indicates validation-failed items routed to review
 
-6. **Per-episode asset status** (TV only, from `envelope.assets.encoded`):
+7. **Per-episode asset status** (TV only, from `envelope.assets.encoded`):
    - Check for `status: "failed"` entries with `error_msg`
    - Encoding allows partial success
    - Verify encoded asset count matches episode count
 
-7. **Cross-episode consistency** (TV only):
+8. **Cross-episode consistency** (TV only):
    - Use `analysis.episode_consistency` for the overview: `majority_profile` gives the common (video_codec, width, height, audio_streams, subtitle_streams), `majority_count`/`total_episodes` show how many match, and `deviations[]` lists episodes with human-readable differences
    - Use `analysis.media_stats` for duration range (`duration_min_sec/max_sec`) and size range (`size_min_bytes/max_bytes`)
-   - Inspect the representative probe for stream-level checks (items 1-6); omitted probes are confirmed equivalent by the consistency analysis
+   - Inspect the representative probe for stream-level checks (items 2-6); omitted probes are confirmed equivalent by the consistency analysis
 
 ### Phase 5: Crop Detection Validation (when `phase_crop` is true)
 
@@ -386,6 +393,7 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 | TMDB match rejected or weakly accepted | Identification | `decision_type=tmdb_match` groups with score/threshold details in `decision_reason` | No match or wrong title match |
 | Unresolved placeholder episodes | Episode ID | `envelope.episodes` with `episode=0` and placeholder keys after episodeid | Episodes land in review_dir |
 | Wrong crop detection | Encoding | `encoding.snapshot.crop_filter` aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
+| A/V sync changed by encoding | Encoding | `analysis.av_sync.entries[].passed=false`; source/output relative A/V start offsets differ by more than 100 ms | Audio leads or lags video; CRITICAL even if Reel's persisted validation says passed |
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review using `media[].probe.streams` | Commentary tracks not preserved |
 | Unlabeled commentary | Audio Analysis | Audio stream with `disposition.comment=1` but no "Commentary" in `tags.title` | Jellyfin won't recognize tracks |
 | Stereo downmix kept | Audio Analysis | Extra 2ch audio track in `media[].probe.streams` | Unnecessary audio bloat |
@@ -526,6 +534,8 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 
 #### Encoded File (if phase_encoded)
 
+- Independent A/V sync: <from analysis.av_sync: pass/fail, source offset, output offset, signed drift; explain unavailable entries>
+
 **Movie:**
 - Video: <codec> <resolution> <HDR status> | Duration: <seconds>s | Size: <bytes>
 - Audio: <stream summary>
@@ -585,6 +595,7 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] Verified `envelope.attributes.content_id.episodes_synchronized` flag
 
 ### Post-Encoding (phase_encoded, phase_crop)
+- [ ] Checked independent source-to-output A/V timing in `analysis.av_sync`; did not rely solely on Reel's persisted validation verdict
 - [ ] Analyzed streams from `media[]` entries (video, audio, subtitle)
 - [ ] Validated crop detection from `encoding.snapshot.crop_filter`
 - [ ] Verified commentary labeling

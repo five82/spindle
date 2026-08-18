@@ -184,6 +184,7 @@ func TestJSONParsing(t *testing.T) {
 				"codec_type": "video",
 				"codec_tag_string": "hvc1",
 				"codec_long_name": "H.265 / HEVC",
+				"start_time": "0.000000",
 				"width": 3840,
 				"height": 2160,
 				"profile": "Main 10",
@@ -196,6 +197,7 @@ func TestJSONParsing(t *testing.T) {
 				"codec_type": "audio",
 				"codec_tag_string": "[0][0][0][0]",
 				"codec_long_name": "TrueHD",
+				"start_time": "0.501000",
 				"sample_rate": "48000",
 				"channels": 8,
 				"channel_layout": "7.1",
@@ -244,6 +246,9 @@ func TestJSONParsing(t *testing.T) {
 	}
 	if result.Streams[1].ChannelLayout != "7.1" {
 		t.Errorf("channel layout = %q, want %q", result.Streams[1].ChannelLayout, "7.1")
+	}
+	if result.Streams[1].StartTime != "0.501000" {
+		t.Errorf("audio start time = %q, want 0.501000", result.Streams[1].StartTime)
 	}
 
 	if got := result.DurationSeconds(); got != 7200.5 {
