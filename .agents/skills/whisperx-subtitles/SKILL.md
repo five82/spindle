@@ -1,17 +1,27 @@
 ---
 name: whisperx-subtitles
-description: Generate an English WhisperX subtitle for a media file when the automated OpenSubtitles adoption path produced none - the pipeline skipped the title or `spindle subtitle` failed verification. You transcribe with WhisperX, act as the transcription editor yourself, and place the SRT. Use /whisperx-subtitles <file(s)>.
+description: Generate an English WhisperX subtitle from primary English audio when the automated OpenSubtitles adoption path produced none - the pipeline skipped the title or `spindle subtitle` failed verification. You transcribe with WhisperX, act as the transcription editor yourself, and place the SRT. Use /whisperx-subtitles <file(s)>.
 user-invocable: true
 argument-hint: <media file path(s)>
 ---
 
 # WhisperX Subtitle Generation
 
-Produce a Jellyfin-ready English SRT for a file that has no verified
-OpenSubtitles download. Spindle no longer maintains WhisperX display
-generation in code; this skill replaces it. You run WhisperX for the raw
-transcript and you are the cleanup audit: read the result, fix what is
-clearly wrong, leave everything else alone.
+Produce a Jellyfin-ready English SRT from primary English audio for a file
+that has no verified OpenSubtitles download. Spindle no longer maintains
+WhisperX display generation in code; this skill replaces it. You run WhisperX
+for the raw transcript and you are the cleanup audit: read the result, fix
+what is clearly wrong, leave everything else alone.
+
+## Scope: English primary audio only
+
+Probe the media before starting. If it has no non-commentary English primary
+audio, stop and route the task to the orchestrate skill's
+`references/foreign-language-feature.md` scenario. Do not use this skill to
+translate a foreign-language feature, do not pass `--task translate`, and do
+not switch from the configured Turbo model to a full Large model for that
+purpose. The orchestration scenario tries a verified OpenSubtitles translation
+first and OCRs the disc's authoritative full English PGS when needed.
 
 ## Before starting
 

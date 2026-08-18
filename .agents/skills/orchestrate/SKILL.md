@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: Take over Spindle workflow orchestration for disc edge cases the automated pipeline does not handle - extras, theatrical shorts, multi-disc movies, multiple editions, foreign-dialogue forced subtitles, and MakeMKV troubleshooting. Use /orchestrate <what you want done with the disc>.
+description: Take over Spindle workflow orchestration for disc edge cases the automated pipeline does not handle - extras, theatrical shorts, multi-disc movies, multiple editions, foreign-language features, foreign-dialogue forced subtitles, and MakeMKV troubleshooting. Use /orchestrate <what you want done with the disc>.
 user-invocable: true
 argument-hint: <scenario description>
 ---
@@ -11,9 +11,10 @@ Manually orchestrate the Spindle pipeline (rip -> encode -> subtitle -> name ->
 place -> refresh) for content the automated daemon workflow does not cover.
 The daemon handles the standard case: one disc, one feature (or one TV
 season), fully automated. Everything else - extras, shorts, alternate cuts,
-foreign-dialogue forced subtitles, discs that need troubleshooting - is this
-skill's job. You are the orchestrator: you make the judgment calls (what each
-title is, what it should be named, where it belongs) and the spindle commands
+foreign-language features, foreign-dialogue forced subtitles, discs that need
+troubleshooting - is this skill's job. You are the orchestrator: you make the
+judgment calls (what each title is, what it should be named, where it belongs)
+and the spindle commands
 do the mechanical work.
 
 ## Daemon protocol (always, before any drive or encode work)
@@ -42,10 +43,10 @@ forgotten stop fails loudly rather than corrupting anything.
 | `spindle disc identify` | Disc label, fingerprint, TMDB match candidates (human-readable but parseable) |
 | `spindle rip --title 2,5 -o DIR` | Rip specific titles to a directory (`--all` for everything). Use the same `--min-length` as the scan that produced the IDs (default 0 for both) |
 | `spindle encode FILE -o DIR` | Reel AV1 target-quality encode of one file. Exits non-zero if validation fails. Unlike the daemon workflow, this does not run the apply-stage audio refinement afterward. |
-| `spindle subtitle FILE` | Download, sync, and verify an OpenSubtitles English SRT and mux it into the file (or `--external` for a sidecar). Needs TMDB identity: a `[tmdbid-ID]` path marker or `--tmdb-id` (plus `--season`/`--episode` for TV). If no download passes verification, generate with the whisperx-subtitles skill instead |
+| `spindle subtitle FILE` | Download, sync, and verify an OpenSubtitles English SRT and mux it into the file (or `--external` for a sidecar). Needs TMDB identity: a `[tmdbid-ID]` path marker or `--tmdb-id` (plus `--season`/`--episode` for TV). For English-primary audio only, use the whisperx-subtitles skill if no download passes |
 | `spindle cache rip` / `spindle cache process N` | Route a disc's *main feature* through the normal automated pipeline (rip to cache, then queue it) |
 | `spindle debug crop FILE` / `spindle debug commentary FILE` | Crop and commentary diagnostics for a single file |
-| `mkvmerge -J FILE` / `mkvextract tracks FILE ID:OUT.sup` | Inspect and extract a source PGS subtitle track for forced-subtitle work |
+| `mkvmerge -J FILE` / `mkvextract tracks FILE ID:OUT.sup` | Inspect and extract a source PGS subtitle track for manual subtitle work |
 | `uvx pgsrip [--keep-temp-files] FILE.en.sup` | OCR an extracted English PGS track to SRT; requires the system Tesseract English data |
 | `spindle jellyfin refresh` | Trigger a Jellyfin library scan after manual placement |
 | `spindle queue audit N` / `spindle logs` | Diagnostics for pipeline-processed items |
@@ -84,9 +85,13 @@ workflows do not write there.
   the feature file and its folder do.
 - **Subtitles:** none for extras (featurettes, deleted scenes, interviews,
   trailers). Yes for theatrical shorts (Pixar, Looney Tunes, etc.) and for
-  every feature-length cut - run `spindle subtitle --tmdb-id ID` on the
-  encoded file. When no OpenSubtitles download passes verification (common
-  for shorts and alternate cuts), fall back to the whisperx-subtitles skill.
+  every feature-length cut. When the primary dialogue is English, run
+  `spindle subtitle --tmdb-id ID` on the encoded file; if no OpenSubtitles
+  download passes verification (common for shorts and alternate cuts), fall
+  back to the whisperx-subtitles skill. When the primary dialogue is not
+  English, follow `references/foreign-language-feature.md` instead: Spindle's
+  same-language transcript verification cannot approve an English
+  translation, and the whisperx-subtitles skill does not translate.
 - **Audio:** final files keep only the primary track and confirmed commentary
   tracks, matching Spindle's apply stage. Before encoding, inspect the ripped
   or joined source with `ffprobe`; when it has multiple audio streams, run
@@ -127,7 +132,8 @@ Read only the reference file(s) matching the request:
 | Find/process disc extras (with or without the movie); theatrical shorts on a feature disc | `references/extras.md` |
 | Standard + extended/director's cut editions (same disc or two discs) | `references/editions.md` |
 | One movie spanning two discs | `references/multi-disc.md` |
-| Foreign dialogue needs an English forced subtitle | `references/forced-subtitles.md` |
+| A feature's primary dialogue is not English and needs a full English subtitle | `references/foreign-language-feature.md` |
+| Foreign dialogue in an otherwise English feature needs an English forced subtitle | `references/forced-subtitles.md` |
 | MakeMKV can't read/rip the disc | `references/troubleshooting.md` |
 
 Scenarios compose: a two-disc extended edition uses `editions.md` +
@@ -148,8 +154,9 @@ Every scenario follows the same skeleton:
 6. Run commentary detection and remux each source to primary audio plus only
    confirmed commentary tracks.
 7. Encode each refined source with `spindle encode`.
-8. Subtitle where the rules above say so; use the forced-subtitle reference
-   when foreign dialogue needs a separate English forced track.
+8. Subtitle where the rules above say so; use the foreign-language-feature
+   reference for a full English translation or the forced-subtitle reference
+   for a separate sparse English forced track.
 9. Verify video, audio policy, SRT subtitles, and duration with `ffprobe`.
 10. Name and place into the library per the reference file's conventions.
 11. `spindle jellyfin refresh`, clean scratch, `spindle start`.
