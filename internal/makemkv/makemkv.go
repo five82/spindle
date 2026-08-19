@@ -285,9 +285,12 @@ func Rip(ctx context.Context, device string, titleID int, outputDir string, time
 			"error_msg_count", len(errorMsgs),
 			"warning_msg_count", len(warningMsgs),
 			"last_error_message", lastErrorText,
+			"stalled_at_percent", publishedPercent,
 		)
-		return fmt.Errorf("makemkv rip: makemkvcon exited 0 but produced no output (saved=%d failed=%d errors=%d last=%q)",
-			savedCount, failedCount, len(errorMsgs), lastErrorText)
+		// publishedPercent is the diagnosis: MakeMKV abandoning a title
+		// part-way through means unreadable sectors, not an empty rip.
+		return fmt.Errorf("makemkv rip: makemkvcon exited 0 but produced no output (stalled at %.1f%%, saved=%d failed=%d errors=%d last=%q)",
+			publishedPercent, savedCount, failedCount, len(errorMsgs), lastErrorText)
 	}
 	if savedCount == 0 {
 		logger.Error("MakeMKV rip summary reports zero saved",
