@@ -7,6 +7,9 @@
 - Finish the work you start; ask before dropping scope or leaving TODOs.
 - Coordinate major trade-offs with the user; never unilaterally defer functionality.
 - Keep edits ASCII unless the file already uses extended characters.
+- Do not commit or push unless explicitly told to.
+- When asked to commit, commit to the current branch - normally `main`. Do not
+  create a branch, open a PR, or push elsewhere unless explicitly told to.
 
 ## Project
 
