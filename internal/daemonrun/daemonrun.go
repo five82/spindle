@@ -204,7 +204,14 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			// slot) was removed 2026-07-07: each reel process sizes its CVVDP
 			// metric pool as if it owns the GPU, and two concurrent pools
 			// exhausted the 16GB card's VRAM, killing both encodes.
-			Claims:    map[string]int{"encode": 1},
+			Claims: map[string]int{"encode": 1},
+			// Gated on identification, not ripping, so a TV disc encodes each
+			// episode while the rest of the disc still rips. A movie takes the
+			// encode claim just as early and then idles for its whole rip,
+			// which is deliberate: ReadyTasks orders by item created_at, so the
+			// claim always goes to the oldest item still needing it, and that
+			// item is the one whose rip finishes first. A younger item cannot
+			// be starved by an older one's idle hold under sequential ripping.
 			DependsOn: []queue.Stage{queue.StageIdentification}},
 		{Stage: queue.StageAnalysis, Handler: analysisHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageEpisodeIdentification}},
 		{Stage: queue.StageSubtitling, Handler: subtitleHandler, Claims: map[string]int{"gpu": 1}, DependsOn: []queue.Stage{queue.StageAnalysis}},

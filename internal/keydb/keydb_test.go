@@ -252,6 +252,13 @@ func TestTitleExtractionChain(t *testing.T) {
 		// normalizeDuplicateTitle
 		{"Movie (Movie)", "Movie"},
 		{"The Film (The Film)", "The Film"},
+		// unwrapVolumeAlias: real KeyDB row shape
+		{"MARY_POPPINS_50TH_ANNIVERSARY (Mary Poppins 50th Anniversary Edition - Blu-ray™)", "Mary Poppins 50th Anniversary Edition - Blu-ray™"},
+		// Underscored volume ID never EqualFolds the spaced display name, so the
+		// duplicate check passes and the unwrap returns the readable half.
+		{"THE_DARK_KNIGHT (The Dark Knight)", "The Dark Knight"},
+		// Short all-caps titles keep their parenthetical, having no volume-ID underscore
+		{"JFK (Director's Cut)", "JFK (Director's Cut)"},
 		// No transformation needed
 		{"Plain Title", "Plain Title"},
 		// Empty bracket content falls through
@@ -261,6 +268,29 @@ func TestTitleExtractionChain(t *testing.T) {
 		got := cleanTitle(tt.input)
 		if got != tt.want {
 			t.Errorf("cleanTitle(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestUnwrapVolumeAlias(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"MARY_POPPINS_50TH_ANNIVERSARY (Mary Poppins 50th Anniversary Edition)", "Mary Poppins 50th Anniversary Edition"},
+		{"TOY_STORY_3 (Toy Story 3 - Blu-ray™)", "Toy Story 3 - Blu-ray™"},
+		// No underscore in the prefix: not a volume ID.
+		{"JFK (Director's Cut)", ""},
+		// Mixed case prefix: not a volume ID.
+		{"Mary_Poppins (Mary Poppins)", ""},
+		// No parenthetical at all.
+		{"MARY_POPPINS_50TH_ANNIVERSARY", ""},
+		// Leading paren leaves no prefix.
+		{"(Mary Poppins)", ""},
+	}
+	for _, tt := range tests {
+		if got := unwrapVolumeAlias(tt.input); got != tt.want {
+			t.Errorf("unwrapVolumeAlias(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }

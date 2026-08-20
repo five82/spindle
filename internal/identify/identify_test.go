@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -156,6 +158,16 @@ func TestCleanQueryTitle(t *testing.T) {
 			name:  "strips UHD",
 			input: "Inception - UHD",
 			want:  "Inception",
+		},
+		{
+			name:  "strips bare 4K",
+			input: "Mary Poppins Returns - 4K",
+			want:  "Mary Poppins Returns",
+		},
+		{
+			name:  "strips resolution branding",
+			input: "Heat 2160p",
+			want:  "Heat",
 		},
 		{
 			name:  "strips DVD",
@@ -584,21 +596,29 @@ func TestExtractDiscNumber(t *testing.T) {
 	}
 }
 
-func TestNoTMDBMatchIsFatal(t *testing.T) {
+func TestNarrowQueryTitle(t *testing.T) {
 	tests := []struct {
-		name      string
-		mediaHint string
-		want      bool
+		name  string
+		input string
+		want  string
 	}{
-		{name: "tv hint is fatal", mediaHint: "tv", want: true},
-		{name: "movie hint is not fatal", mediaHint: "movie", want: false},
-		{name: "unknown hint is not fatal", mediaHint: "", want: false},
+		{name: "ordinal anniversary edition", input: "Mary Poppins 50th Anniversary Edition", want: "Mary Poppins"},
+		{name: "ordinal anniversary alone", input: "Jaws 45th Anniversary", want: "Jaws"},
+		{name: "special edition", input: "Blade Runner Special Edition", want: "Blade Runner"},
+		{name: "collectors edition with apostrophe", input: "Alien Collector's Edition", want: "Alien"},
+		{name: "collectors edition without apostrophe", input: "Alien Collectors Edition", want: "Alien"},
+		{name: "directors cut after dash", input: "Kingdom of Heaven - Director's Cut", want: "Kingdom of Heaven"},
+		{name: "unrated edition", input: "Anchorman Unrated Edition", want: "Anchorman"},
+		{name: "steelbook", input: "Dune Steelbook", want: "Dune"},
+		{name: "nothing to strip is unchanged", input: "Finding Nemo", want: "Finding Nemo"},
+		{name: "edition word alone is kept", input: "The Edition", want: "The Edition"},
+		{name: "all-suffix title falls back to input", input: "Director's Cut", want: "Director's Cut"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := noTMDBMatchIsFatal(tt.mediaHint); got != tt.want {
-				t.Fatalf("noTMDBMatchIsFatal(%q) = %v, want %v", tt.mediaHint, got, tt.want)
+			if got := NarrowQueryTitle(tt.input); got != tt.want {
+				t.Fatalf("NarrowQueryTitle(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -1173,5 +1193,96 @@ func TestCreateEpisodePlaceholders_TNGLikeSelection(t *testing.T) {
 		if ep.TitleID != wantTitleIDs[i] {
 			t.Fatalf("Episodes[%d].TitleID = %d, want %d", i, ep.TitleID, wantTitleIDs[i])
 		}
+	}
+}
+
+// TestResolveMetadata_NarrowedRetry covers the Mary Poppins failure: bd_info
+// reports an edition-suffixed disc name, TMDB indexes only the bare title, and
+// the first search comes back empty. The retry must strip the suffix and match,
+// rather than leaving the item unidentified.
+func TestResolveMetadata_NarrowedRetry(t *testing.T) {
+	var queries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		queries = append(queries, query)
+		w.Header().Set("Content-Type", "application/json")
+		if query == "Mary Poppins" {
+			_, _ = io.WriteString(w, `{"results":[{"id":433,"title":"Mary Poppins",`+
+				`"media_type":"movie","release_date":"1964-08-27",`+
+				`"vote_average":7.6,"vote_count":4200}]}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"results":[]}`)
+	}))
+	defer srv.Close()
+
+	h := &Handler{
+		cfg:        &config.Config{},
+		tmdbClient: tmdb.New("test-key", srv.URL, "en-US", discardLogger()),
+	}
+	item := &queue.Item{DiscTitle: "MARY POPPINS 50TH ANNIVERSARY"}
+	result := &IdentifyResult{
+		BDInfo:     &BDInfoResult{DiscName: "Mary Poppins 50th Anniversary Edition - Blu-ray™"},
+		DiscInfo:   &makemkv.DiscInfo{Name: "Mary Poppins 50th Anniversary Edition"},
+		DiscSource: "bluray",
+	}
+
+	if err := h.resolveMetadata(context.Background(), item, result, discardLogger()); err != nil {
+		t.Fatalf("resolveMetadata: %v", err)
+	}
+
+	if result.Fatal {
+		t.Fatalf("expected a match after retry, got fatal: %s", result.FatalMsg)
+	}
+	if result.Best == nil || result.Best.ID != 433 {
+		t.Fatalf("expected TMDB id 433, got %+v", result.Best)
+	}
+	if result.MediaType != "movie" {
+		t.Errorf("media type = %q, want movie", result.MediaType)
+	}
+	if result.QueryTitle != "Mary Poppins" {
+		t.Errorf("query title = %q, want %q", result.QueryTitle, "Mary Poppins")
+	}
+	want := []string{"Mary Poppins 50th Anniversary Edition", "Mary Poppins"}
+	if !reflect.DeepEqual(queries, want) {
+		t.Errorf("queries = %v, want %v", queries, want)
+	}
+}
+
+// A query with no edition suffix to strip must not be retried, and the item
+// must fail at identification rather than continuing with an unknown type.
+func TestResolveMetadata_NoMatchIsFatal(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"results":[]}`)
+	}))
+	defer srv.Close()
+
+	h := &Handler{
+		cfg:        &config.Config{},
+		tmdbClient: tmdb.New("test-key", srv.URL, "en-US", discardLogger()),
+	}
+	item := &queue.Item{DiscTitle: "SOME OBSCURE DISC"}
+	result := &IdentifyResult{
+		BDInfo:     &BDInfoResult{DiscName: "Some Obscure Disc"},
+		DiscInfo:   &makemkv.DiscInfo{Name: "Some Obscure Disc"},
+		DiscSource: "bluray",
+	}
+
+	if err := h.resolveMetadata(context.Background(), item, result, discardLogger()); err != nil {
+		t.Fatalf("resolveMetadata: %v", err)
+	}
+
+	if !result.Fatal {
+		t.Fatal("expected no-match to be fatal")
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 search with nothing to narrow, got %d", calls)
+	}
+	if result.Envelope.Metadata.MediaType != "unknown" {
+		t.Errorf("fallback envelope media type = %q, want unknown",
+			result.Envelope.Metadata.MediaType)
 	}
 }

@@ -86,7 +86,7 @@ The `stage_gate` object in the audit output contains:
 | Field | Meaning |
 |-------|---------|
 | `furthest_stage` | Status the item reached (or failed at) |
-| `media_type` | Resolved media type: `movie`, `tv`, or `unknown` (pre-identification items with no metadata) |
+| `media_type` | Resolved media type: `movie`, `tv`, or `unknown`. `unknown` means identification has not completed or failed outright — it can never belong to an item that ripped |
 | `media_hint` | Hint inferred before/without full identification (for example `tv` on a failed TMDB lookup) |
 | `disc_source` | `bluray`, `dvd`, or `unknown` |
 | `phase_logs` | Always true |
@@ -102,7 +102,8 @@ The `stage_gate` object in the audit output contains:
 - External validation (blu-ray.com lookups) is only useful when (a) there are encoded files to cross-reference AND (b) the source is Blu-ray. **Skip external validation entirely for DVDs.**
 - UHD status is not encoded in `disc_source`. Infer UHD from contextual signals: disc title containing "UHD", 2160p resolutions in bdinfo, or similar markers in the audit data.
 - **For failed items:** Focus the report on diagnosing the failure. Analyze the error, the events leading up to it, and any retry patterns. Do not pad the report with sections that say "N/A - not reached".
-- **TV-hinted no-TMDB-match is fatal at identification.** Expect these items to fail before ripping rather than continue as degraded TV review items.
+- **No-TMDB-match is fatal at identification for every disc.** Expect these items to fail before ripping rather than continue as degraded unknown-media-type review items. An item that reached ripping therefore always has `media_type=movie` or `tv`; `media_type=unknown` means the item failed at (or has not yet finished) identification. A ripped item carrying `unknown` is itself a finding — the ripper rejects that media type outright.
+- **A failed TMDB search is retried once on a narrowed title.** `decision_type=tmdb_search` with `decision_result=retry_narrowed` shows an edition or cut suffix being stripped ("Mary Poppins 50th Anniversary Edition" -> "Mary Poppins") after the first query found nothing. Its presence is normal recovery, not a defect. When an item still fails, read `event_type=tmdb_no_match`: `error_hint` distinguishes "TMDB returned no results for the query" (query pollution — check `query_title` against the disc label) from "no result met confidence threshold" (candidates existed but scored too low — check the `tmdb_search` candidate scores at DEBUG), and `result_count` confirms which.
 
 ### Phase 2: Log Analysis (when `phase_logs` is true)
 
@@ -115,7 +116,7 @@ Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors
    - Look up groups by `decision_type` to find specific categories (`commentary_classification`, `tmdb_match`, etc.)
    - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=duplicate_detection` (duplicate guard), `decision_type=episode_id_skip` (episode-ID skips), `decision_type=rip_cache` (hit/miss/incomplete — misses log explicitly)
    - Movie title selection: `decision_type=title_selection_funnel` records each elimination stage (rule, `candidates_before/after`, `eliminated_title_ids`, `evidence` with the threshold values); the winner is the `decision_type=title_selection` "primary title decision" line. When the wrong cut/title was picked, the funnel shows which rule eliminated the right one.
-   - Scheduler resource waits: `decision_type=stage_execution` with `decision_result=blocked` / `unblocked` shows a task waiting on GPU/drive/encode claims (`claims` attr) and the `waited` duration on grant. "stage started" lines also carry the resolved `claims` (so the GPU-for-TV choice is visible per dispatch). The `encode` claim has capacity 1 — encodes never run concurrently.
+   - Scheduler resource waits: `decision_type=stage_execution` with `decision_result=blocked` / `unblocked` shows a task waiting on GPU/drive/encode claims (`claims` attr) and the `waited` duration on grant. "stage started" lines also carry the resolved `claims` (so the GPU-for-TV choice is visible per dispatch). The `encode` claim has capacity 1 — encodes never run concurrently. A movie's encoding task takes that claim when identification completes and then polls without work until its rip finishes (`encoding_plan` logs `decision_result=deferred` for this; TV logs `streaming`). That idle hold is by design and is NOT a finding: ready tasks are ordered by item `created_at`, so the claim always goes to the oldest item still needing it, and under sequential ripping that is also the item whose rip completes first.
    - Warnings/errors include `extras` maps with non-standard log fields for diagnostic context; decisions use structured fields only (full log lines available at the files in `logs.paths`)
 
 2. **Timing/progress anomalies** (from `logs.stages` and `logs.events`):
@@ -390,7 +391,7 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 |---------|-------|--------------------------|--------|
 | Duplicate disc detection | Identification/Disc Monitor | `decision_type=duplicate_detection` groups | Item rejected or enqueue skipped |
 | DVD TV title falsely deduplicated | Identification | `decision_type=duplicate_detection` with `title_id`/`duplicate_of` on a DVD; scan/title/placeholder counts decrease | Episode omitted even when the resolved episode sequence remains contiguous |
-| TMDB match rejected or weakly accepted | Identification | `decision_type=tmdb_match` groups with score/threshold details in `decision_reason` | No match or wrong title match |
+| TMDB match rejected or weakly accepted | Identification | `decision_type=tmdb_match` groups with score/threshold details in `decision_reason` | Wrong title match, or item failed at identification |
 | Unresolved placeholder episodes | Episode ID | `envelope.episodes` with `episode=0` and placeholder keys after episodeid | Episodes land in review_dir |
 | Wrong crop detection | Encoding | `encoding.snapshot.crop_filter` aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
 | A/V sync changed by encoding | Encoding | `analysis.av_sync.entries[].passed=false`; source/output relative A/V start offsets differ by more than 100 ms | Audio leads or lags video; CRITICAL even if Reel's persisted validation says passed |
@@ -413,7 +414,9 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 | Cross-episode resolution mismatch | Encoding | Different resolutions across `media[]` entries | Inconsistent quality |
 | Cross-episode audio mismatch | Encoding | Different audio stream counts across `media[]` entries | Inconsistent audio tracks |
 | Fingerprint fallback used | Identification | `decision_type=fingerprint_strategy` with `decision_result=fallback` | Disc type detection degraded |
-| TMDB match rejected | Identification | `decision_type=tmdb_match` with `decision_result=rejected` | No content match found |
+| TMDB match rejected | Identification | `decision_type=tmdb_match` with `decision_result=rejected` | No content match found; item fails before ripping |
+| Polluted TMDB query | Identification | `event_type=tmdb_no_match` with `error_hint="TMDB returned no results for the query"`; `query_title` still carries disc-label cruft after the `retry_narrowed` attempt | Item fails at identification; the cleanup patterns in `CleanQueryTitle`/`NarrowQueryTitle` need the missing form |
+| Unknown media type reached ripping | Ripping | `selectRipTargets` error `cannot select rip targets for media type` | Identification gate was bypassed; investigate how the envelope was built |
 | Validation failed but continued | Encoding | `decision_type=validation_failure_route` with `decision_result=flagged_for_review` | Item routed to review |
 | Commentary tracks lost in refinement | Audio Analysis | `decision_type=commentary_remapping` with remapped count 0 | Commentary detection effort wasted |
 | Source stage fallback to encoded | Organization | `decision_type=source_stage_selection` with `decision_result=encoded` when subtitles enabled | Subtitles may be missing from output |
@@ -476,6 +479,8 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Audio refinement stripping non-English tracks — that's its job
 - Subtitle `qc_observations` that are below review thresholds and have `validation_result=passed`
 - Missing HDR10+ dynamic metadata in encoded output — Reel intentionally emits static HDR because the target playback environment does not consume it
+- A movie's encoding task holding the `encode` claim with no encoded output while its rip runs — the deferred plan is expected; see Stage Gating above
+- An identification-failed item having no rip, encode, or staging artifacts — that is the fatal no-TMDB-match rule working, not missing work
 
 **Stage timing:**
 - Always show the timing table — it's compact and useful for spotting anomalies

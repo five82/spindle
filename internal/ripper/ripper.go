@@ -571,21 +571,10 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 		return targets, nil
 
 	default:
-		// Unknown/fallback: rip all titles above MinTitleLength.
-		var targets []ripspec.Title
-		for _, t := range env.Titles {
-			if t.Duration >= h.cfg.MakeMKV.MinTitleLength {
-				targets = append(targets, t)
-			}
-		}
-		logger.Info("fallback title selection",
-			"decision_type", logs.DecisionTitleSelection,
-			"decision_result", "selected",
-			"decision_reason", "unknown media type, using duration filter",
-			"titles", len(targets),
-			"min_title_length", h.cfg.MakeMKV.MinTitleLength,
-		)
-		return targets, nil
+		// Identification fails the item when TMDB cannot name the disc, so a
+		// media type other than movie/tv cannot reach ripping. Reaching here
+		// means the envelope was built by a path that skipped that gate.
+		return nil, fmt.Errorf("cannot select rip targets for media type %q", env.Metadata.MediaType)
 	}
 }
 
@@ -598,19 +587,25 @@ const stagingSpaceMargin = 1.1
 // into the rip. The check is advisory-only in the other direction: unknown
 // title sizes or a statfs failure never block a rip that might succeed.
 func (h *Handler) checkStagingSpace(logger *slog.Logger, targets []ripspec.Title) error {
+	// Sum only the titles MakeMKV sized. A title with no estimate used to
+	// abandon the whole check, so one sizeless title left an entire rip
+	// unguarded; the known subset is a lower bound on what the rip needs, and
+	// failing when even that does not fit still cannot produce a false alarm.
 	var estimated int64
+	var unsized int
 	for _, t := range targets {
 		if t.SizeBytes <= 0 {
-			logger.Debug("staging space preflight skipped",
-				"event_type", "staging_space_preflight",
-				"reason", "title size unknown",
-				"title_id", t.ID,
-			)
-			return nil
+			unsized++
+			continue
 		}
 		estimated += t.SizeBytes
 	}
 	if estimated == 0 {
+		logger.Debug("staging space preflight skipped",
+			"event_type", "staging_space_preflight",
+			"reason", "no title sizes known",
+			"titles", len(targets),
+		)
 		return nil
 	}
 
@@ -626,15 +621,21 @@ func (h *Handler) checkStagingSpace(logger *slog.Logger, targets []ripspec.Title
 	free := int64(fs.Bavail) * int64(fs.Bsize)
 	required := int64(float64(estimated) * stagingSpaceMargin)
 	if free < required {
+		sized := len(targets) - unsized
+		scope := "rip"
+		if unsized > 0 {
+			scope = fmt.Sprintf("%d of %d titles in the rip", sized, len(targets))
+		}
 		return fmt.Errorf(
-			"insufficient staging space: rip needs about %.1f GiB (%.1f GiB estimated plus margin) but %s has %.1f GiB free; free up space and retry",
-			gib(required), gib(estimated), h.cfg.Paths.StagingDir, gib(free))
+			"insufficient staging space: %s needs about %.1f GiB (%.1f GiB estimated plus margin) but %s has %.1f GiB free; free up space and retry",
+			scope, gib(required), gib(estimated), h.cfg.Paths.StagingDir, gib(free))
 	}
 	logger.Debug("staging space preflight passed",
 		"event_type", "staging_space_preflight",
 		"estimated_bytes", estimated,
 		"required_bytes", required,
 		"free_bytes", free,
+		"unsized_titles", unsized,
 	)
 	return nil
 }

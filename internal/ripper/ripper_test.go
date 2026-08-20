@@ -192,26 +192,30 @@ func TestSelectRipTargets_TV(t *testing.T) {
 	}
 }
 
-func TestSelectRipTargets_Unknown(t *testing.T) {
+// Identification fails an item TMDB cannot name, so ripping must never be
+// handed an unresolved media type. Rejecting it here keeps a disc from being
+// ripped whole (every title over the duration floor) when that gate is bypassed.
+func TestSelectRipTargets_UnknownRejected(t *testing.T) {
 	h := &Handler{cfg: &config.Config{}, titleOverride: -1}
 	h.cfg.MakeMKV.MinTitleLength = 120
 
-	env := &ripspec.Envelope{
-		Metadata: ripspec.Metadata{MediaType: "unknown"},
-		Titles: []ripspec.Title{
-			{ID: 0, Duration: 7200},
-			{ID: 1, Duration: 60}, // below minimum
-			{ID: 2, Duration: 3600},
-		},
-	}
+	for _, mediaType := range []string{"unknown", ""} {
+		env := &ripspec.Envelope{
+			Metadata: ripspec.Metadata{MediaType: mediaType},
+			Titles: []ripspec.Title{
+				{ID: 0, Duration: 7200},
+				{ID: 1, Duration: 60},
+				{ID: 2, Duration: 3600},
+			},
+		}
 
-	targets, err := h.selectRipTargets(testLogger(), env)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(targets) != 2 {
-		t.Fatalf("expected 2 targets, got %d", len(targets))
+		targets, err := h.selectRipTargets(testLogger(), env)
+		if err == nil {
+			t.Fatalf("media type %q: expected error, got %d targets", mediaType, len(targets))
+		}
+		if targets != nil {
+			t.Errorf("media type %q: expected no targets, got %d", mediaType, len(targets))
+		}
 	}
 }
 
@@ -475,18 +479,34 @@ func TestCheckStagingSpaceSufficient(t *testing.T) {
 	}
 }
 
-func TestCheckStagingSpaceSkippedOnUnknownSize(t *testing.T) {
+// A title with no scan estimate must not disable the check for the titles that
+// do have one: the sized subset is a lower bound, so a rip that cannot fit even
+// that much still fails fast.
+func TestCheckStagingSpacePartialSizesStillChecked(t *testing.T) {
 	h := &Handler{cfg: &config.Config{}, titleOverride: -1}
 	h.cfg.Paths.StagingDir = t.TempDir()
 
-	// One title without a scan size estimate disables the check entirely,
-	// even when another title alone would exceed free space.
 	targets := []ripspec.Title{
 		{ID: 0, SizeBytes: 1 << 62},
 		{ID: 1, SizeBytes: 0},
 	}
+	err := h.checkStagingSpace(testLogger(), targets)
+	if err == nil {
+		t.Fatal("expected insufficient-space error from the sized title")
+	}
+	if !strings.Contains(err.Error(), "1 of 2 titles") {
+		t.Errorf("expected partial-estimate scope in message, got: %v", err)
+	}
+}
+
+// With no size anywhere there is nothing to compare, so the check stays advisory.
+func TestCheckStagingSpaceSkippedWhenNoSizesKnown(t *testing.T) {
+	h := &Handler{cfg: &config.Config{}, titleOverride: -1}
+	h.cfg.Paths.StagingDir = t.TempDir()
+
+	targets := []ripspec.Title{{ID: 0, SizeBytes: 0}, {ID: 1, SizeBytes: 0}}
 	if err := h.checkStagingSpace(testLogger(), targets); err != nil {
-		t.Fatalf("expected skip on unknown size, got: %v", err)
+		t.Fatalf("expected skip when no sizes are known, got: %v", err)
 	}
 }
 

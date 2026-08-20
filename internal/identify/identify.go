@@ -35,9 +35,26 @@ var discMetadataPattern = regexp.MustCompile(
 
 // formatBrandingPattern strips physical media format descriptors from disc titles.
 // BDInfo often includes format branding that pollutes TMDB search queries.
-// Examples: "Ultra HD Blu-ray™", "Blu-ray", "4K Ultra HD", "UHD", "DVD".
+// Examples: "Ultra HD Blu-ray™", "Blu-ray", "4K Ultra HD", "UHD", "DVD", "4K".
+// The multi-word forms lead the alternation so "4K Ultra HD" is consumed whole
+// rather than leaving a stranded "Ultra HD" behind bare "4K".
 var formatBrandingPattern = regexp.MustCompile(
-	`(?i)(\s*[-\x{2013}:]\s*)?(?:(?:4K\s+)?Ultra\s+HD(?:\s+Blu[- ]?ray)?|Blu[- ]?ray|\bUHD\b|\bDVD\b|\bBD\b)[\x{2122}\x{00AE}]*`,
+	`(?i)(\s*[-\x{2013}:]\s*)?(?:(?:4K\s+)?Ultra\s+HD(?:\s+Blu[- ]?ray)?|Blu[- ]?ray|\bUHD\b|\bDVD\b|\bBD\b|\b4K\b|\b2160p\b|\b1080p\b)[\x{2122}\x{00AE}]*`,
+)
+
+// editionSuffixPattern strips marketing edition and cut descriptors. Disc labels
+// routinely append these to the film title ("Mary Poppins 50th Anniversary
+// Edition") while TMDB indexes the bare title, so a search on the full label
+// returns zero results. This is applied only on a no-match retry, never to the
+// first query: a handful of real films carry these words in their actual title
+// ("Blade Runner: The Final Cut"), and those must win when TMDB can match them.
+var editionSuffixPattern = regexp.MustCompile(
+	`(?i)(\s*[-\x{2013}:,]\s*)?\b(?:` +
+		`\d{1,3}(?:st|nd|rd|th)\s+anniversary(?:\s+edition)?` +
+		`|(?:special|collector'?s|limited|ultimate|deluxe|extended|unrated|remastered|restored|definitive|signature|anniversary|platinum|diamond)\s+edition` +
+		`|(?:director'?s|extended|theatrical|final|international)\s+cut` +
+		`|steelbook` +
+		`)\b`,
 )
 
 // trailingPunctPattern cleans up trailing punctuation/whitespace left after stripping.
@@ -99,8 +116,6 @@ type IdentifyResult struct {
 	DiscInfo    *makemkv.DiscInfo
 	BDInfo      *BDInfoResult
 	Envelope    ripspec.Envelope
-	Degraded    bool
-	DegradedMsg string
 	Fatal       bool
 	FatalMsg    string
 }
@@ -291,61 +306,46 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 		)
 	}
 
-	var err error
-	switch mediaHint {
-	case "tv":
-		logger.Info("media type hint detected",
-			"decision_type", logs.DecisionTMDBSearch,
-			"decision_result", "tv",
-			"decision_reason", fmt.Sprintf("raw_title=%q", result.RawTitle),
-		)
-		yearStr := ""
-		if result.SearchYear > 0 {
-			yearStr = strconv.Itoa(result.SearchYear)
-		}
-		result.AllResults, err = h.tmdbClient.SearchTV(ctx, result.QueryTitle, yearStr)
-		if err != nil {
-			return fmt.Errorf("tmdb search (tv): %w", err)
-		}
-		result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
-		if result.Best == nil {
-			logger.Info("TV-hinted search found no match, falling back to multi",
-				"decision_type", logs.DecisionTMDBSearch,
-				"decision_result", "fallback_multi",
-				"decision_reason", "no tv match above threshold",
-			)
-			result.AllResults, err = h.tmdbClient.SearchMulti(ctx, result.QueryTitle)
-			if err != nil {
-				return fmt.Errorf("tmdb search (multi fallback): %w", err)
-			}
-			result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
-		}
-	default:
-		result.AllResults, err = h.tmdbClient.SearchMulti(ctx, result.QueryTitle)
-		if err != nil {
-			return fmt.Errorf("tmdb search: %w", err)
-		}
-		result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
+	if err := h.searchTMDB(ctx, mediaHint, result, logger); err != nil {
+		return err
 	}
+
+	// Disc labels append edition and cut descriptors TMDB does not index. Retry
+	// once on the narrowed title so "Mary Poppins 50th Anniversary Edition"
+	// still resolves rather than degrading the whole item.
 	if result.Best == nil {
-		impact := "item flagged for review"
-		if noTMDBMatchIsFatal(mediaHint) {
-			impact = "item failed at identification"
+		if narrowed := NarrowQueryTitle(result.QueryTitle); narrowed != result.QueryTitle {
+			logger.Info("retrying TMDB search on narrowed title",
+				"decision_type", logs.DecisionTMDBSearch,
+				"decision_result", "retry_narrowed",
+				"decision_reason", fmt.Sprintf("edition suffix stripped: %q -> %q", result.QueryTitle, narrowed),
+			)
+			result.QueryTitle = narrowed
+			if err := h.searchTMDB(ctx, mediaHint, result, logger); err != nil {
+				return err
+			}
+		}
+	}
+
+	if result.Best == nil {
+		// Distinguish an empty result set from candidates that all scored below
+		// the acceptance threshold: they point at different causes (query
+		// pollution vs. a weak match) and the hint is the first thing read.
+		hint := "no result met confidence threshold"
+		if len(result.AllResults) == 0 {
+			hint = "TMDB returned no results for the query"
 		}
 		logger.Warn("no TMDB match",
 			"event_type", "tmdb_no_match",
-			"error_hint", "no result met confidence threshold",
-			"impact", impact,
+			"error_hint", hint,
+			"impact", "item failed at identification",
+			"query_title", result.QueryTitle,
+			"result_count", len(result.AllResults),
 		)
 		item.AppendReviewReason("TMDB: no confident match found")
 		result.Envelope = h.buildFallbackEnvelope(ctx, logger, item, result.DiscInfo)
-		if noTMDBMatchIsFatal(mediaHint) {
-			result.Fatal = true
-			result.FatalMsg = "no TMDB match found for TV disc: " + result.QueryTitle
-			return nil
-		}
-		result.Degraded = true
-		result.DegradedMsg = "no TMDB match found for: " + result.QueryTitle
+		result.Fatal = true
+		result.FatalMsg = "no TMDB match found for: " + result.QueryTitle
 		return nil
 	}
 
@@ -412,9 +412,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	if result.Fatal {
 		return fmt.Errorf("identification fatal: %s", result.FatalMsg)
-	}
-	if result.Degraded {
-		return &stage.ErrDegraded{Msg: result.DegradedMsg}
 	}
 
 	// Cache disc ID.
@@ -551,9 +548,55 @@ func CleanQueryTitle(title string) string {
 	return cleaned
 }
 
-// noTMDBMatchIsFatal reports whether a missing TMDB match should stop the item.
-func noTMDBMatchIsFatal(mediaHint string) bool {
-	return mediaHint == "tv"
+// searchTMDB runs one search attempt for result.QueryTitle, routing by media
+// hint, and sets result.AllResults and result.Best. TV-hinted searches fall
+// back to a multi search when the TV search finds nothing acceptable.
+func (h *Handler) searchTMDB(ctx context.Context, mediaHint string, result *IdentifyResult, logger *slog.Logger) error {
+	var err error
+	if mediaHint == "tv" {
+		logger.Info("media type hint detected",
+			"decision_type", logs.DecisionTMDBSearch,
+			"decision_result", "tv",
+			"decision_reason", fmt.Sprintf("raw_title=%q", result.RawTitle),
+		)
+		yearStr := ""
+		if result.SearchYear > 0 {
+			yearStr = strconv.Itoa(result.SearchYear)
+		}
+		result.AllResults, err = h.tmdbClient.SearchTV(ctx, result.QueryTitle, yearStr)
+		if err != nil {
+			return fmt.Errorf("tmdb search (tv): %w", err)
+		}
+		result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
+		if result.Best != nil {
+			return nil
+		}
+		logger.Info("TV-hinted search found no match, falling back to multi",
+			"decision_type", logs.DecisionTMDBSearch,
+			"decision_result", "fallback_multi",
+			"decision_reason", "no tv match above threshold",
+		)
+	}
+
+	result.AllResults, err = h.tmdbClient.SearchMulti(ctx, result.QueryTitle)
+	if err != nil {
+		return fmt.Errorf("tmdb search: %w", err)
+	}
+	result.Best = tmdb.SelectBestResult(result.AllResults, result.QueryTitle, result.SearchYear, 5, logger)
+	return nil
+}
+
+// NarrowQueryTitle strips edition and cut descriptors from a query that found
+// nothing, so "Mary Poppins 50th Anniversary Edition" retries as "Mary Poppins".
+// Returns the input unchanged when there is nothing to strip.
+func NarrowQueryTitle(title string) string {
+	narrowed := editionSuffixPattern.ReplaceAllString(title, "")
+	narrowed = trailingPunctPattern.ReplaceAllString(narrowed, "")
+	narrowed = strings.TrimSpace(narrowed)
+	if narrowed == "" {
+		return title
+	}
+	return narrowed
 }
 
 func detectMediaTypeHint(rawTitle string) string {

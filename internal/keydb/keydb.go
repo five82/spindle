@@ -143,7 +143,32 @@ func cleanTitle(raw string) string {
 	if t := normalizeDuplicateTitle(raw); t != "" {
 		return t
 	}
+	if t := unwrapVolumeAlias(raw); t != "" {
+		return t
+	}
 	return raw
+}
+
+// unwrapVolumeAlias extracts the parenthesized display name when the prefix is a
+// raw volume identifier, the most common KeyDB row shape:
+// "MARY_POPPINS_50TH_ANNIVERSARY (Mary Poppins 50th Anniversary Edition)" ->
+// "Mary Poppins 50th Anniversary Edition". The volume ID is useless as a TMDB
+// query, and KeyDB titles feed the search directly. Requiring an underscore in
+// an all-caps prefix keeps genuinely short all-caps titles ("JFK (Director's
+// Cut)") from having their name mistaken for the volume ID.
+func unwrapVolumeAlias(title string) string {
+	if !strings.HasSuffix(title, ")") {
+		return ""
+	}
+	start := strings.IndexByte(title, '(')
+	if start < 1 {
+		return ""
+	}
+	prefix := strings.TrimSpace(title[:start])
+	if !strings.Contains(prefix, "_") || strings.ToUpper(prefix) != prefix {
+		return ""
+	}
+	return strings.TrimSpace(title[start+1 : len(title)-1])
 }
 
 // extractAlias extracts bracketed content as the title alias.

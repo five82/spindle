@@ -54,10 +54,18 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		"decision_reason", "spindle always uses Reel target-quality mode; encodes run in per-file worker subprocesses",
 	)
 
+	// A TV disc yields one asset per episode, so encoding genuinely overlaps
+	// ripping. A movie is a single title that does not exist until its rip
+	// finishes, so the loop below just waits. Say which one this is rather
+	// than claiming per-asset streaming on an item that cannot stream.
+	planResult, planReason := "streaming", "encode each episode as its rip lands; ripping owns item progress while active"
+	if env.Metadata.MediaType != "tv" {
+		planResult, planReason = "deferred", "single title; nothing to encode until the rip completes"
+	}
 	logger.Info("encoding plan",
 		"decision_type", logs.DecisionEncodingPlan,
-		"decision_result", "streaming",
-		"decision_reason", fmt.Sprintf("media_type=%s; encode ripped assets as they land, ripping owns item progress while active", env.Metadata.MediaType),
+		"decision_result", planResult,
+		"decision_reason", fmt.Sprintf("media_type=%s; %s", env.Metadata.MediaType, planReason),
 	)
 
 	// This stage starts alongside ripping and consumes each completed asset

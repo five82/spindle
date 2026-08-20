@@ -138,9 +138,9 @@ func newIdentifyCmd() *cobra.Command {
 
 			// === TMDB Results ===
 			fmt.Printf("\n%s\n", headerStyle("=== TMDB Results ==="))
-			if result.Degraded {
+			if result.Fatal {
 				fmt.Println("No TMDB results met confidence threshold.")
-				fmt.Println("Spindle will flag this item for manual review.")
+				fmt.Println("Spindle will fail this item at identification; it will not rip.")
 			}
 
 			if result.Best != nil {
