@@ -3,6 +3,7 @@ package ripspec
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -487,4 +488,37 @@ func countUnresolved(episodes []Episode) int {
 		}
 	}
 	return count
+}
+
+// Double-length episode detection is a cross-stage contract: identify orders
+// a probable double-length title first in the episode list, and contentid's
+// opening-double inference fires only when the double leads that order. Both
+// sides must therefore agree on what "double length" means, so the single
+// definition lives here.
+const (
+	doubleEpisodeMinRatio = 1.80
+	doubleEpisodeMaxRatio = 2.40
+)
+
+// IsDoubleLength reports whether duration looks like a double-length episode
+// relative to the other runtimes on the disc: between 1.8x and 2.4x their
+// median. Non-positive runtimes are ignored; fewer than two comparable
+// runtimes is inconclusive and reports false.
+func IsDoubleLength(duration int, otherRuntimes []int) bool {
+	if duration <= 0 {
+		return false
+	}
+	rest := make([]int, 0, len(otherRuntimes))
+	for _, runtime := range otherRuntimes {
+		if runtime > 0 {
+			rest = append(rest, runtime)
+		}
+	}
+	if len(rest) < 2 {
+		return false
+	}
+	slices.Sort(rest)
+	median := rest[len(rest)/2]
+	return duration >= int(float64(median)*doubleEpisodeMinRatio) &&
+		duration <= int(float64(median)*doubleEpisodeMaxRatio)
 }

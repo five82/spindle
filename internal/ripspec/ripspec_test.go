@@ -369,3 +369,28 @@ func TestCountUnresolvedEpisodes(t *testing.T) {
 		t.Errorf("CountUnresolvedEpisodes = %d, want 2", got)
 	}
 }
+
+func TestIsDoubleLength(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration int
+		others   []int
+		want     bool
+	}{
+		{"double of median", 2700, []int{1350, 1350, 1360}, true},
+		{"at lower bound 1.8x", 2430, []int{1350, 1350, 1350}, true},
+		{"just below lower bound", 2400, []int{1350, 1350, 1350}, false},
+		{"above upper bound 2.4x", 3300, []int{1350, 1350, 1350}, false},
+		{"single length", 1350, []int{1350, 1350, 1350}, false},
+		{"non-positive runtimes ignored", 2700, []int{0, -5, 1350, 1350}, true},
+		{"too few comparable runtimes", 2700, []int{1350, 0}, false},
+		{"non-positive duration", 0, []int{1350, 1350}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsDoubleLength(tt.duration, tt.others); got != tt.want {
+				t.Errorf("IsDoubleLength(%d, %v) = %v, want %v", tt.duration, tt.others, got, tt.want)
+			}
+		})
+	}
+}

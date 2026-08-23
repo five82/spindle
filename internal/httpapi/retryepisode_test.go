@@ -1,4 +1,4 @@
-package queueops
+package httpapi
 
 import (
 	"testing"
@@ -41,7 +41,7 @@ func TestRetryEpisodeClearsFailedAssets(t *testing.T) {
 		t.Fatalf("fail item: %v", err)
 	}
 
-	result, err := RetryEpisode(store, item.ID, "S01E01")
+	result, err := retryEpisode(store, item.ID, "S01E01")
 	if err != nil {
 		t.Fatalf("retry episode: %v", err)
 	}

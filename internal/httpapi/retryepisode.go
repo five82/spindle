@@ -1,6 +1,4 @@
-// Package queueops contains workflow-level queue mutations that need to
-// understand higher-level payloads such as RipSpec envelopes.
-package queueops
+package httpapi
 
 import (
 	"fmt"
@@ -10,7 +8,8 @@ import (
 	"github.com/five82/spindle/internal/ripspec"
 )
 
-// RetryResult describes the outcome of a RetryEpisode operation.
+// RetryResult describes the outcome of a retry-episode request. It is the
+// wire value of the /api/queue/retry-episode response's "result" field.
 type RetryResult string
 
 const (
@@ -20,9 +19,9 @@ const (
 	RetryResultEpisodeNotFound RetryResult = "episode_not_found"
 )
 
-// RetryEpisode clears the failed status of a single episode within a queue item
-// and resets the item for reprocessing from its failed stage.
-func RetryEpisode(store *queue.Store, id int64, episodeKey string) (RetryResult, error) {
+// retryEpisode clears the failed status of a single episode within a queue
+// item and resets the item for reprocessing from its failed stage.
+func retryEpisode(store *queue.Store, id int64, episodeKey string) (RetryResult, error) {
 	item, err := store.GetByID(id)
 	if err != nil {
 		return "", fmt.Errorf("retry episode get %d: %w", id, err)

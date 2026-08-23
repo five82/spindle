@@ -117,28 +117,18 @@ func discBlockSize(episodes []ripspec.Episode) int {
 	return discEpisodes
 }
 
+// probableOpeningDoubleEpisode reports whether the first episode in disc
+// order looks double-length; ripspec.IsDoubleLength keeps the ratio band in
+// sync with the ordering identify applies.
 func probableOpeningDoubleEpisode(episodes []ripspec.Episode) bool {
 	if len(episodes) < 3 {
 		return false
 	}
-	first := episodes[0].RuntimeSeconds
-	if first <= 0 {
-		return false
-	}
-	var rest []int
+	rest := make([]int, 0, len(episodes)-1)
 	for _, ep := range episodes[1:] {
-		if ep.RuntimeSeconds > 0 {
-			rest = append(rest, ep.RuntimeSeconds)
-		}
+		rest = append(rest, ep.RuntimeSeconds)
 	}
-	if len(rest) < 2 {
-		return false
-	}
-	sort.Ints(rest)
-	median := rest[len(rest)/2]
-	minDur := int(float64(median) * 1.8)
-	maxDur := int(float64(median) * 2.4)
-	return first >= minDur && first <= maxDur
+	return ripspec.IsDoubleLength(episodes[0].RuntimeSeconds, rest)
 }
 
 func seasonEpisodeNumbers(season *tmdb.Season) []int {

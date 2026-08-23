@@ -13,7 +13,6 @@ import (
 
 	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/queue"
-	"github.com/five82/spindle/internal/queueops"
 	"github.com/five82/spindle/internal/sockhttp"
 )
 
@@ -72,7 +71,7 @@ type queueClearResponse struct {
 }
 
 type queueRetryEpisodeResponse struct {
-	Result queueops.RetryResult `json:"result"`
+	Result httpapi.RetryResult `json:"result"`
 }
 
 type queueEnqueueCachedResponse struct {
@@ -88,24 +87,14 @@ type EnqueueCachedRequest struct {
 	AllowDuplicate bool   `json:"allow_duplicate"`
 }
 
-// Status is the daemon status response used by CLI rendering. JSON field
-// names mirror the daemon's /api/status payload so `spindle status --json`
-// output is shaped the same whether the daemon is running or stopped.
-type Status struct {
-	Running      bool               `json:"running"`
-	PID          int                `json:"pid"`
-	QueueDBPath  string             `json:"queueDbPath"`
-	LockFilePath string             `json:"lockFilePath"`
-	Workflow     WorkflowStatus     `json:"workflow"`
-	Dependencies []DependencyStatus `json:"dependencies"`
-}
+// Status is the daemon /api/status payload, shared with CLI rendering so
+// `spindle status --json` output is shaped the same whether the daemon is
+// running or stopped (the stopped-daemon path leaves the daemon-only
+// omitempty fields unset).
+type Status = httpapi.StatusAPIResponse
 
 // WorkflowStatus is the daemon workflow status used by CLI rendering.
-type WorkflowStatus struct {
-	Running    bool                `json:"running"`
-	QueueStats map[queue.Stage]int `json:"queueStats"`
-	LastError  string              `json:"lastError"`
-}
+type WorkflowStatus = httpapi.WorkflowStatus
 
 // DependencyStatus reports an external dependency health check.
 type DependencyStatus = httpapi.DependencyResponse
@@ -197,33 +186,11 @@ func (a *HTTPAccess) GetByID(id int64) (*Item, error) {
 
 // Status returns daemon status via HTTP.
 func (a *HTTPAccess) Status() (*Status, error) {
-	var resp httpapi.StatusAPIResponse
+	var resp Status
 	if err := a.getJSON("/api/status", &resp); err != nil {
 		return nil, err
 	}
-
-	stats := make(map[queue.Stage]int, len(resp.Workflow.QueueStats))
-	for k, v := range resp.Workflow.QueueStats {
-		stats[queue.Stage(k)] = v
-	}
-
-	deps := make([]DependencyStatus, 0, len(resp.Dependencies))
-	for _, dep := range resp.Dependencies {
-		deps = append(deps, DependencyStatus(dep))
-	}
-
-	return &Status{
-		Running:      resp.Running,
-		PID:          resp.PID,
-		QueueDBPath:  resp.QueueDBPath,
-		LockFilePath: resp.LockFilePath,
-		Workflow: WorkflowStatus{
-			Running:    resp.Workflow.Running,
-			QueueStats: stats,
-			LastError:  resp.Workflow.LastError,
-		},
-		Dependencies: deps,
-	}, nil
+	return &resp, nil
 }
 
 // Retry retries failed queue items via HTTP. No IDs means retry all failed items.
@@ -236,7 +203,7 @@ func (a *HTTPAccess) Retry(ids ...int64) (int, error) {
 }
 
 // RetryEpisode retries a single failed episode via HTTP.
-func (a *HTTPAccess) RetryEpisode(id int64, episodeKey string) (queueops.RetryResult, error) {
+func (a *HTTPAccess) RetryEpisode(id int64, episodeKey string) (httpapi.RetryResult, error) {
 	var resp queueRetryEpisodeResponse
 	body := map[string]any{"id": id, "episode_key": episodeKey}
 	if err := a.postJSON("/api/queue/retry-episode", body, &resp); err != nil {

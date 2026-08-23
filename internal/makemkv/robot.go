@@ -1,0 +1,391 @@
+package makemkv
+
+// Pure parsers for makemkvcon's --robot output protocol. Nothing here
+// touches the process, the filesystem, or a logger.
+
+import (
+	"strconv"
+	"strings"
+)
+
+// MakeMKV robot-protocol MSG flag bits (from AP_iMSG_Flags).
+// Only the low byte carries semantic flags; upper bits are UI hints.
+const (
+	msgFlagError   = 0x01
+	msgFlagWarning = 0x02
+	msgFlagDebug   = 0x04
+)
+
+// MakeMKV MSG code for the final "Copy complete" summary line.
+// Format params: %1 = titles saved, %2 = titles failed.
+const msgCodeCopyComplete = 5036
+
+// ripMessage is a parsed MSG line from makemkvcon rip output.
+type ripMessage struct {
+	code    int
+	flags   int
+	message string
+	params  []string
+}
+
+func (m ripMessage) isError() bool   { return m.flags&msgFlagError != 0 }
+func (m ripMessage) isWarning() bool { return m.flags&msgFlagWarning != 0 }
+
+// parseRobotOutput parses makemkvcon robot-format output lines into a DiscInfo.
+func parseRobotOutput(lines []string) *DiscInfo {
+	info := &DiscInfo{
+		RawLines: lines,
+	}
+
+	// Collect title attributes keyed by title ID.
+	titles := make(map[int]*titleAttrs)
+
+	for _, line := range lines {
+		prefix, body, ok := splitRobotLine(line)
+		if !ok {
+			continue
+		}
+
+		switch prefix {
+		case "CINFO":
+			parseCINFO(body, info)
+		case "TINFO":
+			parseTINFO(body, titles)
+		case "SINFO":
+			parseSINFO(body, titles)
+		}
+	}
+
+	// Convert map to sorted slice.
+	if len(titles) > 0 {
+		maxID := 0
+		for id := range titles {
+			if id > maxID {
+				maxID = id
+			}
+		}
+		for id := 0; id <= maxID; id++ {
+			ta, ok := titles[id]
+			if !ok {
+				continue
+			}
+			tracks := make([]Track, 0, len(ta.trackOrder))
+			for _, sid := range ta.trackOrder {
+				if t, ok := ta.tracks[sid]; ok {
+					tracks = append(tracks, *t)
+				}
+			}
+			info.Titles = append(info.Titles, TitleInfo{
+				ID:           id,
+				Name:         ta.name,
+				Duration:     ta.duration,
+				Chapters:     ta.chapters,
+				SizeBytes:    ta.sizeBytes,
+				SegmentCount: ta.segmentCount,
+				SegmentMap:   ta.segmentMap,
+				Playlist:     ta.playlist,
+				Tracks:       tracks,
+			})
+		}
+	}
+
+	return info
+}
+
+// splitRobotLine splits "PREFIX:body" and returns (prefix, body, ok).
+func splitRobotLine(line string) (string, string, bool) {
+	idx := strings.IndexByte(line, ':')
+	if idx < 1 {
+		return "", "", false
+	}
+	return line[:idx], line[idx+1:], true
+}
+
+// parseCINFO handles CINFO lines: attrID,attrType,value
+func parseCINFO(body string, info *DiscInfo) {
+	fields := splitRobotFields(body, 3)
+	if len(fields) < 3 {
+		return
+	}
+	attrID, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return
+	}
+	value := unquote(fields[2])
+	if attrID == 2 {
+		info.Name = value
+	}
+}
+
+// parseTINFO handles TINFO lines: titleID,attrID,attrType,value
+func parseTINFO(body string, titles map[int]*titleAttrs) {
+	fields := splitRobotFields(body, 4)
+	if len(fields) < 4 {
+		return
+	}
+	titleID, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return
+	}
+	attrID, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return
+	}
+	value := unquote(fields[3])
+
+	ta := titles[titleID]
+	if ta == nil {
+		ta = &titleAttrs{}
+		titles[titleID] = ta
+	}
+
+	switch attrID {
+	case 2:
+		ta.name = value
+	case 8:
+		ta.chapters, _ = strconv.Atoi(value)
+	case 9:
+		ta.duration = parseDuration(value)
+	case 10:
+		ta.sizeBytes, _ = strconv.ParseInt(value, 10, 64)
+	case 16:
+		ta.playlist = value
+	case 25:
+		ta.segmentCount, _ = strconv.Atoi(value)
+	case 26:
+		ta.segmentMap = value
+	}
+}
+
+// parseSINFO parses SINFO (stream info) lines into Track structures on titleAttrs.
+// Format: titleID,streamID,attrID,reserved,"value"
+func parseSINFO(body string, titles map[int]*titleAttrs) {
+	fields := splitRobotFields(body, 5)
+	if len(fields) < 5 {
+		return
+	}
+	titleID, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return
+	}
+	streamID, err := strconv.Atoi(strings.TrimSpace(fields[1]))
+	if err != nil {
+		return
+	}
+	attrID, err := strconv.Atoi(strings.TrimSpace(fields[2]))
+	if err != nil {
+		return
+	}
+	value := unquote(fields[4])
+
+	ta := titles[titleID]
+	if ta == nil {
+		ta = &titleAttrs{}
+		titles[titleID] = ta
+	}
+
+	track := ta.ensureTrack(streamID)
+	if track.Attributes == nil {
+		track.Attributes = make(map[int]string)
+	}
+	if value != "" {
+		track.Attributes[attrID] = value
+	}
+
+	switch attrID {
+	case 1:
+		track.Type = classifyTrackType(value)
+	case 2:
+		if track.Name == "" {
+			track.Name = value
+		}
+	case 3, 28:
+		if track.Language == "" {
+			track.Language = strings.ToLower(value)
+		}
+	case 4, 29:
+		if track.LanguageName == "" {
+			track.LanguageName = value
+		}
+	case 5:
+		track.CodecID = value
+	case 6:
+		track.CodecShort = value
+	case 7:
+		track.CodecLong = value
+	case 13:
+		track.BitRate = value
+	case 14:
+		if ch, err := strconv.Atoi(value); err == nil && ch > 0 {
+			track.ChannelCount = ch
+		}
+	case 30:
+		track.Name = value
+	case 40:
+		track.ChannelLayout = value
+	}
+}
+
+// titleAttrs accumulates raw title attributes during parsing.
+type titleAttrs struct {
+	name         string
+	duration     int
+	chapters     int
+	sizeBytes    int64
+	segmentCount int
+	segmentMap   string
+	playlist     string
+	tracks       map[int]*Track
+	trackOrder   []int
+}
+
+// ensureTrack returns the track for the given stream ID, creating it if needed.
+func (ta *titleAttrs) ensureTrack(streamID int) *Track {
+	if ta.tracks == nil {
+		ta.tracks = make(map[int]*Track)
+	}
+	if track, ok := ta.tracks[streamID]; ok {
+		return track
+	}
+	track := &Track{StreamID: streamID, Type: TrackTypeUnknown}
+	track.Order = len(ta.trackOrder)
+	ta.tracks[streamID] = track
+	ta.trackOrder = append(ta.trackOrder, streamID)
+	return track
+}
+
+// parseMSG parses a MSG robot-protocol line.
+//
+// Format: MSG:code,flags,count,"message","format",param1,param2,...
+//
+// `count` is the number of format parameters that follow the "message"
+// and "format" fields. The leading fields are always present; extra
+// fields beyond count are ignored.
+func parseMSG(line string) (ripMessage, bool) {
+	prefix, body, ok := splitRobotLine(line)
+	if !ok || prefix != "MSG" {
+		return ripMessage{}, false
+	}
+	// Split aggressively; MSG lines can have many comma-separated params.
+	fields := splitRobotFields(body, 0)
+	if len(fields) < 4 {
+		return ripMessage{}, false
+	}
+	code, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return ripMessage{}, false
+	}
+	flags, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return ripMessage{}, false
+	}
+	// fields[2] = param count, fields[3] = "message"
+	msg := ripMessage{
+		code:    code,
+		flags:   flags,
+		message: unquote(fields[3]),
+	}
+	// Params begin after message (index 3) and format (index 4).
+	if len(fields) > 5 {
+		for _, f := range fields[5:] {
+			msg.params = append(msg.params, unquote(f))
+		}
+	}
+	return msg, true
+}
+
+// parsePRGV parses MakeMKV's current-operation, total, and maximum progress.
+// User-facing rip progress must use total; current resets for each sub-operation.
+func parsePRGV(line string, titleID int) (RipProgress, bool) {
+	prefix, body, ok := splitRobotLine(line)
+	if !ok || prefix != "PRGV" {
+		return RipProgress{}, false
+	}
+	fields := splitRobotFields(body, 3)
+	if len(fields) < 3 {
+		return RipProgress{}, false
+	}
+	current, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return RipProgress{}, false
+	}
+	total, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return RipProgress{}, false
+	}
+	max, err := strconv.Atoi(fields[2])
+	if err != nil || max <= 0 {
+		return RipProgress{}, false
+	}
+
+	return RipProgress{
+		TitleID: titleID,
+		Current: current,
+		Total:   total,
+		Percent: float64(total) / float64(max) * 100,
+	}, true
+}
+
+// parseDuration parses a duration string in "H:MM:SS" format and returns
+// the total number of seconds.
+func parseDuration(s string) int {
+	parts := strings.Split(s, ":")
+	if len(parts) != 3 {
+		return 0
+	}
+	h, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0
+	}
+	m, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0
+	}
+	sec, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return 0
+	}
+	return h*3600 + m*60 + sec
+}
+
+// splitRobotFields splits a comma-separated robot-protocol body, honoring
+// double-quoted values that may contain commas. A positive limit returns at
+// most that many fields, with the last field receiving the unsplit remainder.
+// A zero or negative limit returns all fields.
+func splitRobotFields(s string, limit int) []string {
+	if limit == 1 {
+		return []string{s}
+	}
+
+	var fields []string
+	var current strings.Builder
+	inQuote := false
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == '"':
+			inQuote = !inQuote
+			current.WriteByte(ch)
+		case ch == ',' && !inQuote:
+			fields = append(fields, current.String())
+			current.Reset()
+			if limit > 0 && len(fields) == limit-1 {
+				fields = append(fields, s[i+1:])
+				return fields
+			}
+		default:
+			current.WriteByte(ch)
+		}
+	}
+	fields = append(fields, current.String())
+	return fields
+}
+
+// unquote removes surrounding double quotes from a string.
+func unquote(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}

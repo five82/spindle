@@ -185,7 +185,7 @@ database read and dependency checks run locally.`,
 				queue.StageAnalysis, queue.StageSubtitling, queue.StageApply,
 				queue.StageOrganizing, queue.StageCompleted, queue.StageFailed,
 			} {
-				count := stats[stage]
+				count := stats[string(stage)]
 				if count > 0 || flagVerbose {
 					fmt.Printf("  %-24s %d\n", labelStyle(stage), count)
 					hasItems = true
@@ -204,15 +204,19 @@ database read and dependency checks run locally.`,
 // localStatus builds status while the daemon is stopped: queue counts come
 // from a direct read-only database read, dependency checks run locally.
 func localStatus() (*queueaccess.Status, error) {
-	stats := map[queue.Stage]int{}
+	stats := map[string]int{}
 	store, err := openQueueDB(cfg.QueueDBPath())
 	if err != nil {
 		return nil, err
 	}
 	if store != nil {
 		defer func() { _ = store.Close() }()
-		if stats, err = store.Stats(); err != nil {
+		stageStats, err := store.Stats()
+		if err != nil {
 			return nil, err
+		}
+		for stage, count := range stageStats {
+			stats[string(stage)] = count
 		}
 	}
 	return &queueaccess.Status{

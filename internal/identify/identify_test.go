@@ -1329,3 +1329,64 @@ func TestResolveMetadata_NoMatchIsFatal(t *testing.T) {
 			result.Envelope.Metadata.MediaType)
 	}
 }
+
+// resolveSearchYear is a pure phase over the accumulator, so the year
+// priority chain is testable without TMDB httptest scaffolding.
+func TestResolveSearchYear_PriorityChain(t *testing.T) {
+	tests := []struct {
+		name       string
+		discTitle  string
+		queryTitle string
+		bdInfo     *BDInfoResult
+		wantTitle  string
+		wantYear   int
+		wantSource string
+	}{
+		{
+			name:       "bdinfo wins and trailing year is still stripped",
+			discTitle:  "RUSH",
+			queryTitle: "Rush (2013)",
+			bdInfo:     &BDInfoResult{Year: "2013"},
+			wantTitle:  "Rush",
+			wantYear:   2013,
+			wantSource: "bdinfo",
+		},
+		{
+			name:       "resolved title year when bdinfo has none",
+			discTitle:  "MUNICH",
+			queryTitle: "Munich (2005)",
+			wantTitle:  "Munich",
+			wantYear:   2005,
+			wantSource: "resolved_title",
+		},
+		{
+			name:       "disc title year as last resort",
+			discTitle:  "Munich (2005)",
+			queryTitle: "Munich (2005)",
+			wantTitle:  "Munich",
+			wantYear:   2005,
+			wantSource: "resolved_title",
+		},
+		{
+			name:       "no year anywhere",
+			discTitle:  "MUNICH",
+			queryTitle: "Munich",
+			wantTitle:  "Munich",
+			wantYear:   0,
+			wantSource: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := &queue.Item{DiscTitle: tt.discTitle}
+			result := &IdentifyResult{QueryTitle: tt.queryTitle, BDInfo: tt.bdInfo}
+			resolveSearchYear(item, result, discardLogger())
+			if result.QueryTitle != tt.wantTitle {
+				t.Errorf("query title = %q, want %q", result.QueryTitle, tt.wantTitle)
+			}
+			if result.SearchYear != tt.wantYear || result.YearSource != tt.wantSource {
+				t.Errorf("year = %d from %q, want %d from %q", result.SearchYear, result.YearSource, tt.wantYear, tt.wantSource)
+			}
+		})
+	}
+}

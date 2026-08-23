@@ -14,7 +14,6 @@ import (
 
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/queue"
-	"github.com/five82/spindle/internal/queueops"
 )
 
 // Server is the HTTP API server.
@@ -237,7 +236,7 @@ func (s *Server) handleQueueRetryEpisode(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "id and episode_key are required")
 		return
 	}
-	result, err := queueops.RetryEpisode(s.store, body.ID, body.EpisodeKey)
+	result, err := retryEpisode(s.store, body.ID, body.EpisodeKey)
 	if err != nil {
 		s.logger.Error("retry episode", "error", err, "id", body.ID, "episode_key", body.EpisodeKey)
 		writeError(w, http.StatusInternalServerError, "failed to retry episode")

@@ -20,12 +20,6 @@ const (
 	// tvGrossOutlierRatio drops titles shorter than this fraction of the
 	// duration-weighted median candidate: menus, trailers, credit reels.
 	tvGrossOutlierRatio = 0.4
-	// tvDoubleMinRatio/tvDoubleMaxRatio describe a double-length episode
-	// relative to the median single episode. Used only to order a probable
-	// opening double first (contentid's opening-double inference reads
-	// episode order), never to exclude.
-	tvDoubleMinRatio = 1.80
-	tvDoubleMaxRatio = 2.40
 	// tvRuntimeToleranceRatio/tvRuntimeToleranceSec bound how far a title may
 	// deviate from the nearest TMDB expected episode runtime (or adjacent
 	// double-episode sum) before an expectation-backed disc drops it. The
@@ -482,6 +476,9 @@ func orderSelectedTitles(alive []tvTitleCandidate, decisions []tvTitleDecision) 
 	return titles
 }
 
+// looksDoubleLength is used only to order a probable opening double first
+// (contentid's opening-double inference reads episode order), never to
+// exclude. The ratio band lives in ripspec so both stages agree on it.
 func looksDoubleLength(candidate tvTitleCandidate, alive []tvTitleCandidate) bool {
 	rest := make([]int, 0, len(alive)-1)
 	for _, other := range alive {
@@ -490,16 +487,7 @@ func looksDoubleLength(candidate tvTitleCandidate, alive []tvTitleCandidate) boo
 		}
 		rest = append(rest, other.title.Duration)
 	}
-	if len(rest) < 2 {
-		return false
-	}
-	slices.Sort(rest)
-	median := rest[len(rest)/2]
-	if median <= 0 {
-		return false
-	}
-	duration := candidate.title.Duration
-	return duration >= int(float64(median)*tvDoubleMinRatio) && duration <= int(float64(median)*tvDoubleMaxRatio)
+	return ripspec.IsDoubleLength(candidate.title.Duration, rest)
 }
 
 func longestCandidate(candidates []tvTitleCandidate) tvTitleCandidate {

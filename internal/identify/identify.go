@@ -218,64 +218,85 @@ func (h *Handler) scanDisc(ctx context.Context, item *queue.Item, logger *slog.L
 }
 
 // resolveMetadata is the drive-free identification phase (task:
-// resolve_metadata). It resolves the search title, consults the disc ID
-// cache, searches TMDB, and builds the RipSpec envelope onto the scan
-// result. It must not touch the optical drive.
+// resolve_metadata). It must not touch the optical drive. Each step is a
+// small phase mutating the shared IdentifyResult accumulator; the sequence
+// here is the whole pipeline.
 func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result *IdentifyResult, logger *slog.Logger) error {
-	// Step 4: Resolve title (needed before cache check for validation).
+	h.resolveSearchTitle(item, result, logger)
+	if h.applyCachedIdentity(ctx, item, result, logger) {
+		return nil
+	}
+	resolveSearchYear(item, result, logger)
+	if err := h.searchTMDBWithRetry(ctx, result, logger); err != nil {
+		return err
+	}
+	h.concludeMatch(ctx, item, result, logger)
+	return nil
+}
+
+// resolveSearchTitle resolves the raw title through the priority chain,
+// cleans it into a TMDB query, and detects the media type hint used for
+// both cache validation and search routing.
+func (h *Handler) resolveSearchTitle(item *queue.Item, result *IdentifyResult, logger *slog.Logger) {
 	result.RawTitle, result.TitleSource = h.resolveTitle(item, result.DiscInfo, result.BDInfo)
 	result.QueryTitle = CleanQueryTitle(result.RawTitle)
+	result.MediaHint = detectMediaTypeHint(result.RawTitle)
 	logger.Info("title resolved for TMDB search",
 		"decision_type", logs.DecisionTitleResolution,
 		"decision_result", result.TitleSource,
 		"decision_reason", result.QueryTitle,
 		"raw_title", result.RawTitle,
 	)
+}
 
-	// Detect media type hint once; used for both cache validation and TMDB search routing.
-	mediaHint := detectMediaTypeHint(result.RawTitle)
-	result.MediaHint = mediaHint
-
+// applyCachedIdentity checks the disc ID cache and, on a valid hit, builds
+// the envelope from the cached entry (skipping the TMDB search, not the
+// scan) and reports true. Cached media type is validated against fresh disc
+// metadata so stale entries never override unambiguous disc signals (e.g.,
+// TV hint vs cached movie).
+func (h *Handler) applyCachedIdentity(ctx context.Context, item *queue.Item, result *IdentifyResult, logger *slog.Logger) bool {
 	discID := ""
 	if result.BDInfo != nil {
 		discID = strings.TrimSpace(result.BDInfo.DiscID)
 	}
-
-	// Step 5: Check disc ID cache (skips TMDB search and KeyDB lookup, not the scan).
-	// Validate cached media type against fresh disc metadata to prevent stale entries
-	// from overriding unambiguous disc signals (e.g., TV hint vs cached movie).
-	if h.discIDCache != nil && discID != "" {
-		if entry := h.discIDCache.Lookup(discID); entry != nil {
-			if mediaHint == "tv" && entry.MediaType == "movie" {
-				logger.Warn("disc ID cache invalidated: TV hint contradicts cached movie type",
-					"decision_type", logs.DecisionDiscIDCache,
-					"decision_result", "invalidated",
-					"decision_reason", fmt.Sprintf("raw_title=%q has TV hint but cache says movie", result.RawTitle),
-					"disc_id", discID,
-				)
-				_ = h.discIDCache.Remove(discID)
-				// Fall through to full identification.
-			} else {
-				canonTitle := entry.Title
-				if entry.Year != "" {
-					canonTitle = fmt.Sprintf("%s (%s)", canonTitle, entry.Year)
-				}
-				item.DiscTitle = canonTitle
-				logger.Info("disc title updated from cache",
-					"decision_type", logs.DecisionTitleSource,
-					"decision_result", "updated",
-					"decision_reason", "disc_id_cache_entry",
-					"disc_id", discID,
-				)
-				result.Envelope = h.buildEnvelopeFromCache(ctx, logger, item, entry, result.DiscInfo, result.DiscSource)
-				return nil
-			}
-		}
+	if h.discIDCache == nil || discID == "" {
+		return false
+	}
+	entry := h.discIDCache.Lookup(discID)
+	if entry == nil {
+		return false
+	}
+	if result.MediaHint == "tv" && entry.MediaType == "movie" {
+		logger.Warn("disc ID cache invalidated: TV hint contradicts cached movie type",
+			"decision_type", logs.DecisionDiscIDCache,
+			"decision_result", "invalidated",
+			"decision_reason", fmt.Sprintf("raw_title=%q has TV hint but cache says movie", result.RawTitle),
+			"disc_id", discID,
+		)
+		_ = h.discIDCache.Remove(discID)
+		return false // Fall through to full identification.
 	}
 
-	// Step 6: Extract year and clean title for TMDB search.
-	// Always remove a trailing year from the query, even when BDInfo supplies
-	// the year separately. Year priority: BDInfo > resolved title > item disc title.
+	canonTitle := entry.Title
+	if entry.Year != "" {
+		canonTitle = fmt.Sprintf("%s (%s)", canonTitle, entry.Year)
+	}
+	item.DiscTitle = canonTitle
+	logger.Info("disc title updated from cache",
+		"decision_type", logs.DecisionTitleSource,
+		"decision_result", "updated",
+		"decision_reason", "disc_id_cache_entry",
+		"disc_id", discID,
+	)
+	result.Envelope = h.buildEnvelopeFromCache(ctx, logger, item, entry, result.DiscInfo, result.DiscSource)
+	return true
+}
+
+// resolveSearchYear extracts the search year and strips it from the query
+// title. A trailing year is always removed from the query, even when BDInfo
+// supplies the year separately. Year priority: BDInfo > resolved title >
+// item disc title.
+func resolveSearchYear(item *queue.Item, result *IdentifyResult, logger *slog.Logger) {
 	cleanedQueryTitle, queryYear := splitTitleYear(result.QueryTitle)
 	result.QueryTitle = cleanedQueryTitle
 	if result.BDInfo != nil && result.BDInfo.Year != "" {
@@ -305,14 +326,16 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 			"decision_reason", fmt.Sprintf("year=%d", result.SearchYear),
 		)
 	}
+}
 
-	if err := h.searchTMDB(ctx, mediaHint, result, logger); err != nil {
+// searchTMDBWithRetry runs the TMDB search and, when nothing matches,
+// retries once on a narrowed title. Disc labels append edition and cut
+// descriptors TMDB does not index, so "Mary Poppins 50th Anniversary
+// Edition" still resolves rather than degrading the whole item.
+func (h *Handler) searchTMDBWithRetry(ctx context.Context, result *IdentifyResult, logger *slog.Logger) error {
+	if err := h.searchTMDB(ctx, result, logger); err != nil {
 		return err
 	}
-
-	// Disc labels append edition and cut descriptors TMDB does not index. Retry
-	// once on the narrowed title so "Mary Poppins 50th Anniversary Edition"
-	// still resolves rather than degrading the whole item.
 	if result.Best == nil {
 		if narrowed := NarrowQueryTitle(result.QueryTitle); narrowed != result.QueryTitle {
 			logger.Info("retrying TMDB search on narrowed title",
@@ -321,12 +344,18 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 				"decision_reason", fmt.Sprintf("edition suffix stripped: %q -> %q", result.QueryTitle, narrowed),
 			)
 			result.QueryTitle = narrowed
-			if err := h.searchTMDB(ctx, mediaHint, result, logger); err != nil {
+			if err := h.searchTMDB(ctx, result, logger); err != nil {
 				return err
 			}
 		}
 	}
+	return nil
+}
 
+// concludeMatch turns the search outcome into an envelope: a confident
+// match yields the full envelope and a canonical disc title, while no match
+// yields the review fallback envelope and marks the result fatal.
+func (h *Handler) concludeMatch(ctx context.Context, item *queue.Item, result *IdentifyResult, logger *slog.Logger) {
 	if result.Best == nil {
 		// Distinguish an empty result set from candidates that all scored below
 		// the acceptance threshold: they point at different causes (query
@@ -346,7 +375,7 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 		result.Envelope = h.buildFallbackEnvelope(ctx, logger, item, result.DiscInfo)
 		result.Fatal = true
 		result.FatalMsg = "no TMDB match found for: " + result.QueryTitle
-		return nil
+		return
 	}
 
 	logger.Info("TMDB match found",
@@ -366,11 +395,7 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 		)
 	}
 	item.DiscTitle = canonicalTitle(*result.Best, result.MediaType, item.DiscTitle, result.DiscInfo)
-
-	// Step 6: Build RipSpec envelope.
 	result.Envelope = h.buildEnvelope(ctx, logger, item, result.DiscInfo, result.Best, result.MediaType, result.DiscSource)
-
-	return nil
 }
 
 // Run executes the identification stage.
@@ -535,12 +560,13 @@ func CleanQueryTitle(title string) string {
 	return cleaned
 }
 
-// searchTMDB runs one search attempt for result.QueryTitle, routing by media
-// hint, and sets result.AllResults and result.Best. TV-hinted searches fall
-// back to a multi search when the TV search finds nothing acceptable.
-func (h *Handler) searchTMDB(ctx context.Context, mediaHint string, result *IdentifyResult, logger *slog.Logger) error {
+// searchTMDB runs one search attempt for result.QueryTitle, routing by
+// result.MediaHint, and sets result.AllResults and result.Best. TV-hinted
+// searches fall back to a multi search when the TV search finds nothing
+// acceptable.
+func (h *Handler) searchTMDB(ctx context.Context, result *IdentifyResult, logger *slog.Logger) error {
 	var err error
-	if mediaHint == "tv" {
+	if result.MediaHint == "tv" {
 		logger.Info("media type hint detected",
 			"decision_type", logs.DecisionTMDBSearch,
 			"decision_result", "tv",

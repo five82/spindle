@@ -13,7 +13,6 @@ import (
 	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/queueaccess"
-	"github.com/five82/spindle/internal/queueops"
 )
 
 // printTaskLines renders per-task status lines: running tasks show percent
@@ -320,13 +319,13 @@ func newQueueRetryCmd() *cobra.Command {
 					return err
 				}
 				switch result {
-				case queueops.RetryResultRetried:
+				case httpapi.RetryResultRetried:
 					fmt.Println(successStyle(fmt.Sprintf("Retried episode %s on item %d", episode, id)))
-				case queueops.RetryResultNotFound:
+				case httpapi.RetryResultNotFound:
 					return fmt.Errorf("item %d not found", id)
-				case queueops.RetryResultNotFailed:
+				case httpapi.RetryResultNotFailed:
 					return fmt.Errorf("item %d is not in failed state", id)
-				case queueops.RetryResultEpisodeNotFound:
+				case httpapi.RetryResultEpisodeNotFound:
 					return fmt.Errorf("episode %s not found in item %d", episode, id)
 				default:
 					return fmt.Errorf("unexpected retry result: %s", result)
