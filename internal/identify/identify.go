@@ -274,19 +274,19 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 	}
 
 	// Step 6: Extract year and clean title for TMDB search.
-	// Year priority: BDInfo > resolved title > item disc title.
+	// Always remove a trailing year from the query, even when BDInfo supplies
+	// the year separately. Year priority: BDInfo > resolved title > item disc title.
+	cleanedQueryTitle, queryYear := splitTitleYear(result.QueryTitle)
+	result.QueryTitle = cleanedQueryTitle
 	if result.BDInfo != nil && result.BDInfo.Year != "" {
 		if y, err := strconv.Atoi(result.BDInfo.Year); err == nil {
 			result.SearchYear = y
 			result.YearSource = "bdinfo"
 		}
 	}
-	if result.SearchYear == 0 {
-		if cleaned, y := splitTitleYear(result.QueryTitle); y > 0 {
-			result.SearchYear = y
-			result.QueryTitle = cleaned
-			result.YearSource = "resolved_title"
-		}
+	if result.SearchYear == 0 && queryYear > 0 {
+		result.SearchYear = queryYear
+		result.YearSource = "resolved_title"
 	}
 	if result.SearchYear == 0 {
 		if cleaned, y := splitTitleYear(item.DiscTitle); y > 0 {

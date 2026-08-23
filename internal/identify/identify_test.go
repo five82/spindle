@@ -1196,6 +1196,49 @@ func TestCreateEpisodePlaceholders_TNGLikeSelection(t *testing.T) {
 	}
 }
 
+func TestResolveMetadata_StripsQueryYearWhenBDInfoSuppliesYear(t *testing.T) {
+	var queries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("query"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"results":[{"id":96721,"title":"Rush",`+
+			`"media_type":"movie","release_date":"2013-09-02",`+
+			`"vote_average":7.7,"vote_count":7979}]}`)
+	}))
+	defer srv.Close()
+
+	h := &Handler{
+		cfg:        &config.Config{},
+		tmdbClient: tmdb.New("test-key", srv.URL, "en-US", discardLogger()),
+	}
+	item := &queue.Item{DiscTitle: "RUSH"}
+	result := &IdentifyResult{
+		BDInfo:     &BDInfoResult{DiscName: "Rush (2013)", Year: "2013"},
+		DiscInfo:   &makemkv.DiscInfo{Name: "Rush (2013)"},
+		DiscSource: "bluray",
+	}
+
+	if err := h.resolveMetadata(context.Background(), item, result, discardLogger()); err != nil {
+		t.Fatalf("resolveMetadata: %v", err)
+	}
+
+	if result.Fatal {
+		t.Fatalf("expected exact title and year match, got fatal: %s", result.FatalMsg)
+	}
+	if result.Best == nil || result.Best.ID != 96721 {
+		t.Fatalf("expected TMDB id 96721, got %+v", result.Best)
+	}
+	if result.QueryTitle != "Rush" {
+		t.Errorf("query title = %q, want %q", result.QueryTitle, "Rush")
+	}
+	if result.SearchYear != 2013 || result.YearSource != "bdinfo" {
+		t.Errorf("search year = %d from %q, want 2013 from bdinfo", result.SearchYear, result.YearSource)
+	}
+	if want := []string{"Rush"}; !reflect.DeepEqual(queries, want) {
+		t.Errorf("queries = %v, want %v", queries, want)
+	}
+}
+
 // TestResolveMetadata_NarrowedRetry covers the Mary Poppins failure: bd_info
 // reports an edition-suffixed disc name, TMDB indexes only the bare title, and
 // the first search comes back empty. The retry must strip the suffix and match,
