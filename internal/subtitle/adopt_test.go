@@ -289,8 +289,7 @@ func TestPlanSubtitleJobsSkipsCompletedAndSkippedRecords(t *testing.T) {
 		{EpisodeKey: "s01e01", Source: "none", ValidationResult: "skipped"},
 	}
 
-	h := &Handler{cfg: &config.Config{}}
-	jobs, skipped := h.planSubtitleJobs(sess)
+	jobs, skipped := planSubtitleJobs(sess)
 	if len(jobs) != 1 || jobs[0].Key != "s01e02" {
 		t.Fatalf("jobs = %+v", jobs)
 	}

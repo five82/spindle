@@ -12,6 +12,7 @@ import (
 	"github.com/five82/spindle/internal/fileutil"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/srtutil"
 	"github.com/five82/spindle/internal/stage"
 )
 
@@ -174,7 +175,7 @@ func (h *Handler) applySubtitles(ctx context.Context, sess *stage.Session, key, 
 
 	// Place the sidecar next to the encoded file so the organizer's sidecar
 	// glob finds it (and Jellyfin when muxing is disabled).
-	sidecarPath := DisplaySubtitlePath(encodedPath, record.Language)
+	sidecarPath := srtutil.DisplaySubtitlePath(encodedPath, record.Language)
 	if err := fileutil.CopyFile(record.SubtitlePath, sidecarPath); err != nil {
 		return fmt.Errorf("place subtitle sidecar %s: %w", key, err)
 	}

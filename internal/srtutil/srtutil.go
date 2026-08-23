@@ -1,16 +1,31 @@
 // Package srtutil provides a minimal SRT (SubRip) parser/formatter shared by
-// the packages that need to read or write subtitle cues — subtitle filtering,
+// the packages that need to read or write subtitle cues — subtitle adoption,
 // WhisperX transcription, OpenSubtitles reference comparison, and content-ID
-// fingerprinting. It intentionally does not do tag/HTML stripping; callers
-// that need that should run opensubtitles.CleanSRT ahead of Parse.
+// fingerprinting. It intentionally does not do tag/HTML stripping; display
+// cleanup lives in the subtitle package and fingerprint normalization in
+// opensubtitles.CleanSRT.
 package srtutil
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/five82/spindle/internal/language"
 )
+
+// DisplaySubtitlePath derives the sidecar SRT path for a video path and
+// subtitle language, e.g. movie.mkv -> movie.en.srt.
+func DisplaySubtitlePath(videoPath, subtitleLanguage string) string {
+	base := strings.TrimSuffix(videoPath, filepath.Ext(videoPath))
+	lang := language.ToISO2(subtitleLanguage)
+	if lang == "" {
+		lang = "en"
+	}
+	return base + "." + lang + ".srt"
+}
 
 // Cue is a single SRT cue.
 type Cue struct {

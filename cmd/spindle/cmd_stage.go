@@ -21,6 +21,7 @@ import (
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/srtutil"
 	"github.com/five82/spindle/internal/subtitle"
 	"github.com/five82/spindle/internal/tmdb"
 	"github.com/five82/spindle/internal/transcription"
@@ -387,7 +388,7 @@ func adoptStandaloneSubtitle(ctx context.Context, handler *subtitle.Handler, p s
 	}
 
 	if p.sidecarMode {
-		finalSidecarPath := apply.DisplaySubtitlePath(filepath.Join(outputDir, filepath.Base(file)), result.Language)
+		finalSidecarPath := srtutil.DisplaySubtitlePath(filepath.Join(outputDir, filepath.Base(file)), result.Language)
 		data, err := os.ReadFile(result.SubtitlePath)
 		if err != nil {
 			return fmt.Errorf("read adopted srt: %w", err)

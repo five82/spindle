@@ -25,16 +25,6 @@ type MuxRequest struct {
 	ReplaceExisting       bool
 }
 
-// DisplaySubtitlePath returns the standard sidecar path for a video.
-func DisplaySubtitlePath(videoPath, subtitleLanguage string) string {
-	base := strings.TrimSuffix(videoPath, filepath.Ext(videoPath))
-	lang := language.ToISO2(subtitleLanguage)
-	if lang == "" {
-		lang = "en"
-	}
-	return base + "." + lang + ".srt"
-}
-
 func buildSubtitleMuxArgs(outputPath, videoPath string, track MuxTrack, replaceExisting bool) []string {
 	args := []string{"-o", outputPath}
 	if replaceExisting {

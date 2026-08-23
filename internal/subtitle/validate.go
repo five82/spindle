@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/five82/spindle/internal/srtutil"
@@ -21,6 +22,11 @@ const (
 	minSubtitleCueGap       = 2.0 / 24.0 // two frames at 24 fps
 	unbalancedLineDelta     = 16
 )
+
+// subtitleDurationSlackSeconds is how far cues may run past the end of the
+// video before duration_mismatch flags them; the adoption gate applies the
+// same slack when rejecting candidates outright.
+const subtitleDurationSlackSeconds = 8.0
 
 type validationResult struct {
 	Issues       []string
@@ -68,7 +74,7 @@ func validateCuesDetailed(cues []srtutil.Cue, videoSeconds float64) validationRe
 	}
 
 	lastEnd := cues[len(cues)-1].End
-	if lastEnd > videoSeconds+8 {
+	if lastEnd > videoSeconds+subtitleDurationSlackSeconds {
 		addIssue("duration_mismatch")
 	}
 	if videoSeconds > 60 {
@@ -112,10 +118,18 @@ func validateCuesDetailed(cues []srtutil.Cue, videoSeconds float64) validationRe
 		}
 	}
 
-	return validationResult{Issues: issues, ReviewIssues: subtitleReviewIssues(issues, severe, stats), SevereIssues: severe, Stats: stats}
+	return validationResult{Issues: issues, ReviewIssues: subtitleReviewIssues(issues, severe), SevereIssues: severe, Stats: stats}
 }
 
-func subtitleReviewIssues(issues, severe []string, stats subtitleQCStats) []string {
+// subtitleReviewRequired lists the non-severe issues that route the episode
+// to review; everything else is recorded as an observation only.
+var subtitleReviewRequired = map[string]bool{
+	"duration_mismatch": true,
+	"sparse_subtitles":  true,
+	"late_first_cue":    true,
+}
+
+func subtitleReviewIssues(issues, severe []string) []string {
 	if len(issues) == 0 {
 		return nil
 	}
@@ -125,22 +139,11 @@ func subtitleReviewIssues(issues, severe []string, stats subtitleQCStats) []stri
 	}
 	var review []string
 	for _, issue := range issues {
-		if severeSet[issue] || subtitleIssueRequiresReview(issue, stats) {
+		if severeSet[issue] || subtitleReviewRequired[issue] {
 			review = append(review, issue)
 		}
 	}
 	return review
-}
-
-func subtitleIssueRequiresReview(issue string, _ subtitleQCStats) bool {
-	switch issue {
-	case "duration_mismatch", "sparse_subtitles", "late_first_cue":
-		return true
-	case "high_reading_speed", "short_cue_duration", "long_cue_duration", "too_many_lines", "line_too_long", "unbalanced_line_breaks":
-		return false
-	default:
-		return false
-	}
 }
 
 func calculateSubtitleQCStats(cues []srtutil.Cue) subtitleQCStats {
@@ -271,4 +274,36 @@ func isLowInformationLongCueMetrics(duration float64, lexicalWords, textRunes in
 		return true
 	}
 	return false
+}
+
+// lexicalTokens splits text into lowercased words, keeping intra-word
+// apostrophes and hyphens, for the low-information word count.
+func lexicalTokens(text string) []string {
+	var (
+		tokens []string
+		buf    []rune
+	)
+	flush := func() {
+		if len(buf) == 0 {
+			return
+		}
+		tokens = append(tokens, string(buf))
+		buf = buf[:0]
+	}
+	for _, r := range text {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			buf = append(buf, unicode.ToLower(r))
+		case (r == '\'' || r == '-') && len(buf) > 0:
+			buf = append(buf, r)
+		default:
+			flush()
+		}
+	}
+	flush()
+	return tokens
+}
+
+func lexicalWordCount(text string) int {
+	return len(lexicalTokens(text))
 }

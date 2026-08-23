@@ -40,9 +40,6 @@ const (
 	// a candidate whose text already proves it is this title's subtitle may
 	// have its timing repaired and re-verified.
 	adoptRefineMinSimilarity = 0.75
-	// adoptDurationSlackSeconds mirrors the validator's duration_mismatch
-	// slack for cues running past the end of the video.
-	adoptDurationSlackSeconds = 8.0
 )
 
 // adoptionCheck reports the verification-gate metrics for one candidate.
@@ -126,7 +123,9 @@ func verifyAdoptionCandidate(candidate, reference []srtutil.Cue, videoSeconds fl
 		check.FailureReason = fmt.Sprintf("candidate ends %.0fs before the spoken reference; exceeds %ds", check.ReferenceTailGap, adoptMaxReferenceTailGapSeconds)
 		return check
 	}
-	if videoSeconds > 0 && candidate[len(candidate)-1].End > videoSeconds+adoptDurationSlackSeconds {
+	// Shares the validator's duration_mismatch slack for cues running past
+	// the end of the video.
+	if videoSeconds > 0 && candidate[len(candidate)-1].End > videoSeconds+subtitleDurationSlackSeconds {
 		check.FailureReason = fmt.Sprintf("last cue at %.0fs runs past the %.0fs video", candidate[len(candidate)-1].End, videoSeconds)
 		return check
 	}

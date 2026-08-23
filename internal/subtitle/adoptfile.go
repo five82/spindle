@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/five82/spindle/internal/logs"
-	"github.com/five82/spindle/internal/srtutil"
 	"github.com/five82/spindle/internal/transcription"
 )
 
@@ -102,53 +101,25 @@ func (h *Handler) AdoptForFile(ctx context.Context, req AdoptFileRequest) (*Adop
 			req.OnTranscribeComplete(transcript)
 		}
 	}
-	referenceCues, err := srtutil.ParseFile(transcript.SRTPath)
+	adopt, err := buildAdoptContext(ctx, logger, transcript, req.VideoPath, req.WorkDir)
 	if err != nil {
-		return nil, fmt.Errorf("read sync reference transcript: %w", err)
+		return nil, err
 	}
-	videoSeconds, _ := resolveSubtitleVideoDuration(ctx, logger, req.VideoPath, transcript.Duration)
 
-	adopt := adoptContext{
-		ReferenceSRTPath: transcript.SRTPath,
-		ReferenceCues:    referenceCues,
-		ReferenceWords:   loadReferenceWords(logger, transcript.JSONPath),
-		VideoSeconds:     videoSeconds,
-		WorkDir:          req.WorkDir,
+	adopted, rejected, err := h.adoptFirstCandidate(ctx, logger, candidates, adopt, filepath.Join(req.WorkDir, filepath.Base(req.VideoPath)))
+	if err != nil {
+		return nil, err
 	}
-	var rejected []string
-	for _, candidate := range candidates {
-		eval, err := h.evaluateCandidate(ctx, candidate, adopt)
-		if err != nil {
-			return nil, err
-		}
-		if eval.RejectReason != "" {
-			logger.Info("subtitle candidate rejected",
-				"decision_type", logs.DecisionSubtitleSource,
-				"decision_result", "candidate_rejected",
-				"decision_reason", eval.RejectReason,
-				"candidate", candidate.label(),
-			)
-			rejected = append(rejected, candidate.label()+": "+eval.RejectReason)
-			continue
-		}
-
-		language := candidate.Language
-		if language == "" {
-			language = "en"
-		}
-		displayPath := displaySubtitlePath(filepath.Join(req.WorkDir, filepath.Base(req.VideoPath)), language)
-		if err := writeSRTAtomic(displayPath, eval.Cues); err != nil {
-			return nil, fmt.Errorf("write adopted subtitle: %w", err)
-		}
-		return &AdoptFileResult{
-			SubtitlePath:       displayPath,
-			Language:           language,
-			Candidate:          candidate.label(),
-			Segments:           len(eval.Cues),
-			Validation:         subtitleValidationResult(eval.Validation),
-			GateMetrics:        eval.Check.Metrics(),
-			RejectedCandidates: rejected,
-		}, nil
+	if adopted == nil {
+		return nil, fmt.Errorf("no downloaded subtitle passed verification:\n  %s", strings.Join(rejected, "\n  "))
 	}
-	return nil, fmt.Errorf("no downloaded subtitle passed verification:\n  %s", strings.Join(rejected, "\n  "))
+	return &AdoptFileResult{
+		SubtitlePath:       adopted.DisplayPath,
+		Language:           adopted.Language,
+		Candidate:          adopted.Candidate.label(),
+		Segments:           adopted.Segments,
+		Validation:         subtitleValidationResult(adopted.Validation),
+		GateMetrics:        adopted.Check.Metrics(),
+		RejectedCandidates: rejected,
+	}, nil
 }

@@ -18,8 +18,7 @@ import (
 func TestStartSubtitleJobLogsRippedInput(t *testing.T) {
 	var output bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&output, nil))
-	h := &Handler{}
-	h.startSubtitleJob(&stage.Session{Logger: logger}, stage.AssetJob{
+	startSubtitleJob(&stage.Session{Logger: logger}, stage.AssetJob{
 		Key:           "s01_001",
 		Input:         ripspec.Asset{Path: "/staging/ripped/episode.mkv"},
 		ProgressTotal: 1,
