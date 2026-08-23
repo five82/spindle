@@ -27,7 +27,7 @@ go install github.com/five82/spindle/cmd/spindle@latest
 
 Requirements:
 
-- Go 1.26.6+
+- Go 1.27.0+
 - MakeMKV (`makemkvcon`)
 - FFmpeg and ffprobe
 - mkvmerge for the default subtitle muxing behavior
