@@ -31,21 +31,9 @@ func New(cfg *config.Config) *Handler {
 // Run executes the apply stage.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	logger := sess.Logger
-	logger.Info("apply stage started", "event_type", "stage_start", "stage", "apply")
 	env := sess.Env
 
-	keys := env.AssetKeys()
-	type encodedInput struct {
-		key  string
-		path string
-	}
-	var inputs []encodedInput
-	for _, key := range keys {
-		asset, ok := env.Assets.FindAsset(ripspec.AssetKindEncoded, key)
-		if ok && asset.IsCompleted() {
-			inputs = append(inputs, encodedInput{key: key, path: asset.Path})
-		}
-	}
+	inputs := sess.CompletedAssetJobs(ripspec.AssetKindEncoded)
 	if len(inputs) == 0 {
 		return fmt.Errorf("no encoded assets available for apply")
 	}
@@ -57,7 +45,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	// Phase 1: per-file audio refinement and commentary disposition, using
 	// the episode's own commentary indices from the analysis stage.
-	_ = sess.Progress(10, "Phase 1/3 - Audio refinement")
+	sess.Progress(10, "Phase 1/3 - Audio refinement")
 	logger.Info("Phase 1/3 - Audio refinement")
 	var aggregateComms []ripspec.CommentaryTrackRef
 	for i, in := range inputs {
@@ -65,7 +53,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			return ctx.Err()
 		}
 		var comms []ripspec.CommentaryTrackRef
-		epAnalysis := analysisData.EpisodeAnalysis(in.key)
+		epAnalysis := analysisData.EpisodeAnalysis(in.Key)
 		if epAnalysis != nil {
 			comms = epAnalysis.CommentaryTracks
 		} else if len(analysisData.PerEpisode) == 0 {
@@ -78,18 +66,18 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			keep = append(keep, c.Index)
 		}
 
-		refinement, refErr := refineAudioTargets(ctx, logger, []string{in.path}, keep)
+		refinement, refErr := refineAudioTargets(ctx, logger, []string{in.Input.Path}, keep)
 		if refErr != nil {
 			logger.Warn("audio refinement failed",
 				"event_type", "audio_refinement_error",
 				"error_hint", refErr.Error(),
 				"impact", "audio refinement skipped, proceeding with all tracks",
-				"episode_key", in.key,
+				"episode_key", in.Key,
 			)
 			refinement = nil
 		}
 
-		primary, primaryLabel, remapped, err := applyPostRefinementAudio(ctx, logger, in.path, refinement, comms)
+		primary, primaryLabel, remapped, err := applyPostRefinementAudio(ctx, logger, in.Input.Path, refinement, comms)
 		if err != nil {
 			return err
 		}
@@ -110,11 +98,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	analysisData.CommentaryTracks = aggregateComms
 
 	// Phase 2: duration validation across all encoded outputs.
-	_ = sess.Progress(45, "Phase 2/3 - Audio validation")
+	sess.Progress(45, "Phase 2/3 - Audio validation")
 	logger.Info("Phase 2/3 - Audio validation")
 	var allPaths []string
 	for _, in := range inputs {
-		allPaths = append(allPaths, in.path)
+		allPaths = append(allPaths, in.Input.Path)
 	}
 	if err := validateAudioTargetDurations(ctx, allPaths); err != nil {
 		reason := "audio_validation: " + err.Error()
@@ -133,14 +121,14 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	// Phase 3: subtitle placement and muxing from the analysis branch's
 	// generated SRTs.
-	_ = sess.Progress(75, "Phase 3/3 - Subtitle muxing")
+	sess.Progress(75, "Phase 3/3 - Subtitle muxing")
 	logger.Info("Phase 3/3 - Subtitle muxing")
 	if h.cfg.Subtitles.Enabled {
 		for _, in := range inputs {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if err := h.applySubtitles(ctx, sess, in.key, in.path); err != nil {
+			if err := h.applySubtitles(ctx, sess, in.Key, in.Input.Path); err != nil {
 				return err
 			}
 		}
@@ -153,20 +141,8 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	}
 
 	env.Attributes.AudioAnalysis = analysisData
-	_ = sess.Progress(95, "Phase 3/3 - Persisting results")
-	if err := sess.Save(); err != nil {
-		return err
-	}
-
-	logger.Info("apply stage completed",
-		"event_type", "stage_complete",
-		"stage", "apply",
-		"primary_audio_index", analysisData.PrimaryTrack.Index,
-		"primary_audio", analysisData.PrimaryDescription,
-		"commentary_tracks", len(analysisData.CommentaryTracks),
-		"encoded_assets", len(inputs),
-	)
-	return nil
+	sess.Progress(95, "Phase 3/3 - Persisting results")
+	return sess.Save()
 }
 
 // applySubtitles places the episode's generated SRT next to the encoded

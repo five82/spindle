@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/queue"
 )
 
@@ -69,9 +70,17 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 		}
 	}
 
+	// The executor owns the stage_start/stage_complete lifecycle events:
+	// exactly one of each per run, for scheduled and OneShot execution alike.
+	// Handlers must not emit them.
+	runLogger := logger.With("item_id", item.ID)
 	sess, err := NewSession(ctx, opts.Store, item, opts.Task)
 	if err == nil {
-		sess.Logger = logger.With("item_id", item.ID)
+		sess.Logger = runLogger
+		runLogger.Debug("stage started",
+			"event_type", "stage_start",
+			"stage", stageName,
+		)
 		err = opts.Handler.Run(ctx, sess)
 	}
 
@@ -122,6 +131,12 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 			return res, err
 		}
 	}
+
+	runLogger.Debug("stage completed",
+		"event_type", "stage_complete",
+		"stage", stageName,
+		"stage_duration", logs.FormatDuration(time.Since(start)),
+	)
 
 	if opts.OneShot {
 		if updateErr := opts.Store.ClearInProgress(item); updateErr != nil {

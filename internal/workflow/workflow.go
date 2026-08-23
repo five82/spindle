@@ -672,10 +672,11 @@ func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue
 		)
 	}
 
+	// The stage_complete event itself is emitted by the stage executor; this
+	// is the scheduler's INFO decision record of the same outcome.
 	itemLogger.Info("stage completed",
 		"decision_type", logs.DecisionStageExecution,
 		"decision_result", "completed",
-		"event_type", "stage_complete",
 		"stage", ps.Stage,
 		"stage_duration", logs.FormatDuration(res.Duration),
 	)

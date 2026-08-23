@@ -88,21 +88,8 @@ func New(
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	item := sess.Item
 	logger := sess.Logger
-	logger.Info("analysis stage started", "event_type", "stage_start", "stage", "analysis")
-	env := sess.Env
 
-	keys := env.AssetKeys()
-	type rippedInput struct {
-		key  string
-		path string
-	}
-	var inputs []rippedInput
-	for _, key := range keys {
-		asset, ok := env.Assets.FindAsset(ripspec.AssetKindRipped, key)
-		if ok && asset.IsCompleted() {
-			inputs = append(inputs, rippedInput{key: key, path: asset.Path})
-		}
-	}
+	inputs := sess.CompletedAssetJobs(ripspec.AssetKindRipped)
 	if len(inputs) == 0 {
 		return fmt.Errorf("no ripped assets available for analysis")
 	}
@@ -119,13 +106,13 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			result, err := ffprobe.Inspect(ctx, "", in.path)
+			result, err := ffprobe.Inspect(ctx, "", in.Input.Path)
 			if err != nil {
-				return fmt.Errorf("ffprobe %s: %w", in.path, err)
+				return fmt.Errorf("ffprobe %s: %w", in.Input.Path, err)
 			}
-			comms, excluded := h.detectCommentary(ctx, sess, result, in.path, item.DiscFingerprint, in.key)
+			comms, excluded := h.detectCommentary(ctx, sess, result, in.Input.Path, item.DiscFingerprint, in.Key)
 			analysisData.PerEpisode = append(analysisData.PerEpisode, ripspec.EpisodeAudioAnalysis{
-				EpisodeKey:       in.key,
+				EpisodeKey:       in.Key,
 				CommentaryTracks: comms,
 				ExcludedTracks:   excluded,
 			})
@@ -144,21 +131,10 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		)
 	}
 
-	if err := sess.MergeSave(func(env *ripspec.Envelope) error {
+	return sess.MergeSave(func(env *ripspec.Envelope) error {
 		env.Attributes.AudioAnalysis = analysisData
 		return nil
-	}); err != nil {
-		return err
-	}
-
-	logger.Info("analysis stage completed",
-		"event_type", "stage_complete",
-		"stage", "analysis",
-		"commentary_tracks", len(analysisData.CommentaryTracks),
-		"excluded_tracks", len(analysisData.ExcludedTracks),
-		"ripped_assets", len(inputs),
-	)
-	return nil
+	})
 }
 
 // detectCommentary examines non-primary audio tracks for commentary content.
@@ -407,7 +383,7 @@ func (h *Handler) primaryFingerprint(
 	if h.transcriber == nil {
 		return nil
 	}
-	stagingRoot, err := sess.Item.StagingRoot(h.cfg.Paths.StagingDir)
+	stagingRoot, err := sess.StagingRoot(h.cfg.Paths.StagingDir)
 	if err != nil {
 		logger.Warn("primary transcription skipped",
 			"event_type", "commentary_detection_failed",

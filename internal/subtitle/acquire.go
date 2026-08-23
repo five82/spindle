@@ -100,7 +100,7 @@ func (h *Handler) listSubtitleCandidates(ctx context.Context, sess *stage.Sessio
 // contentIDReference reuses the reference subtitle episode identification
 // already downloaded into staging for this episode, when exactly one exists.
 func (h *Handler) contentIDReference(sess *stage.Session, ep *ripspec.Episode) (subtitleCandidate, bool) {
-	stagingRoot, err := sess.Item.StagingRoot(h.cfg.Paths.StagingDir)
+	stagingRoot, err := sess.StagingRoot(h.cfg.Paths.StagingDir)
 	if err != nil {
 		return subtitleCandidate{}, false
 	}

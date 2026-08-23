@@ -79,7 +79,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return nil
 	}
 
-	logger.Debug("episode identification stage started", "event_type", "stage_start", "stage", "episode_identification")
 	logger.Info("episode identification plan",
 		"event_type", "episode_identification_plan",
 		"episodes", len(env.Episodes),
@@ -118,7 +117,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return &stage.ErrDegraded{Msg: "tmdb season contains no episodes"}
 	}
 
-	_ = sess.Progress(10, "Phase 1/3 - Transcribing episodes", stage.WithActiveEpisode(""))
+	sess.Progress(10, "Phase 1/3 - Transcribing episodes", stage.WithActiveEpisode(""))
 
 	// The initial reference fetch needs only the envelope and TMDB season, so
 	// it runs concurrently with transcription: the fetch loop is network-bound
@@ -163,7 +162,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return &stage.ErrDegraded{Msg: "no valid transcriptions"}
 	}
 
-	_ = sess.Progress(50, "Phase 2/3 - Fetching reference subtitles", stage.WithActiveEpisode(""))
+	sess.Progress(50, "Phase 2/3 - Fetching reference subtitles", stage.WithActiveEpisode(""))
 
 	fetched := <-refFetched
 	refs, err := fetched.refs, fetched.err
@@ -179,21 +178,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return &stage.ErrDegraded{Msg: "no reference subtitles found"}
 	}
 
-	matches, refs, err := h.matchEpisodes(ctx, sess, env, season, seasonNum, plan, ripPrints, refs, refCache)
-	if err != nil {
+	if err := h.matchEpisodes(ctx, sess, env, season, seasonNum, plan, ripPrints, refs, refCache); err != nil {
 		return err
 	}
 
-	_ = sess.Progress(95, "Phase 3/3 - Episode identification complete", stage.WithActiveEpisode(""))
-
-	logger.Debug("episode identification stage completed",
-		"event_type", "stage_complete",
-		"stage", "episode_identification",
-		"transcribed_episodes", len(ripPrints),
-		"reference_episodes", len(refs),
-		"matched_episodes", len(matches),
-		"needs_review", item.NeedsReview == 1,
-	)
+	sess.Progress(95, "Phase 3/3 - Episode identification complete", stage.WithActiveEpisode(""))
 	return nil
 }
 
@@ -201,7 +190,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 // fingerprints, expanding the reference scope and re-fetching when the
 // initial candidates are insufficient, verifying ambiguous pairs via LLM,
 // and applying the accepted matches to the envelope (task: episode_match).
-// It returns the accepted matches and the (possibly expanded) reference set.
 func (h *Handler) matchEpisodes(
 	ctx context.Context,
 	sess *stage.Session,
@@ -212,7 +200,7 @@ func (h *Handler) matchEpisodes(
 	ripPrints []ripFingerprint,
 	refs []referenceFingerprint,
 	refCache map[int]referenceFingerprint,
-) ([]matchResult, []referenceFingerprint, error) {
+) error {
 	logger := sess.Logger
 	item := sess.Item
 
@@ -227,7 +215,7 @@ func (h *Handler) matchEpisodes(
 		)
 		expandedRefs, fetchErr := h.fetchReferenceFingerprints(ctx, logger, item, seasonNum, env.Metadata.ID, season, plan.ExpandedEpisodes, refCache)
 		if fetchErr != nil {
-			return nil, nil, fmt.Errorf("fetch expanded references: %w", fetchErr)
+			return fmt.Errorf("fetch expanded references: %w", fetchErr)
 		}
 		if len(expandedRefs) > 0 {
 			refs = expandedRefs
@@ -280,7 +268,7 @@ func (h *Handler) matchEpisodes(
 		sess.AddReviewReason("Episode ID: one or more matches rely on suspect references")
 	}
 
-	_ = sess.Progress(80, "Phase 3/3 - Matching episodes")
+	sess.Progress(80, "Phase 3/3 - Matching episodes")
 
 	noClaimRips := make(map[string]struct{}, len(resolution.RipsWithoutClaims))
 	for _, key := range resolution.RipsWithoutClaims {
@@ -314,10 +302,7 @@ func (h *Handler) matchEpisodes(
 
 	env.Attributes.ContentID = buildContentIDSummary(env, matches, len(ripPrints), len(refs), h.policy.LowConfidenceReviewThreshold)
 
-	if err := persistContentIDResults(sess); err != nil {
-		return nil, nil, err
-	}
-	return matches, refs, nil
+	return persistContentIDResults(sess)
 }
 
 // persistContentIDResults merges the episode-identification-owned fields.
@@ -348,15 +333,11 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, sess *stage.S
 	logger := sess.Logger
 	item := sess.Item
 	episodeCount := max(len(env.Episodes), 1)
-	stagingRoot, err := item.StagingRoot(h.cfg.Paths.StagingDir)
-	if err != nil {
-		return nil, err
-	}
 	// Transcripts are shared artifacts: commentary analysis and subtitle
 	// generation reuse them later via ripspec.AssetKindTranscript.
-	episodeDir := filepath.Join(stagingRoot, "transcripts")
-	if err := os.MkdirAll(episodeDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create transcripts dir: %w", err)
+	episodeDir, err := sess.StageDir(h.cfg.Paths.StagingDir, "transcripts")
+	if err != nil {
+		return nil, err
 	}
 
 	// Select the primary audio track per episode (cheap ffprobe), then
@@ -395,7 +376,7 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, sess *stage.S
 		return nil, nil
 	}
 
-	_ = sess.Progress(15, fmt.Sprintf("Phase 1/3 - Transcribing %d of %d episodes (batched)", len(reqs), episodeCount), stage.WithActiveEpisode(""))
+	sess.Progress(15, fmt.Sprintf("Phase 1/3 - Transcribing %d of %d episodes (batched)", len(reqs), episodeCount), stage.WithActiveEpisode(""))
 	results, err := h.transcriber.TranscribeBatch(ctx, reqs)
 	if err != nil {
 		return nil, fmt.Errorf("transcribe episode batch: %w", err)

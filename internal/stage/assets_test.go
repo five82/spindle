@@ -6,12 +6,22 @@ import (
 	"github.com/five82/spindle/internal/ripspec"
 )
 
-func TestCompletedAssetJobsPreservesCompletedAssetOrder(t *testing.T) {
-	env := &ripspec.Envelope{Assets: ripspec.Assets{Ripped: []ripspec.Asset{
-		{EpisodeKey: "s01e01", Path: "/rip/1.mkv", Status: ripspec.AssetStatusCompleted},
-		{EpisodeKey: "s01e02", Path: "", Status: ripspec.AssetStatusFailed},
-		{EpisodeKey: "s01e03", Path: "/rip/3.mkv", Status: ripspec.AssetStatusCompleted},
-	}}}
+func TestCompletedAssetJobsPreservesEnvelopeKeyOrder(t *testing.T) {
+	env := &ripspec.Envelope{
+		Metadata: ripspec.Metadata{MediaType: "tv"},
+		Episodes: []ripspec.Episode{
+			{Key: "s01e01"},
+			{Key: "s01e02"},
+			{Key: "s01e03"},
+		},
+		// Assets recorded out of episode order: jobs must still follow the
+		// envelope key order, not completion order.
+		Assets: ripspec.Assets{Ripped: []ripspec.Asset{
+			{EpisodeKey: "s01e03", Path: "/rip/3.mkv", Status: ripspec.AssetStatusCompleted},
+			{EpisodeKey: "s01e02", Path: "", Status: ripspec.AssetStatusFailed},
+			{EpisodeKey: "s01e01", Path: "/rip/1.mkv", Status: ripspec.AssetStatusCompleted},
+		}},
+	}
 
 	jobs := CompletedAssetJobs(env, ripspec.AssetKindRipped)
 	if len(jobs) != 2 {

@@ -46,7 +46,6 @@ func New(cfg *config.Config, jfClient *jellyfin.Client, notifier *notify.Notifie
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	item := sess.Item
 	logger := sess.Logger
-	logger.Debug("organization stage started", "event_type", "stage_start", "stage", "organizing")
 	env := sess.Env
 
 	meta := mediameta.FromJSON(item.MetadataJSON, item.DiscTitle)
@@ -74,12 +73,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			}
 			reviewCount = len(keys)
 			h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
-			logger.Debug("organization stage completed",
-				"event_type", "stage_complete",
-				"stage", "organizing",
-				"library_count", libraryCount,
-				"review_count", reviewCount,
-			)
 			return nil
 		}
 
@@ -95,12 +88,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			}
 			reviewCount = len(reviewKeys)
 			h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
-			logger.Debug("organization stage completed",
-				"event_type", "stage_complete",
-				"stage", "organizing",
-				"library_count", libraryCount,
-				"review_count", reviewCount,
-			)
 			return nil
 		}
 		logger.Info("item partially organized",
@@ -122,7 +109,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		}
 		libraryCount = len(libraryKeys)
 		reviewCount = len(reviewKeys)
-		_ = sess.Progress(100, fmt.Sprintf("Available in library (%d episodes, %d to review)", libraryCount, reviewCount))
+		sess.Progress(100, fmt.Sprintf("Available in library (%d episodes, %d to review)", libraryCount, reviewCount))
 	} else {
 		copied, err := h.placeInLibrary(ctx, logger, sess, &meta, keys)
 		if err != nil {
@@ -182,13 +169,6 @@ func (h *Handler) finalize(ctx context.Context, logger *slog.Logger, sess *stage
 
 	h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
 	h.cleanupStaging(logger, sess.Item)
-
-	logger.Debug("organization stage completed",
-		"event_type", "stage_complete",
-		"stage", "organizing",
-		"library_count", libraryCount,
-		"review_count", reviewCount,
-	)
 	return nil
 }
 
@@ -271,7 +251,7 @@ func throttledProgressUpdater(sess *stage.Session, minInterval time.Duration) fu
 			return
 		}
 		lastUpdate = now
-		_ = sess.Progress(sess.Task.ProgressPercent, sess.Task.ProgressMessage,
+		sess.Progress(sess.Task.ProgressPercent, sess.Task.ProgressMessage,
 			stage.WithProgressBytes(sess.Task.ProgressBytesCopied, sess.Task.ProgressTotalBytes))
 	}
 }
@@ -405,7 +385,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 			"source_path", asset.Path,
 			"dest_path", destPath,
 		)
-		_ = sess.Progress(overallBytePercent(completedBytes, totalBytes), fmt.Sprintf("Phase %d/%d - Copying to %s (%s)", i+1, len(keys), target, key), stage.WithProgressBytes(completedBytes, totalBytes))
+		sess.Progress(overallBytePercent(completedBytes, totalBytes), fmt.Sprintf("Phase %d/%d - Copying to %s (%s)", i+1, len(keys), target, key), stage.WithProgressBytes(completedBytes, totalBytes))
 
 		transfer := fileutil.CopyFileVerifiedWithProgress
 		if target == "review" {
@@ -463,7 +443,7 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 		if info, statErr := os.Stat(asset.Path); statErr == nil {
 			completedBytes += info.Size()
 		}
-		_ = sess.Progress(overallBytePercent(completedBytes, totalBytes), sess.Task.ProgressMessage, stage.WithProgressBytes(completedBytes, totalBytes))
+		sess.Progress(overallBytePercent(completedBytes, totalBytes), sess.Task.ProgressMessage, stage.WithProgressBytes(completedBytes, totalBytes))
 	}
 	return lastPath, copied, nil
 }
@@ -472,13 +452,14 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 // Directory structure: review_dir/{reason}_{fingerprint_prefix}/
 func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, sess *stage.Session, meta *mediameta.Metadata, keys []string) error {
 	item := sess.Item
+	reviewPath := reviewPathForItem(h.cfg.Paths.ReviewDir, item)
 	logger.Info("routing to review",
 		"decision_type", logs.DecisionOrganizeRoute,
 		"decision_result", "review",
 		"decision_reason", item.ReviewReason,
+		"review_path", reviewPath,
 	)
 
-	reviewPath := reviewPathForItem(h.cfg.Paths.ReviewDir, item)
 	if _, _, err := h.copyAssetsToDir(ctx, logger, sess, meta, reviewPath, keys, "review"); err != nil {
 		return err
 	}
@@ -487,8 +468,6 @@ func (h *Handler) routeToReview(ctx context.Context, logger *slog.Logger, sess *
 	}
 
 	h.cleanupStaging(logger, item)
-
-	logger.Info("review routing completed", "event_type", "stage_complete", "stage", "organizing", "review_path", reviewPath)
 	return nil
 }
 

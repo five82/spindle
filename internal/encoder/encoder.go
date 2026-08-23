@@ -33,19 +33,12 @@ func New(cfg *config.Config) *Handler {
 
 // Run executes the encoding stage.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
-	item := sess.Item
 	logger := sess.Logger
-	logger.Debug("encoding stage started", "event_type", "stage_start", "stage", "encoding")
 	env := sess.Env
 
-	stagingRoot, err := item.StagingRoot(h.cfg.Paths.StagingDir)
+	encodedDir, err := sess.StageDir(h.cfg.Paths.StagingDir, "encoded")
 	if err != nil {
-		return fmt.Errorf("staging root: %w", err)
-	}
-	encodedDir := filepath.Join(stagingRoot, "encoded")
-
-	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
-		return fmt.Errorf("create encoded dir: %w", err)
+		return err
 	}
 
 	logger.Info("Reel target-quality mode selected",
@@ -132,14 +125,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	if summary.errors > 0 {
 		return fmt.Errorf("encoding failed for %d of %d jobs", summary.errors, attempted)
 	}
-
-	logger.Debug("encoding stage completed",
-		"event_type", "stage_complete",
-		"stage", "encoding",
-		"jobs", attempted,
-		"encoded_size_bytes", summary.encodedSize,
-		"original_size_bytes", summary.originalSize,
-	)
 	return nil
 }
 
@@ -207,19 +192,6 @@ func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encodedDi
 	return summary, nil
 }
 
-// persistProgress calls sess.Progress and warns on failure, using the
-// progress_persist_error shape shared by the initial/error/final snapshot
-// persists in encodeJob, handleEncodeFailure, and handleEncodeSuccess.
-func persistProgress(logger *slog.Logger, sess *stage.Session, percent float64, message, warnMsg, impact string, opts ...stage.ProgressOption) {
-	if err := sess.Progress(percent, message, opts...); err != nil {
-		logger.Warn(warnMsg,
-			"event_type", "progress_persist_error",
-			"error_hint", err.Error(),
-			"impact", impact,
-		)
-	}
-}
-
 func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encodedDir string, job stage.AssetJob) (encodeJobResult, error) {
 	item := sess.Item
 	logger := sess.Logger
@@ -242,13 +214,12 @@ func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encodedDir
 		"event_type", "encode_start",
 		"episode_key", job.Key,
 	)
-	_ = sess.Progress(job.Percent(0), message, stage.WithActiveEpisode(job.Key))
+	sess.Progress(job.Percent(0), message, stage.WithActiveEpisode(job.Key))
 
 	// Reset encoding snapshot and force-persist.
 	snap := h.initialEncodingSnapshot(ctx, logger, job)
 	item.EncodingDetailsJSON = snap.Marshal()
-	persistProgress(logger, sess, sess.Task.ProgressPercent, sess.Task.ProgressMessage,
-		"failed to persist initial snapshot", "progress display may be stale",
+	sess.Progress(sess.Task.ProgressPercent, sess.Task.ProgressMessage,
 		stage.WithEncodingDetails(item.EncodingDetailsJSON))
 
 	reporter := newSpindleReporter(sess, logger, job.Key, job.ProgressIndex, job.ProgressTotal)
@@ -316,8 +287,7 @@ func (h *Handler) handleEncodeFailure(logger *slog.Logger, sess *stage.Session, 
 		Message: encErr.Error(),
 	}
 	item.EncodingDetailsJSON = snap.Marshal()
-	persistProgress(logger, sess, job.CompletionPercent(), sess.Task.ProgressMessage,
-		"failed to persist error snapshot", "error state not reflected in progress",
+	sess.Progress(job.CompletionPercent(), sess.Task.ProgressMessage,
 		stage.WithEncodingDetails(item.EncodingDetailsJSON))
 	return sess.SaveAssetFailure(ripspec.AssetKindEncoded, job.Key, encErr.Error())
 }
@@ -333,8 +303,7 @@ func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, 
 	snap.AverageSpeed = float64(result.EncodingSpeed)
 
 	item.EncodingDetailsJSON = snap.Marshal()
-	persistProgress(logger, sess, job.CompletionPercent(), sess.Task.ProgressMessage,
-		"failed to persist final snapshot", "final progress not reflected",
+	sess.Progress(job.CompletionPercent(), sess.Task.ProgressMessage,
 		stage.WithEncodingDetails(item.EncodingDetailsJSON))
 
 	if err := sess.SaveAssetSuccess(ripspec.AssetKindEncoded, ripspec.Asset{
@@ -417,37 +386,16 @@ func newSpindleReporter(sess *stage.Session, logger *slog.Logger, episodeKey str
 	}
 }
 
-// updateSnapshot mutates the encoding snapshot and persists it, warning on
-// failure so every call site collapses to a single statement.
-//
-// hint == "" selects the legacy shape used by progress-percent updates:
-// event_type "progress_persist_error", error_hint is the persistence error's
-// text, and no "error" attribute. hint != "" selects the shape used by
-// substage/result updates: event_type "progress_persist_failed", error_hint
-// is the given static hint, and the error is also logged under "error".
-func (r *spindleReporter) updateSnapshot(mutate func(*encodingstate.Snapshot), warnMsg, hint, impact string) {
+// updateSnapshot mutates the encoding snapshot and persists it; persistence
+// failures are logged by Session.Progress.
+func (r *spindleReporter) updateSnapshot(mutate func(*encodingstate.Snapshot)) {
 	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
 	if err != nil {
 		snap = encodingstate.Snapshot{}
 	}
 	mutate(&snap)
 	r.item.EncodingDetailsJSON = snap.Marshal()
-	if perr := r.sess.Progress(r.sess.Task.ProgressPercent, r.sess.Task.ProgressMessage, stage.WithEncodingDetails(r.item.EncodingDetailsJSON)); perr != nil {
-		if hint == "" {
-			r.logger.Warn(warnMsg,
-				"event_type", "progress_persist_error",
-				"error_hint", perr.Error(),
-				"impact", impact,
-			)
-			return
-		}
-		r.logger.Warn(warnMsg,
-			"event_type", "progress_persist_failed",
-			"error_hint", hint,
-			"impact", impact,
-			"error", perr,
-		)
-	}
+	r.sess.Progress(r.sess.Task.ProgressPercent, r.sess.Task.ProgressMessage, stage.WithEncodingDetails(r.item.EncodingDetailsJSON))
 }
 
 func (r *spindleReporter) EncodingProgress(p reel.ProgressSnapshot) {
@@ -466,7 +414,7 @@ func (r *spindleReporter) EncodingProgress(p reel.ProgressSnapshot) {
 		snap.CurrentFrame = int64(p.CurrentFrame)
 		snap.TotalFrames = int64(p.TotalFrames)
 		r.sess.Task.ProgressPercent = stage.OverallPercent(r.completedJobs, r.totalJobs, float64(p.Percent))
-	}, "failed to persist encoding progress", "", "progress display may be stale")
+	})
 
 	if r.lastLog.IsZero() || now.Sub(r.lastLog) >= encodingProgressLogInterval || p.Percent >= 100 {
 		r.lastLog = now
@@ -491,7 +439,7 @@ func (r *spindleReporter) EncodingStarted(totalFrames uint64) {
 	r.updateSnapshot(func(snap *encodingstate.Snapshot) {
 		snap.Substage = "encoding"
 		snap.TotalFrames = int64(totalFrames)
-	}, "failed to persist encoding started", "", "total frames not persisted")
+	})
 }
 
 func (r *spindleReporter) Initialization(s reel.InitializationSummary) {
@@ -500,7 +448,7 @@ func (r *spindleReporter) Initialization(s reel.InitializationSummary) {
 		snap.Resolution = s.Resolution
 		snap.DynamicRange = s.DynamicRange
 		snap.Substage = "initializing"
-	}, "progress persistence failed", "initialization state not persisted to queue", "encoding progress not reflected in queue")
+	})
 
 	r.logger.Info("encode input initialized",
 		"event_type", "encode_init",
@@ -516,7 +464,7 @@ func (r *spindleReporter) Initialization(s reel.InitializationSummary) {
 func (r *spindleReporter) StageProgress(s reel.StageProgress) {
 	r.updateSnapshot(func(snap *encodingstate.Snapshot) {
 		snap.Substage = strings.ToLower(strings.TrimSpace(s.Stage))
-	}, "progress persistence failed", "encoding substage not persisted to queue", "encoding progress not reflected in queue")
+	})
 
 	attrs := []any{
 		"event_type", "encoding_substage",
@@ -546,7 +494,7 @@ func (r *spindleReporter) EncodingConfig(s reel.EncodingConfigSummary) {
 		snap.Tune = s.Tune
 		snap.AudioCodec = s.AudioCodec
 		snap.Substage = "configuring"
-	}, "progress persistence failed", "encoding config state not persisted to queue", "encoding progress not reflected in queue")
+	})
 
 	r.logger.Info("encoder configured",
 		"event_type", "encoder_config",
@@ -574,7 +522,7 @@ func (r *spindleReporter) CropResult(s reel.CropSummary) {
 				snap.Resolution = fmt.Sprintf("%dx%d", w, h)
 			}
 		}
-	}, "progress persistence failed", "crop result not persisted to queue", "encoding progress not reflected in queue")
+	})
 
 	decisionResult := "no_crop"
 	if s.Required {
@@ -603,7 +551,7 @@ func (r *spindleReporter) ValidationComplete(s reel.ValidationSummary) {
 			Passed: s.Passed,
 			Steps:  steps,
 		}
-	}, "progress persistence failed", "validation result not persisted to queue", "encoding progress not reflected in queue")
+	})
 
 	var passed, failed int
 	for _, step := range s.Steps {
@@ -633,7 +581,7 @@ func (r *spindleReporter) EncodingComplete(s reel.EncodingOutcome) {
 		snap.OriginalSize = int64(s.OriginalSize)
 		snap.AverageSpeed = float64(s.AverageSpeed)
 		snap.EncodeDurationSeconds = s.TotalTime.Seconds()
-	}, "progress persistence failed", "encoding completion not persisted to queue", "encoding progress not reflected in queue")
+	})
 
 	r.logger.Info("encode result",
 		"event_type", "encode_result",
@@ -650,7 +598,7 @@ func (r *spindleReporter) EncodingComplete(s reel.EncodingOutcome) {
 func (r *spindleReporter) Warning(message string) {
 	r.updateSnapshot(func(snap *encodingstate.Snapshot) {
 		snap.Warning = message
-	}, "progress persistence failed", "warning state not persisted to queue", "encoding progress not reflected in queue")
+	})
 
 	r.logger.Warn("reel warning",
 		"event_type", "reel_warning",
@@ -677,5 +625,5 @@ func (r *spindleReporter) Error(e reel.ReporterError) {
 			Context:    e.Context,
 			Suggestion: e.Suggestion,
 		}
-	}, "progress persistence failed", "encoding error state not persisted to queue", "encoding error may not be visible in queue")
+	})
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/five82/spindle/internal/queue"
@@ -54,6 +56,30 @@ func NewSession(ctx context.Context, store *queue.Store, item *queue.Item, task 
 		Logger: slog.Default(),
 		Task:   task,
 	}, nil
+}
+
+// StagingRoot resolves the item's per-item staging root under base (the
+// configured staging directory).
+func (s *Session) StagingRoot(base string) (string, error) {
+	root, err := s.Item.StagingRoot(base)
+	if err != nil {
+		return "", fmt.Errorf("staging root: %w", err)
+	}
+	return root, nil
+}
+
+// StageDir resolves a staging subdirectory for the item under base and
+// creates it.
+func (s *Session) StageDir(base string, sub ...string) (string, error) {
+	root, err := s.StagingRoot(base)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(append([]string{root}, sub...)...)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create staging dir %s: %w", dir, err)
+	}
+	return dir, nil
 }
 
 // SetEnvelope replaces the session's RipSpec envelope.
@@ -266,10 +292,11 @@ func WithEncodingDetails(json string) ProgressOption {
 
 // Progress updates the running task's progress columns. Encoding telemetry
 // rides along on the item (single writer: the encoding task). A detached
-// task (ID 0) keeps progress in memory only.
-func (s *Session) Progress(percent float64, message string, opts ...ProgressOption) error {
+// task (ID 0) keeps progress in memory only. Persistence failures are
+// non-fatal: progress is display state, so they are logged and swallowed.
+func (s *Session) Progress(percent float64, message string, opts ...ProgressOption) {
 	if s == nil || s.Store == nil || s.Item == nil || s.Task == nil {
-		return fmt.Errorf("stage session: incomplete progress state")
+		return
 	}
 	update := progressUpdate{}
 	for _, opt := range opts {
@@ -290,23 +317,41 @@ func (s *Session) Progress(percent float64, message string, opts ...ProgressOpti
 	if update.encodingJSON != nil {
 		s.Item.EncodingDetailsJSON = *update.encodingJSON
 		if err := s.Store.UpdateEncodingDetails(s.Item); err != nil {
-			return err
+			s.warnProgressFailure(err)
+			return
 		}
 	}
 	if s.Task.ID == 0 {
-		return nil
+		return
 	}
-	return s.Store.UpdateTaskProgress(s.Task)
+	if err := s.Store.UpdateTaskProgress(s.Task); err != nil {
+		s.warnProgressFailure(err)
+	}
+}
+
+// warnProgressFailure is the single convention for progress persistence
+// failures; every Progress call site relies on it instead of wrapping the
+// error itself.
+func (s *Session) warnProgressFailure(err error) {
+	logger := s.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Warn("progress persistence failed",
+		"event_type", "progress_persist_error",
+		"error_hint", err.Error(),
+		"impact", "progress display may be stale",
+	)
 }
 
 // SetActiveEpisode persists a change to the task's active asset key without
 // changing the current percent or message.
-func (s *Session) SetActiveEpisode(key string) error {
-	return s.Progress(s.Task.ProgressPercent, s.Task.ProgressMessage, WithActiveEpisode(key))
+func (s *Session) SetActiveEpisode(key string) {
+	s.Progress(s.Task.ProgressPercent, s.Task.ProgressMessage, WithActiveEpisode(key))
 }
 
 // ClearActiveEpisode clears the active asset key without changing current progress.
-func (s *Session) ClearActiveEpisode() error { return s.SetActiveEpisode("") }
+func (s *Session) ClearActiveEpisode() { s.SetActiveEpisode("") }
 
 // AddReviewReason marks the item for review and appends a queue-level reason.
 func (s *Session) AddReviewReason(reason string) {

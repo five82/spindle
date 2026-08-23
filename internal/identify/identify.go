@@ -377,18 +377,13 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	item := sess.Item
 	logger := sess.Logger
-	logger.Debug("identification stage started",
-		"event_type", "stage_start",
-		"stage", "identification",
-		"disc_title", item.DiscTitle,
-	)
 	logger.Info("identification plan",
 		"event_type", "identification_plan",
 		"disc_title", item.DiscTitle,
 		"optical_drive", h.cfg.MakeMKV.OpticalDrive,
 	)
 
-	_ = sess.Progress(5, "Phase 1/3 - Cleaning stale staging")
+	sess.Progress(5, "Phase 1/3 - Cleaning stale staging")
 
 	// Clean stale staging directories (older than 48 hours).
 	cleanResult := stagingdir.CleanStale(ctx, h.cfg.Paths.StagingDir, 48*time.Hour, nil, logger)
@@ -396,7 +391,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		logger.Info("cleaned stale staging directories", "removed", cleanResult.Removed)
 	}
 
-	_ = sess.Progress(20, "Phase 2/3 - Scanning disc and resolving metadata")
+	sess.Progress(20, "Phase 2/3 - Scanning disc and resolving metadata")
 
 	result, err := h.Identify(ctx, item, logger)
 	if err != nil {
@@ -404,7 +399,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	}
 
 	// Persist envelope.
-	_ = sess.Progress(85, "Phase 3/3 - Finalizing identification")
+	sess.Progress(85, "Phase 3/3 - Finalizing identification")
 	sess.SetEnvelope(&result.Envelope)
 	if err := h.persistEnvelope(sess); err != nil {
 		return err
@@ -445,14 +440,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	_ = notify.SendLogged(ctx, h.notifier, logger, notify.EventIdentificationComplete,
 		"Identified: "+displayTitle,
 		"Metadata match confirmed. Ripping is next.",
-	)
-
-	logger.Debug("identification stage completed",
-		"event_type", "stage_complete",
-		"stage", "identification",
-		"media_type", result.MediaType,
-		"tmdb_id", result.Envelope.Metadata.ID,
-		"title", result.Envelope.Metadata.Title,
 	)
 	return nil
 }

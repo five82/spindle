@@ -74,9 +74,7 @@ func TestNewSessionRejectsInvalidRipSpec(t *testing.T) {
 func TestSessionProgressPersistsTask(t *testing.T) {
 	store, item, s := newTestSessionWithTask(t)
 
-	if err := s.Progress(42, "Phase 1/1 - Testing", WithActiveEpisode("s01e02"), WithProgressBytes(10, 20), WithEncodingDetails(`{"substage":"encoding"}`)); err != nil {
-		t.Fatalf("Progress: %v", err)
-	}
+	s.Progress(42, "Phase 1/1 - Testing", WithActiveEpisode("s01e02"), WithProgressBytes(10, 20), WithEncodingDetails(`{"substage":"encoding"}`))
 
 	tasks, err := store.TasksForItem(item.ID)
 	if err != nil {
@@ -111,9 +109,7 @@ func TestSessionProgressPersistsTask(t *testing.T) {
 func TestSessionProgressDetachedTaskStaysInMemory(t *testing.T) {
 	store, item, s := newTestSession(t)
 
-	if err := s.Progress(42, "Phase 1/1 - Testing"); err != nil {
-		t.Fatalf("Progress: %v", err)
-	}
+	s.Progress(42, "Phase 1/1 - Testing")
 
 	if s.Task.ProgressPercent != 42 || s.Task.ProgressMessage != "Phase 1/1 - Testing" {
 		t.Fatalf("detached task not updated in memory: %+v", s.Task)

@@ -36,21 +36,23 @@ func (j AssetJob) PhaseMessage(action string) string {
 	return fmt.Sprintf("Phase %d/%d - %s", j.Number(), j.ProgressTotal, action)
 }
 
-// CompletedAssetJobs returns one job for each completed asset at inputKind.
-// Jobs preserve the asset slice order. This supports stages such as encoding
-// whose work set is exactly the artifacts produced by the previous stage.
+// CompletedAssetJobs returns one job for each envelope asset key whose
+// asset at inputKind is completed, in envelope key order. This supports
+// stages whose work set is exactly the completed artifacts of an earlier
+// stage (apply consumes encoded assets, analysis consumes ripped assets).
 func CompletedAssetJobs(env *ripspec.Envelope, inputKind string) []AssetJob {
 	if env == nil {
 		return nil
 	}
-	assets := assetsForKind(env, inputKind)
-	jobs := make([]AssetJob, 0, len(assets))
-	for _, asset := range assets {
-		if !asset.IsCompleted() {
+	keys := env.AssetKeys()
+	jobs := make([]AssetJob, 0, len(keys))
+	for _, key := range keys {
+		asset, found := env.Assets.FindAsset(inputKind, key)
+		if !found || !asset.IsCompleted() {
 			continue
 		}
 		jobs = append(jobs, AssetJob{
-			Key:   asset.EpisodeKey,
+			Key:   key,
 			Input: asset,
 		})
 	}
@@ -169,22 +171,4 @@ func OverallPercent(completedItems, totalItems int, currentItemPercent float64) 
 		progress = float64(totalItems)
 	}
 	return progress / float64(totalItems) * 100
-}
-
-func assetsForKind(env *ripspec.Envelope, kind string) []ripspec.Asset {
-	if env == nil {
-		return nil
-	}
-	switch kind {
-	case ripspec.AssetKindRipped:
-		return env.Assets.Ripped
-	case ripspec.AssetKindEncoded:
-		return env.Assets.Encoded
-	case ripspec.AssetKindSubtitled:
-		return env.Assets.Subtitled
-	case ripspec.AssetKindFinal:
-		return env.Assets.Final
-	default:
-		return nil
-	}
 }

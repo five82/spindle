@@ -50,7 +50,6 @@ func New(cfg *config.Config, transcriber *transcription.Service, osClient *opens
 // verified OpenSubtitles download or is skipped with a warning.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	logger := sess.Logger
-	logger.Debug("subtitle stage started", "event_type", "stage_start", "stage", "subtitling")
 
 	if !h.cfg.Subtitles.Enabled {
 		logger.Info("subtitles disabled, skipping",
@@ -89,7 +88,10 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		}
 	}
 
-	return h.finishSubtitleStage(sess, summary)
+	if summary.attempted > 0 && summary.failed == summary.attempted {
+		return fmt.Errorf("all %d subtitle job(s) failed", summary.attempted)
+	}
+	return nil
 }
 
 const (
@@ -156,17 +158,13 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 		return subtitleOutcomeSkipped, h.recordSubtitleSkip(sess, key, skipReason)
 	}
 
-	stagingRoot, err := sess.Item.StagingRoot(h.cfg.Paths.StagingDir)
+	// Adopted SRTs land in staging; the apply stage places them next to the
+	// encoded output and muxes them after the encoding branch joins.
+	workDir, err := sess.StageDir(h.cfg.Paths.StagingDir, "subtitles", job.Key+".work")
 	if err != nil {
 		return subtitleOutcomeFailed, err
 	}
-	// Adopted SRTs land in staging; the apply stage places them next to the
-	// encoded output and muxes them after the encoding branch joins.
-	subtitleDir := filepath.Join(stagingRoot, "subtitles")
-	workDir := filepath.Join(subtitleDir, job.Key+".work")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		return subtitleOutcomeFailed, fmt.Errorf("create subtitles work dir: %w", err)
-	}
+	subtitleDir := filepath.Dir(workDir)
 
 	reference, err := h.ensureSyncReference(ctx, sess, job)
 	if err != nil {
@@ -186,7 +184,7 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 		"episode_key", key,
 	)
 
-	_ = sess.Progress(job.Percent(92), job.PhaseMessage("Syncing subtitles ("+key+")"))
+	sess.Progress(job.Percent(92), job.PhaseMessage("Syncing subtitles ("+key+")"))
 	for _, candidate := range candidates {
 		adopted, err := h.tryAdoptCandidate(ctx, sess, job, candidate, adoptContext{
 			ReferenceSRTPath: reference.SRTPath,
@@ -432,7 +430,7 @@ func (h *Handler) startSubtitleJob(sess *stage.Session, job stage.AssetJob) {
 	logger.Info(job.PhaseMessage("Preparing subtitles ("+key+")"),
 		"event_type", "subtitle_start",
 	)
-	_ = sess.Progress(job.Percent(5), job.PhaseMessage("Preparing subtitles ("+key+")"))
+	sess.Progress(job.Percent(5), job.PhaseMessage("Preparing subtitles ("+key+")"))
 }
 
 // ensureSyncReference returns the episode's canonical WhisperX transcript,
@@ -445,7 +443,7 @@ func (h *Handler) ensureSyncReference(ctx context.Context, sess *stage.Session, 
 	if h.transcriber == nil {
 		return nil, fmt.Errorf("transcriber not configured")
 	}
-	stagingRoot, err := sess.Item.StagingRoot(h.cfg.Paths.StagingDir)
+	stagingRoot, err := sess.StagingRoot(h.cfg.Paths.StagingDir)
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +472,7 @@ func (h *Handler) ensureSyncReference(ctx context.Context, sess *stage.Session, 
 				message = job.PhaseMessage("Transcribing audio (" + job.Key + ")")
 			}
 		}
-		_ = sess.Progress(job.Percent(subtitlePhasePercent(phase, elapsed)), message)
+		sess.Progress(job.Percent(subtitlePhasePercent(phase, elapsed)), message)
 	})
 	if err != nil {
 		return nil, err
@@ -598,22 +596,6 @@ func (h *Handler) persistReviewReason(logger *slog.Logger, sess *stage.Session, 
 			"error", mergeErr,
 		)
 	}
-}
-
-func (h *Handler) finishSubtitleStage(sess *stage.Session, summary subtitleRunSummary) error {
-	if summary.attempted > 0 && summary.failed == summary.attempted {
-		return fmt.Errorf("all %d subtitle job(s) failed", summary.attempted)
-	}
-
-	sess.Logger.Debug("subtitle stage completed",
-		"event_type", "stage_complete",
-		"stage", "subtitling",
-		"attempted", summary.attempted,
-		"adopted", summary.adopted,
-		"skipped", summary.skipped,
-		"failed", summary.failed,
-	)
-	return nil
 }
 
 func resolveSubtitleVideoDuration(ctx context.Context, logger *slog.Logger, videoPath string, fallback float64) (seconds float64, source string) {

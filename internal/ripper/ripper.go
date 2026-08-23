@@ -45,7 +45,6 @@ func New(cfg *config.Config, notifier *notify.Notifier, cache *ripcache.Store, m
 // Run executes the ripping stage.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	logger := sess.Logger
-	logger.Debug("ripping stage started", "event_type", "stage_start", "stage", "ripping")
 
 	rippedDir, err := h.prepareRipStaging(sess)
 	if err != nil {
@@ -53,13 +52,6 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	}
 
 	if restored, err := h.restoreFromRipCache(ctx, sess, rippedDir); restored || err != nil {
-		if err == nil {
-			logger.Debug("ripping stage completed",
-				"event_type", "stage_complete",
-				"stage", "ripping",
-				"rip_cache_restored", true,
-			)
-		}
 		return err
 	}
 
@@ -86,7 +78,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	if err := h.ripTitles(ctx, sess, rippedDir, targets); err != nil {
 		return err
 	}
-	_ = sess.ClearActiveEpisode()
+	sess.ClearActiveEpisode()
 
 	if err := h.mapAndValidateAssets(ctx, logger, sess, rippedDir, nil); err != nil {
 		return err
@@ -97,22 +89,15 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	h.cacheFreshRip(logger, sess, rippedDir, len(targets))
 	h.notifyRipComplete(ctx, logger, sess, len(targets))
-
-	logger.Debug("ripping stage completed",
-		"event_type", "stage_complete",
-		"stage", "ripping",
-		"titles_ripped", len(targets),
-	)
 	return nil
 }
 
 func (h *Handler) prepareRipStaging(sess *stage.Session) (string, error) {
-	item := sess.Item
 	logger := sess.Logger
 
-	stagingRoot, err := item.StagingRoot(h.cfg.Paths.StagingDir)
+	stagingRoot, err := sess.StagingRoot(h.cfg.Paths.StagingDir)
 	if err != nil {
-		return "", fmt.Errorf("staging root: %w", err)
+		return "", err
 	}
 	rippedDir := filepath.Join(stagingRoot, "ripped")
 
@@ -293,14 +278,7 @@ func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir s
 		"event_type", "rip_title_start",
 	)
 
-	if err := sess.Progress(overallRipPercent(index, total, 0), fmt.Sprintf("Phase %d/%d - Ripping title %d", index+1, total, title.ID), stage.WithActiveEpisode(episodeKey)); err != nil {
-		logger.Warn("progress persistence failed",
-			"event_type", "progress_persist_failed",
-			"error_hint", "rip progress message not persisted",
-			"impact", "rip progress not reflected in queue",
-			"error", err,
-		)
-	}
+	sess.Progress(overallRipPercent(index, total, 0), fmt.Sprintf("Phase %d/%d - Ripping title %d", index+1, total, title.ID), stage.WithActiveEpisode(episodeKey))
 
 	before := listMKVFiles(rippedDir)
 	var lastRipLog time.Time
@@ -309,7 +287,7 @@ func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir s
 		h.cfg.MakeMKV.MinTitleLength,
 		func(p makemkv.RipProgress) {
 			message := sess.Task.ProgressMessage
-			_ = sess.Progress(overallRipPercent(index, total, p.Percent), message)
+			sess.Progress(overallRipPercent(index, total, p.Percent), message)
 
 			now := time.Now()
 			if lastRipLog.IsZero() || now.Sub(lastRipLog) >= ripProgressLogInterval {
@@ -344,14 +322,7 @@ func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir s
 		}
 	}
 
-	if err := sess.Progress(overallRipPercent(index+1, total, 0), fmt.Sprintf("Phase %d/%d - Ripped title %d", index+1, total, title.ID)); err != nil {
-		logger.Warn("progress persistence failed",
-			"event_type", "progress_persist_failed",
-			"error_hint", "rip completion progress not persisted",
-			"impact", "rip progress not reflected in queue",
-			"error", err,
-		)
-	}
+	sess.Progress(overallRipPercent(index+1, total, 0), fmt.Sprintf("Phase %d/%d - Ripped title %d", index+1, total, title.ID))
 	return nil
 }
 
@@ -785,7 +756,7 @@ func (h *Handler) cacheProgressFunc(sess *stage.Session, message string) ripcach
 		}
 		lastPush = now
 		percent := float64(p.BytesCopied) / float64(p.TotalBytes) * 100
-		_ = sess.Progress(percent, message, stage.WithProgressBytes(p.BytesCopied, p.TotalBytes))
+		sess.Progress(percent, message, stage.WithProgressBytes(p.BytesCopied, p.TotalBytes))
 	}
 }
 
