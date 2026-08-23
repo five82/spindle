@@ -7,7 +7,7 @@ require (
 	github.com/five82/reel v0.0.0-20260818114334-d97533e35b29
 	github.com/gofrs/flock v0.13.0
 	github.com/pelletier/go-toml/v2 v2.4.3
-	github.com/pilebones/go-udev v0.9.1
+	github.com/pilebones/go-udev v0.10.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
