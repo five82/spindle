@@ -10,7 +10,7 @@ func SampleConfig() string {
 # Working directory for in-progress items
 # staging_dir = "~/.local/share/spindle/staging"
 
-# Root of Jellyfin media library
+# Root of Loom media libraries
 # library_dir = "~/library"
 
 # Daemon logs and queue DB
@@ -36,15 +36,9 @@ api_key = ""
 # TMDB query language
 # language = "en-US"
 
-[jellyfin]
-# Enable Jellyfin library refresh
-# enabled = false
-
-# Jellyfin server URL
-# url = ""
-
-# Jellyfin API key (or set JELLYFIN_API_KEY env var)
-# api_key = ""
+[loom]
+# Loom server base URL (empty disables library scans)
+# url = "http://localhost:8097"
 
 [library]
 # Subdirectory under library_dir for movies

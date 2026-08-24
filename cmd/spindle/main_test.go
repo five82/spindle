@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/five82/spindle/internal/config"
 )
 
 func TestTruncateIsRuneSafe(t *testing.T) {
@@ -26,6 +28,31 @@ func TestTruncateIsRuneSafe(t *testing.T) {
 	multibyte := strings.Repeat("é", 9) // 18 bytes, 9 runes
 	if got := truncate(multibyte, 10); got != multibyte {
 		t.Fatalf("truncate cut a string within its rune budget: %q", got)
+	}
+}
+
+func TestLoomCommand(t *testing.T) {
+	cmd := newLoomCmd()
+	if cmd.Use != "loom" || cmd.Short != "Loom server integration" {
+		t.Fatalf("unexpected Loom command: Use=%q Short=%q", cmd.Use, cmd.Short)
+	}
+
+	var scan *cobra.Command
+	for _, child := range cmd.Commands() {
+		if child.Name() == "scan" {
+			scan = child
+			break
+		}
+	}
+	if scan == nil {
+		t.Fatal("loom scan subcommand is not registered")
+	}
+
+	oldCfg := cfg
+	cfg = &config.Config{}
+	t.Cleanup(func() { cfg = oldCfg })
+	if err := scan.RunE(scan, nil); err == nil || !strings.Contains(err.Error(), "loom is not configured") {
+		t.Fatalf("expected missing Loom configuration error, got: %v", err)
 	}
 }
 

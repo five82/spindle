@@ -15,7 +15,7 @@ type Config struct {
 	Paths         PathsConfig         `toml:"paths"`
 	API           APIConfig           `toml:"api"`
 	TMDB          TMDBConfig          `toml:"tmdb"`
-	Jellyfin      JellyfinConfig      `toml:"jellyfin"`
+	Loom          LoomConfig          `toml:"loom"`
 	Library       LibraryConfig       `toml:"library"`
 	Notifications NotificationsConfig `toml:"notifications"`
 	Subtitles     SubtitlesConfig     `toml:"subtitles"`
@@ -49,11 +49,9 @@ type TMDBConfig struct {
 	Language string `toml:"language"`
 }
 
-// JellyfinConfig defines Jellyfin server integration settings.
-type JellyfinConfig struct {
-	Enabled bool   `toml:"enabled"`
-	URL     string `toml:"url"`
-	APIKey  string `toml:"api_key"`
+// LoomConfig defines Loom server integration settings.
+type LoomConfig struct {
+	URL string `toml:"url"`
 }
 
 // LibraryConfig defines media library directory structure settings.

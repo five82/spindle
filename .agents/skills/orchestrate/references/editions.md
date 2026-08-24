@@ -35,26 +35,24 @@ selection picks a single primary), so when both cuts are wanted, orchestrate
 both manually rather than mixing pipeline + manual for the same movie -
 identical treatment keeps the two files consistent.
 
-## 3. Naming and placement (Jellyfin)
+## 3. Naming and placement (Loom)
 
-Multiple versions of one movie are files in the same movie folder sharing
-the folder's base name (which carries the `[tmdbid-ID]` marker), separated
-by ` - ` and a version label. Authoritative reference:
-https://jellyfin.org/docs/general/server/media/movies (Multiple Versions
-section):
+Loom supports one video file directly inside a movie directory. When several
+videos share that directory it chooses the most recently modified file, so it
+does not provide an edition picker. Place only the operator-selected cut in
+Loom using the normal name:
 
 ```
 Movies/Film (2010) [tmdbid-12345]/
-  Film (2010) [tmdbid-12345] - Theatrical.mkv
-  Film (2010) [tmdbid-12345] - Extended.mkv
+  Film (2010) [tmdbid-12345].mkv
 ```
 
-Jellyfin groups them into one library item with a version picker. The label
-after ` - ` is free text; use the official edition names from research.
+Keep any other cut outside Loom's configured movie library and report its
+location; do not rely on filename labels to make both cuts cataloged.
 
 ## 4. Verify and finish
 
 - ffprobe both files: AV1 video, one English subrip stream each, durations
   matching the researched runtimes of their respective cuts (not each
   other's).
-- `spindle jellyfin refresh`, clean scratch, `spindle start`.
+- `spindle loom scan`, clean scratch, `spindle start`.

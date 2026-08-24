@@ -43,46 +43,28 @@ Then per file: `spindle encode scratch/ripped/FILE -o scratch/encoded/`.
   back up.
 - If the movie track is explicitly excluded, do not rip it at all.
 
-## 3. Naming and placement (Jellyfin)
+## 3. Naming and placement (Loom)
 
-Extras live inside the movie's folder in named subdirectories Jellyfin
-recognizes. Authoritative reference:
-https://jellyfin.org/docs/general/server/media/movies (Extras section).
-The established layout:
+Loom ignores nested movie videos, including everything under `extras/` and
+`behindthescenes/`; it does not catalog nested extras folders. Do not
+place featurettes, deleted scenes, interviews, trailers, or other extras in a
+Loom movie directory as library content. Keep any requested non-short extras
+outside Loom's configured libraries and report their location separately.
+
+Theatrical shorts with their own TMDB ID are the supported exception. Place
+each as a standalone item in `[library] shorts_dir` (under `[paths]
+library_dir`) using Loom's one-video layout:
 
 ```
-Movies/Film (2010) [tmdbid-12345]/
-  Film (2010) [tmdbid-12345].mkv        <- the feature (pipeline-produced)
-  shorts/Geri's Game (1997).mkv         <- theatrical shorts
-  featurettes/The Making of Film.mkv
-  deleted scenes/Alternate Ending.mkv
-  interviews/Director Interview.mkv
-  trailers/Theatrical Trailer.mkv
-  extras/Anything Unclassifiable.mkv
+shorts/Short (Year) [tmdbid-ID]/Short (Year) [tmdbid-ID].mkv
 ```
 
-Recognized extras folders: `behind the scenes`, `deleted scenes`,
-`interviews`, `scenes`, `samples`, `shorts`, `featurettes`, `clips`,
-`trailers`, `extras`, `other`. Pick the most specific one; `extras` is the
-fallback. Name each file with the extra's real researched title, not the
-disc title name.
-
-If the feature was processed by the pipeline, the movie folder already
-exists in the library - add the extras subfolders to it. If only extras were
-requested and no movie folder exists, create it with the exact
-`Title (Year) [tmdbid-ID]` name from `spindle disc identify` so a future
-feature rip lands in the same folder.
-
-Place theatrical shorts as standalone movies in the configured
-`[library] shorts_dir` (under `[paths] library_dir`) when it is set. Use the
-same movie layout there: `Short (Year) [tmdbid-ID]/Short (Year)
-[tmdbid-ID].mkv`; most theatrical shorts have their own TMDB entry, and the
-file must include subtitles. If `shorts_dir` is not set, or the user wants
-the short attached to its parent feature, place it in `shorts/` inside the
-parent movie folder instead.
+The short directory and video filename must both carry the TMDB ID, and the
+file must include subtitles. Do not attach the short under its parent movie
+folder if it is expected to appear in Loom.
 
 ## 4. Verify and finish
 
 - ffprobe each placed file: AV1 video, audio present, sane duration.
 - Shorts: confirm exactly one English subrip stream, not forced.
-- `spindle jellyfin refresh`, remove scratch, `spindle start`.
+- `spindle loom scan`, remove scratch, `spindle start`.

@@ -7,7 +7,7 @@ argument-hint: <media file path(s)>
 
 # WhisperX Subtitle Generation
 
-Produce a Jellyfin-ready English SRT from primary English audio for a file
+Produce an English SRT from primary English audio for a file
 that has no verified OpenSubtitles download. Spindle no longer maintains
 WhisperX display generation in code; this skill replaces it. You run WhisperX
 for the raw transcript and you are the cleanup audit: read the result, fix
@@ -78,8 +78,9 @@ these badly; small deviations are fine.
 
 Final output is SRT — never PGS. Respect `mux_into_mkv`:
 
-- Sidecar: `Name.en.srt` next to the video file (Jellyfin picks it up).
-- Mux: `mkvmerge -o tmp.mkv FILE --language 0:eng --track-name 0:English final.srt`
+- Sidecar: `Name.en.srt` next to the video file when it is kept outside Loom;
+  Loom ignores external subtitle files.
+- Mux: for a Loom library, use `mkvmerge -o tmp.mkv FILE --language 0:eng --track-name 0:English final.srt`
   then replace the original. If the file already has subtitle tracks, drop
   them with `--no-subtitles` on the input file.
 

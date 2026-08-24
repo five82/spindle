@@ -1,9 +1,9 @@
 # spindle
 
-Spindle turns optical discs into a Jellyfin-ready library. Insert a disc and
+Spindle turns optical discs into a Loom-ready library. Insert a disc and
 the daemon handles identification with TMDB, ripping with MakeMKV, AV1 encoding
 with Reel, optional subtitles and commentary detection, organization,
-Jellyfin refreshes, and notifications.
+Loom scans, and notifications.
 
 A single Go binary provides both the operator CLI and daemon.
 
@@ -35,7 +35,7 @@ Requirements:
 - A TMDB API key
 
 Optional tools and services include `uvx` (which runs WhisperX, stable-ts,
-and ffsubsync on demand), `bd_info`, OpenSubtitles, OpenRouter, Jellyfin, and
+and ffsubsync on demand), `bd_info`, OpenSubtitles, OpenRouter, Loom, and
 ntfy. `spindle status` reports the locally required command and library
 checks.
 
@@ -125,7 +125,7 @@ An item that needs review can still complete, but questionable output is routed
 to the configured review area instead of being silently accepted. Clean TV
 episodes may reach the library while only unresolved episodes go to review.
 
-Final Jellyfin-facing display subtitles are SRT. They are muxed into the MKV by
+Final display subtitles are SRT. They are muxed into the MKV by
 default or kept as sidecars when muxing is disabled or fails. The pipeline
 downloads the identified title's OpenSubtitles track, cleans promo lines and
 SDH annotation from it, retimes it against the rip's WhisperX transcript with
@@ -147,7 +147,7 @@ multiple editions, discs MakeMKV struggles with - are handled by a coding
 agent using the `orchestrate` skill in `.agents/skills/orchestrate/`. The
 skill drives the same building blocks by hand: `spindle disc scan`,
 `spindle rip`, `spindle encode`, `spindle subtitle`, and
-`spindle jellyfin refresh`. The daemon must be stopped while orchestration
+`spindle loom scan`. The daemon must be stopped while orchestration
 runs; `spindle rip` and `spindle encode` enforce this.
 
 ## Recovery
@@ -202,13 +202,13 @@ spindle staging clean
 Locations come from the generated configuration:
 
 - `staging_dir`: per-item ripped, encoded, transcript, and subtitle artifacts
-- `library_dir`: clean movie and TV outputs using Jellyfin-style names
+- `library_dir`: clean movie and TV outputs using Loom-style names
 - `review_dir`: outputs requiring operator inspection, grouped by reason
 - `state_dir`: timestamped JSON daemon logs and the transient queue database
 - XDG cache: rip cache, disc-ID cache, and OpenSubtitles cache
 - XDG runtime directory, with `/tmp` fallback: daemon socket and lock
 
-Identified library paths include durable Jellyfin TMDB provider IDs:
+Identified library paths include Loom TMDB IDs:
 
 ```text
 Movies/Movie (2024) [tmdbid-123456]/Movie (2024) [tmdbid-123456].mkv

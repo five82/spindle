@@ -35,7 +35,7 @@ func TestPackageBoundaries(t *testing.T) {
 
 	assertNoImports(t, "queue", map[string]bool{"ripspec": true})
 	assertNoImports(t, "config", map[string]bool{
-		"jellyfin": true, "keydb": true, "llm": true, "notify": true,
+		"keydb": true, "llm": true, "loom": true, "notify": true,
 		"opensubtitles": true, "tmdb": true,
 	})
 }

@@ -136,7 +136,7 @@ invalid overlaps, and has no cue past the final encode duration.
 
 A full English translation is a normal display subtitle, not a forced track.
 For a feature with no English primary audio, make it the default so playback
-is understandable without relying on a Jellyfin profile's subtitle policy:
+is understandable without relying on a client subtitle policy:
 
 - Codec: SubRip/SRT
 - Language: `eng`
@@ -165,6 +165,6 @@ Inspect the result with `mkvmerge -J` and `ffprobe`. Require:
 - Start, middle, and end subtitle spot-checks remain synchronized in the final
   MKV.
 
-Only then place the file, refresh Jellyfin, verify Jellyfin reports the
-English subtitle correctly, and delete the downloaded candidates, SUP, OCR
-images, and other scratch files.
+Only then place the file, run `spindle loom scan`, verify Loom reports the
+embedded English subtitle correctly, and delete the downloaded candidates,
+SUP, OCR images, and other scratch files.

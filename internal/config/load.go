@@ -175,10 +175,6 @@ func collectEnvOverrides(cfg *Config) []string {
 		cfg.TMDB.APIKey = v
 		applied = append(applied, "TMDB_API_KEY")
 	}
-	if v := os.Getenv("JELLYFIN_API_KEY"); v != "" {
-		cfg.Jellyfin.APIKey = v
-		applied = append(applied, "JELLYFIN_API_KEY")
-	}
 	if v := os.Getenv("OPENROUTER_API_KEY"); v != "" {
 		cfg.LLM.APIKey = v
 		applied = append(applied, "OPENROUTER_API_KEY")

@@ -238,24 +238,22 @@ func TestValidateNotifications(t *testing.T) {
 	}
 }
 
-func TestValidateJellyfinConditional(t *testing.T) {
+func TestValidateLoomURL(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.TMDB.APIKey = "test-key"
 	cfg.Paths.StagingDir = "/tmp/staging"
 	cfg.Paths.StateDir = "/tmp/state"
 	cfg.Paths.ReviewDir = "/tmp/review"
-	cfg.Jellyfin.Enabled = true
+	cfg.Loom.URL = "ftp://loom.example.test?bad=query"
 
 	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("Validate should fail when jellyfin enabled without url/api_key")
+	if err == nil || !strings.Contains(err.Error(), "loom.url") {
+		t.Fatalf("Validate should reject invalid Loom URL, got: %v", err)
 	}
-	errMsg := err.Error()
-	if !strings.Contains(errMsg, "jellyfin.url") {
-		t.Errorf("expected error about jellyfin.url, got: %s", errMsg)
-	}
-	if !strings.Contains(errMsg, "jellyfin.api_key") {
-		t.Errorf("expected error about jellyfin.api_key, got: %s", errMsg)
+
+	cfg.Loom.URL = "https://loom.example.test/spindle"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate rejected valid Loom URL: %v", err)
 	}
 }
 
@@ -324,7 +322,7 @@ func TestSampleConfigIsValidTOML(t *testing.T) {
 
 	// Should contain all major sections.
 	expectedSections := []string{
-		"tmdb", "paths", "api", "jellyfin", "library",
+		"tmdb", "paths", "api", "loom", "library",
 		"notifications", "subtitles", "rip_cache", "disc_id_cache",
 		"makemkv", "llm", "commentary", "content_id", "logging",
 	}
@@ -398,7 +396,6 @@ func TestEnvironmentVariableOverrides(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "config"))
 
 	t.Setenv("TMDB_API_KEY", "tmdb-from-env")
-	t.Setenv("JELLYFIN_API_KEY", "jf-from-env")
 	t.Setenv("OPENROUTER_API_KEY", "or-from-env")
 	t.Setenv("SPINDLE_API_TOKEN", "api-from-env")
 	t.Setenv("HUGGING_FACE_HUB_TOKEN", "hf-from-env")
@@ -412,9 +409,6 @@ func TestEnvironmentVariableOverrides(t *testing.T) {
 
 	if cfg.TMDB.APIKey != "tmdb-from-env" {
 		t.Errorf("TMDB API key not set from env: %q", cfg.TMDB.APIKey)
-	}
-	if cfg.Jellyfin.APIKey != "jf-from-env" {
-		t.Errorf("Jellyfin API key not set from env: %q", cfg.Jellyfin.APIKey)
 	}
 	if cfg.LLM.APIKey != "or-from-env" {
 		t.Errorf("LLM API key not set from env: %q", cfg.LLM.APIKey)

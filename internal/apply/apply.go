@@ -174,7 +174,7 @@ func (h *Handler) applySubtitles(ctx context.Context, sess *stage.Session, key, 
 	}
 
 	// Place the sidecar next to the encoded file so the organizer's sidecar
-	// glob finds it (and Jellyfin when muxing is disabled).
+	// glob finds it when muxing is disabled.
 	sidecarPath := srtutil.DisplaySubtitlePath(encodedPath, record.Language)
 	if err := fileutil.CopyFile(record.SubtitlePath, sidecarPath); err != nil {
 		return fmt.Errorf("place subtitle sidecar %s: %w", key, err)

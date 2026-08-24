@@ -44,13 +44,12 @@ Check TMDB (via `spindle disc identify` and a web search of the TMDB entry):
    `Movies/Film (1963) [tmdbid-12345]/Film (1963) [tmdbid-12345].mkv`.
 
 If the halves genuinely will not concatenate (different resolutions or
-layouts), fall back to Jellyfin's multi-part naming in one folder -
-`Film (1963) [tmdbid-12345] - part1.mkv` / `... - part2.mkv` (verify the
-current part-naming convention at
-https://jellyfin.org/docs/general/server/media/movies) - and say in the
-report why the join was not possible.
+layouts), do not place them as a multipart Loom movie. Loom expects one video
+file directly in a movie directory and selects only the newest when several
+are present. Keep the parts outside Loom's configured movie library and say
+in the report why no Loom-cataloged movie was produced.
 
 ## 3. Verify and finish
 
 - ffprobe: AV1 video, duration ≈ TMDB runtime, one English subrip stream.
-- `spindle jellyfin refresh`, clean scratch, `spindle start`.
+- `spindle loom scan`, clean scratch, `spindle start`.

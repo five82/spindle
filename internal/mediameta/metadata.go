@@ -115,7 +115,7 @@ func (m *Metadata) Filename() string {
 	return buildEpisodeFilename(m)
 }
 
-// BaseFilename returns the movie/base filename using Jellyfin provider-ID
+// BaseFilename returns the movie/base filename using Loom's TMDB-ID
 // naming: "Title (Year) [tmdbid-ID]".
 func (m *Metadata) BaseFilename() string {
 	title := m.Title

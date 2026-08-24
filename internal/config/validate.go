@@ -45,16 +45,14 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Conditional requirements.
-	if c.Jellyfin.Enabled {
-		if c.Jellyfin.URL == "" {
-			errs = append(errs, "jellyfin.url is required when jellyfin.enabled")
-		}
-		if c.Jellyfin.APIKey == "" {
-			errs = append(errs, "jellyfin.api_key is required when jellyfin.enabled")
+	if c.Loom.URL != "" {
+		parsed, err := url.Parse(c.Loom.URL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			errs = append(errs, "loom.url must be an absolute http or https URL without a query or fragment")
 		}
 	}
 
+	// Conditional requirements.
 	if c.Subtitles.Enabled && c.Subtitles.WhisperXVADMethod != "silero" {
 		if c.Subtitles.WhisperXHFToken == "" {
 			errs = append(errs, "subtitles.whisperx_hf_token is required when subtitles enabled with non-silero VAD method")

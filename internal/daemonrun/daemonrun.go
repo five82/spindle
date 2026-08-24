@@ -22,9 +22,9 @@ import (
 	"github.com/five82/spindle/internal/discidcache"
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/httpapi"
-	"github.com/five82/spindle/internal/jellyfin"
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/logs"
+	"github.com/five82/spindle/internal/loom"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
@@ -128,7 +128,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			"decision_reason", "no ntfy topic configured",
 		)
 	}
-	jfClient := jellyfin.New(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, logger)
+	loomClient := loom.New(cfg.Loom.URL, logger)
 	osClient := opensubtitles.New(opensubtitles.Params{
 		APIKey:    cfg.Subtitles.OpenSubtitlesAPIKey,
 		UserAgent: cfg.Subtitles.OpenSubtitlesUserAgent,
@@ -176,7 +176,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	analysisHandler := audioanalysis.New(cfg, llmClient, transcriber)
 	subtitleHandler := subtitle.New(cfg, transcriber, osClient)
 	applyHandler := apply.New(cfg)
-	organizerHandler := organizer.New(cfg, jfClient, notifier)
+	organizerHandler := organizer.New(cfg, loomClient, notifier)
 
 	// Check dependencies and create status tracker.
 	statusTracker := httpapi.NewStatusTracker(CheckDependencies())

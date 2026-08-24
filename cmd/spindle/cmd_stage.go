@@ -310,7 +310,7 @@ func newGensubtitleCmd() *cobra.Command {
 }
 
 // resolveSubtitleIdentity picks the TMDB identity for one file: explicit
-// flags win, then the Jellyfin path markers.
+// flags win, then the Loom path markers.
 func resolveSubtitleIdentity(file string, tmdbID, season, episode int) (subtitle.PathIdentity, error) {
 	if tmdbID > 0 {
 		return subtitle.PathIdentity{TMDBID: tmdbID, Season: season, Episode: episode, EpisodeEnd: episode}, nil

@@ -178,7 +178,7 @@ Require all of the following:
 - No PGS subtitle is present.
 
 Only then place or atomically replace the final MKV, remove any forced-SRT
-sidecar beside it, run `spindle jellyfin refresh`, and verify Jellyfin reports
-both the regular English subtitle and the embedded English forced subtitle
-with the correct flags. Delete the SUP, working SRT, OCR images, and other
-scratch artifacts only after this verification succeeds.
+sidecar beside it, run `spindle loom scan`, and verify Loom reports both the
+regular English subtitle and the embedded English forced subtitle with the
+correct flags. Delete the SUP, working SRT, OCR images, and other scratch
+artifacts only after this verification succeeds.

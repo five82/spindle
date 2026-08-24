@@ -39,7 +39,7 @@ var lineBreakMarkerPattern = regexp.MustCompile(`(?i)\[br\]|<br\s*/?>`)
 var assOverrideTagPattern = regexp.MustCompile(`\{[^}]*\}`)
 
 // markupTagPattern matches any HTML-style tag; keepMarkupTags lists the
-// display formatting Jellyfin renders in SRT and therefore survives cleanup.
+// display formatting preserved in SRT and therefore survives cleanup.
 var markupTagPattern = regexp.MustCompile(`</?([a-zA-Z][a-zA-Z0-9]*)[^>]*>`)
 
 var keepMarkupTags = map[string]bool{"i": true, "b": true}
@@ -93,7 +93,7 @@ func bytesTrimBOM(data []byte) []byte {
 
 // cleanDownloadedSubtitle parses raw downloaded subtitle bytes and returns
 // display-ready cues: spam cues dropped, ASS/HTML markup reduced to the
-// italic/bold tags Jellyfin renders, SDH annotations stripped, and cues that
+// italic/bold tags preserved in SRT, SDH annotations stripped, and cues that
 // end up empty removed. Cue timing is preserved; indexes are renumbered.
 func cleanDownloadedSubtitle(data []byte) ([]srtutil.Cue, cleanStats) {
 	cues := srtutil.Parse(decodeSubtitleText(data))

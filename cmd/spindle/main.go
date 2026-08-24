@@ -44,9 +44,9 @@ var cfg *config.Config
 func main() {
 	root := &cobra.Command{
 		Use:   "spindle",
-		Short: "Optical disc to Jellyfin media library automation",
-		Long: `Spindle automates optical disc to Jellyfin library processing:
-disc detection, ripping, encoding, metadata, subtitles, and library refresh.
+		Short: "Optical disc to Loom media library automation",
+		Long: `Spindle automates optical disc to Loom media library processing:
+disc detection, ripping, encoding, metadata, subtitles, and library scanning.
 
 First run: 'spindle config init' to generate a config, then 'spindle start'.`,
 		Example: `  spindle start              # launch the daemon
@@ -101,7 +101,7 @@ First run: 'spindle config init' to generate a config, then 'spindle start'.`,
 		newRipCmd(),
 		newEncodeCmd(),
 		newGensubtitleCmd(),
-		newJellyfinCmd(),
+		newLoomCmd(),
 		newCacheCmd(),
 		newConfigCmd(),
 		newStagingCmd(),

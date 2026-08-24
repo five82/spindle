@@ -48,7 +48,7 @@ forgotten stop fails loudly rather than corrupting anything.
 | `spindle debug crop FILE` / `spindle debug commentary FILE` | Crop and commentary diagnostics for a single file |
 | `mkvmerge -J FILE` / `mkvextract tracks FILE ID:OUT.sup` | Inspect and extract a source PGS subtitle track for manual subtitle work |
 | `uvx pgsrip [--keep-temp-files] FILE.en.sup` | OCR an extracted English PGS track to SRT; requires the system Tesseract English data |
-| `spindle jellyfin refresh` | Trigger a Jellyfin library scan after manual placement |
+| `spindle loom scan` | Trigger a Loom library scan after manual placement |
 | `spindle queue audit N` / `spindle logs` | Diagnostics for pipeline-processed items |
 
 Library, review, and staging paths come from the config file
@@ -59,7 +59,7 @@ workflows do not write there.
 
 ## Hard rules
 
-- **Jellyfin-facing subtitle output is SRT.** Never place PGS as final output.
+- **Final display subtitle output is SRT.** Never place PGS as final output.
   Embed a foreign-dialogue forced track in the final MKV as English SubRip,
   named `English (Forced)`, with forced=yes and default=no. Preserve Spindle's
   regular English SRT as a separate non-forced track; keep PGS only in scratch
@@ -69,20 +69,21 @@ workflows do not write there.
   requirement and ask the operator before running `sudo apt install
   tesseract-ocr tesseract-ocr-eng`. Run the Python tool ephemerally with
   `uvx pgsrip`; do not add it or Tesseract as a Spindle dependency.
-- **Follow the Jellyfin organization and naming standards** for everything
-  placed in the library:
-  - Movies (layout, extras folders, multiple versions, multi-part):
-    https://jellyfin.org/docs/general/server/media/movies
-  - Shows: https://jellyfin.org/docs/general/server/media/shows
-- **Follow Spindle's naming convention on top of that**: every movie folder,
-  movie file, and show folder carries the TMDB provider ID -
-  `Title (Year) [tmdbid-ID]` (TV: `Show (Year) [tmdbid-ID]/Season NN/`).
-  This is what the automated pipeline produces, and Spindle tooling depends
-  on it - `spindle subtitle` reads the `[tmdbid-ID]` marker from
-  library paths to identify the title on OpenSubtitles (pre-placement files
-  need `--tmdb-id` instead). Get the ID from `spindle disc identify` or TMDB
-  directly. Extras files inside the named subfolders do not need the marker;
-  the feature file and its folder do.
+- **Follow Loom's library conventions** for everything placed in the library:
+  - A movie or short film directory contains exactly one video file directly
+    inside it. Both directory and file use `Title (Year) [tmdbid-ID]`.
+  - A TV show directory uses `Show (Year) [tmdbid-ID]`; episodes use
+    `SxxEyy` (or `SxxEyy-zz`) filenames and may be inside `Season NN/`.
+  - Loom ignores nested movie videos, including `extras/` and
+    `behindthescenes/`, and when a movie directory has multiple videos it
+    selects only the most recently modified one. Do not present extras,
+    alternate cuts, or unjoined multipart movies as Loom library content.
+- **Follow Spindle's naming convention**: every movie folder, movie file, and
+  show folder carries the TMDB ID as above. This is what the automated
+  pipeline produces, and Spindle tooling depends on it - `spindle subtitle`
+  reads the `[tmdbid-ID]` marker from library paths to identify the title on
+  OpenSubtitles (pre-placement files need `--tmdb-id` instead). Get the ID
+  from `spindle disc identify` or TMDB directly.
 - **Subtitles:** none for extras (featurettes, deleted scenes, interviews,
   trailers). Yes for theatrical shorts (Pixar, Looney Tunes, etc.) and for
   every feature-length cut. When the primary dialogue is English, run
@@ -121,7 +122,7 @@ workflows do not write there.
 - Web research (runtimes, extras listings, edition details) should be
   cross-checked against actual title runtimes from `spindle disc scan` -
   runtime agreement within ~1-2% is the primary matching signal.
-- Finish with `spindle jellyfin refresh`, then `spindle start`.
+- Finish with `spindle loom scan`, then `spindle start`.
 
 ## Scenario routing
 
@@ -159,7 +160,7 @@ Every scenario follows the same skeleton:
    for a separate sparse English forced track.
 9. Verify video, audio policy, SRT subtitles, and duration with `ffprobe`.
 10. Name and place into the library per the reference file's conventions.
-11. `spindle jellyfin refresh`, clean scratch, `spindle start`.
+11. `spindle loom scan`, clean scratch, `spindle start`.
 12. Report what was produced: each output path, what it is, and how each
     disc title was identified (runtime match, web source).
 

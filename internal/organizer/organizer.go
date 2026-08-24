@@ -15,9 +15,9 @@ import (
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/fileutil"
-	"github.com/five82/spindle/internal/jellyfin"
 	"github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/logs"
+	"github.com/five82/spindle/internal/loom"
 	"github.com/five82/spindle/internal/mediameta"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
@@ -32,14 +32,14 @@ const copyProgressLogInterval = 3 * time.Minute
 
 // Handler implements stage.Handler for organization.
 type Handler struct {
-	cfg      *config.Config
-	jfClient *jellyfin.Client
-	notifier *notify.Notifier
+	cfg        *config.Config
+	loomClient *loom.Client
+	notifier   *notify.Notifier
 }
 
 // New creates an organization handler.
-func New(cfg *config.Config, jfClient *jellyfin.Client, notifier *notify.Notifier) *Handler {
-	return &Handler{cfg: cfg, jfClient: jfClient, notifier: notifier}
+func New(cfg *config.Config, loomClient *loom.Client, notifier *notify.Notifier) *Handler {
+	return &Handler{cfg: cfg, loomClient: loomClient, notifier: notifier}
 }
 
 // Run executes the organization stage.
@@ -153,15 +153,15 @@ func (h *Handler) placeInLibrary(
 }
 
 // finalize performs the item-level completion work after all assets are
-// placed (task: finalize): Jellyfin refresh, terminal notification, staging
+// placed (task: finalize): Loom scan, terminal notification, staging
 // cleanup, and the stage completion log.
 func (h *Handler) finalize(ctx context.Context, logger *slog.Logger, sess *stage.Session, libraryCount, reviewCount int) error {
-	if h.jfClient != nil {
-		if err := h.jfClient.Refresh(ctx); err != nil {
-			logger.Warn("jellyfin refresh failed",
-				"event_type", "jellyfin_refresh_error",
+	if h.loomClient != nil {
+		if err := h.loomClient.Scan(ctx); err != nil {
+			logger.Warn("Loom scan failed",
+				"event_type", "loom_scan_error",
 				"error_hint", err.Error(),
-				"impact", "library may not show new content immediately",
+				"impact", "Loom may not show new content immediately",
 			)
 			// Degraded, not fatal.
 		}

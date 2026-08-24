@@ -13,7 +13,7 @@ var (
 	episodePathPattern = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])s([0-9]{1,2})e([0-9]{1,3})(?:-e([0-9]{1,3}))?(?:[^a-z0-9]|$)`)
 )
 
-// PathIdentity is the TMDB identity parsed from a Jellyfin library path.
+// PathIdentity is the TMDB identity parsed from a Loom library path.
 // Season and Episode are zero for movies; EpisodeEnd > Episode marks a
 // multi-episode file.
 type PathIdentity struct {
@@ -23,7 +23,7 @@ type PathIdentity struct {
 	EpisodeEnd int
 }
 
-// ParseLibraryPathIdentity reads Jellyfin's TMDB provider marker
+// ParseLibraryPathIdentity reads Loom's TMDB ID marker
 // ([tmdbid-ID]) plus the Season NN / SxxEyy markers from a library path.
 // found is false when the path carries no marker at all; err reports a
 // marker that is present but inconsistent.

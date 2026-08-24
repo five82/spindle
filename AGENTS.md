@@ -12,7 +12,7 @@
 
 ## Project
 
-Personal single-operator tool: optical disc -> Jellyfin library (MakeMKV rip,
+Personal single-operator tool: optical disc -> Loom library (MakeMKV rip,
 Reel AV1 target-quality encode, TMDB metadata, OpenSubtitles subtitles synced
 against WhisperX transcripts, ntfy).
 Feature-complete and in a bugfix phase — avoid over-engineering. Break
@@ -62,7 +62,7 @@ or simplified.
 
 ## Hard invariants
 
-- Jellyfin-facing subtitle output is SRT. Never PGS as final library output.
+- Final display subtitle output is SRT. Never PGS as final library output.
 - The queue DB is transient: no migrations, no schema versioning. Schema
   changes mean clear the database.
 - `queue` must not import `ripspec` (RipSpec is opaque text to the store);

@@ -124,7 +124,7 @@ Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors
    - Stages taking unusually long or short (use `duration_seconds` when available)
    - Large gaps between stage events suggesting hangs
    - Repeated retry attempts
-   - Use `logs.events` for long-running work visibility: `encoding_progress`, `rip_progress`, `copy_progress`, `transcription_extract[_complete]`, `transcription_whisperx[_complete]`, `commentary_llm_start/_complete`, `mux_start/_complete`, `jellyfin_refresh_start`, and plan events such as `*_plan`
+   - Use `logs.events` for long-running work visibility: `encoding_progress`, `rip_progress`, `copy_progress`, `transcription_extract[_complete]`, `transcription_whisperx[_complete]`, `commentary_llm_start/_complete`, `mux_start/_complete`, `loom_scan_start`, and plan events such as `*_plan`
    - Encode lifecycle events: `encode_init` (input resolution/dynamic range), `encoder_config` (preset/quality and full `svtav1_params` — check level/mbr cap here for playback-compat questions), `encoding_substage` (reel pipeline phase: chunking/encoding/merging/muxing), `encode_result` (sizes, wall time, speed). `encoding_progress` carries `bitrate` and `chunks_complete/chunks_total`.
    - Item lifecycle: `event_type=item_complete` is the one-line completion summary (per-stage `<stage>_duration` attrs plus `total_wall_time`); `event_type=operator_action` records user-initiated retry/stop/remove/clear/disc-pause; `event_type=startup_queue_state` shows what a daemon restart resumed.
    - Level layout: the stage executor emits exactly one `stage_start`/`stage_complete` event pair per stage run at DEBUG ("item stage derived" is also DEBUG; all still present in the log file and in gather output); the INFO narrative is the workflow "stage started/completed" decision pair. `stage_duration` (on the executor's `stage_complete` and the workflow decision log) is a human-readable Go duration string.
@@ -398,20 +398,20 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 | Wrong crop detection | Encoding | `encoding.snapshot.crop_filter` aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
 | A/V sync changed by encoding | Encoding | `analysis.av_sync.entries[].passed=false`; source/output relative A/V start offsets differ by more than 100 ms | Audio leads or lags video; CRITICAL even if Reel's persisted validation says passed |
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review using `media[].probe.streams` | Commentary tracks not preserved |
-| Unlabeled commentary | Audio Analysis | Audio stream with `disposition.comment=1` but no "Commentary" in `tags.title` | Jellyfin won't recognize tracks |
+| Unlabeled commentary | Audio Analysis | Audio stream with `disposition.comment=1` but no "Commentary" in `tags.title` | Commentary track is not clearly labeled |
 | Stereo downmix kept | Audio Analysis | Extra 2ch audio track in `media[].probe.streams` | Unnecessary audio bloat |
 | Subtitle skipped | Subtitles | `subtitle_generation_results[].source` is `none`; WARN `event_type=subtitle_skipped`; pre-flagged warning anomaly | Title has no subtitles; WARNING not CRITICAL — recovery is the whisperx-subtitles skill or a `spindle subtitle` retry |
 | SRT validation review/failure | Subtitles | `subtitle_generation_results[].validation_result` is `needs_review` or `failed`; `review_issues`/`severe_issues` populated; review routing present | Subtitle pipeline flagged output for separate review; do not inspect its text here |
 | Subtitle tail mismatch | Subtitles | An adopted `subtitle_source` reports `reference_tail_gap_s` over 600 seconds despite the gate, or other structural validation explicitly rejected/review-routed the tail; do not use Matroska `tags.DURATION`, video-tail length, or a below-threshold raw WhisperX tail alone | Incomplete or wrong candidate adopted despite the gate |
 | Extra/forced subtitle | Subtitles | More than one display subtitle stream, `disposition.forced=1`, or "Forced" subtitle labels in current outputs | Stale or incorrect subtitle output; current pipeline should produce one non-forced display SRT |
-| Subtitles not muxed | Subtitles | Adopted record (`source=opensubtitles`) but no subtitle streams in `media[].probe.streams` | Jellyfin may not auto-load; a `source=none` title with no subtitle stream is NOT this pattern |
-| Unlabeled subtitles | Subtitles | Missing or incorrect `tags.title` on subtitle stream | Jellyfin display issue |
+| Subtitles not muxed | Subtitles | Adopted record (`source=opensubtitles`) but no subtitle streams in `media[].probe.streams` | Loom ignores external subtitle files; a `source=none` title with no subtitle stream is NOT this pattern |
+| Unlabeled subtitles | Subtitles | Missing or incorrect `tags.title` on subtitle stream | Subtitle display issue |
 | Low episode match confidence | Episode ID | `envelope.episodes[].match_confidence` < 0.70 | Episodes may be mislabeled |
 | Decisive low-similarity episode match | Episode ID | `decision_type=episode_match` with `confidence_quality=decisive_low_similarity` and strong margins | Usually not a defect; explain as lower transcript/reference overlap rather than confusion with another episode |
 | Episodes unresolved | Episode ID | `item.needs_review=true`, episodes with `episode=0` | Placeholder names in review_dir |
 | Episode sequence gaps | Episode ID | Non-sequential episode numbers in `envelope.episodes[]` | Missing episodes or matching error |
 | Per-episode rip failure | Ripping | `envelope.assets.ripped[]` with `status: "failed"` | Episode missing from pipeline |
-| Per-episode encode failure | Encoding | `envelope.assets.encoded[]` with `status: "failed"` | Episode won't appear in Jellyfin |
+| Per-episode encode failure | Encoding | `envelope.assets.encoded[]` with `status: "failed"` | Episode will not appear in Loom |
 | Per-episode subtitle failure | Subtitles | `envelope.assets.subtitled[]` with `status: "failed"` | Episode missing subtitles |
 | Cross-episode resolution mismatch | Encoding | Different resolutions across `media[]` entries | Inconsistent quality |
 | Cross-episode audio mismatch | Encoding | Different audio stream counts across `media[]` entries | Inconsistent audio tracks |

@@ -1,4 +1,4 @@
-// Package subtitle produces Jellyfin display SRTs by adopting cleaned,
+// Package subtitle produces display SRTs by adopting cleaned,
 // retimed OpenSubtitles downloads verified against the rip's WhisperX
 // transcript. The pipeline stage skips the episode (warning, not failure)
 // when no candidate survives verification; the same adoption process backs
