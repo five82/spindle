@@ -52,8 +52,13 @@ func digestReport() *Report {
 		Media: []MediaFileProbe{{Path: "/x/broken.mkv", EpisodeKey: "s01_002", Error: "ffprobe failed"}},
 		Analysis: &Analysis{
 			Anomalies: []Anomaly{{Severity: "critical", Category: "assets", Message: "episode missing"}},
-			AVSync: &AVSyncSummary{Failed: 1, Entries: []AVSyncEntry{{
-				EpisodeKey: "main", SourceAudioOffsetSec: 0.501, OutputAudioOffsetSec: 0, DriftMilliseconds: -501,
+			FinalValidation: &ripspec.FinalValidation{Entries: []ripspec.FinalValidationEntry{{
+				EpisodeKey:   "main",
+				OutputPath:   "/library/main.mkv",
+				FailedChecks: []string{"av_sync drift -501ms exceeds 100ms"},
+				AVSync: &ripspec.AVSyncCheck{
+					SourceAudioOffsetSec: 0.501, OutputAudioOffsetSec: 0, DriftMilliseconds: -501,
+				},
 			}}},
 			DecisionGroups: []DecisionGroup{
 				{
@@ -104,8 +109,9 @@ func TestRenderDigestCoreSections(t *testing.T) {
 		"s01_001 title_id=1 S01E03 conf=0.95",
 		"s01_002 title_id=2 UNRESOLVED",
 		"REVIEW: unresolved",
-		"## Audio/video sync (independent source comparison)",
-		"main: FAILED | source offset +501ms -> output +0ms | audio 501ms earlier",
+		"## Final output validation (apply stage, against ripped source)",
+		"main: FAILED | av_sync drift -501ms exceeds 100ms",
+		"A/V sync: FAILED | source offset +501ms -> output +0ms | audio 501ms earlier",
 		// Probe errors must surface even without valid summaries.
 		"PROBE ERROR /x/broken.mkv (s01_002): ffprobe failed",
 		"## Digest limits",

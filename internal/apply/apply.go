@@ -18,8 +18,10 @@ import (
 
 // Handler owns the apply stage. It serializes audio refinement, commentary
 // disposition, duration validation, and subtitle muxing after the encoding
-// and analysis branches join. Keeping every encoded-file writer here prevents
-// concurrent in-place rewrites of the same MKV.
+// and analysis branches join, then verifies the files the organizer will
+// deliver. Keeping every encoded-file writer here prevents concurrent
+// in-place rewrites of the same MKV, and makes this the only stage that can
+// see the finished output.
 type Handler struct {
 	cfg *config.Config
 }
@@ -43,12 +45,20 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	if analysisData == nil {
 		analysisData = &ripspec.AudioAnalysisData{}
 	}
+	// Snapshot the recorded primary audio index before this stage overwrites
+	// it with the post-refinement one: the final A/V sync comparison needs the
+	// index as it applies to the ripped source.
+	sourceAudioIndex := -1
+	if env.Attributes.AudioAnalysis != nil {
+		sourceAudioIndex = env.Attributes.AudioAnalysis.PrimaryTrack.Index
+	}
 
 	// Phase 1: per-file audio refinement and commentary disposition, using
 	// the episode's own commentary indices from the analysis stage.
-	sess.Progress(10, "Phase 1/3 - Audio refinement")
-	logger.Info("Phase 1/3 - Audio refinement")
+	sess.Progress(10, "Phase 1/4 - Audio refinement")
+	logger.Info("Phase 1/4 - Audio refinement")
 	var aggregateComms []ripspec.CommentaryTrackRef
+	expectations := make([]finalExpectation, 0, len(inputs))
 	for i, in := range inputs {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -72,9 +82,12 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			logger.Warn("audio refinement failed",
 				"event_type", "audio_refinement_error",
 				"error_hint", refErr.Error(),
-				"impact", "audio refinement skipped, proceeding with all tracks",
+				"impact", "unrefined audio shipped; episode routed to review",
 				"episode_key", in.Key,
 			)
+			if err := flagForReview(sess, in.Key, "audio_refinement: "+refErr.Error()); err != nil {
+				return err
+			}
 			refinement = nil
 		}
 
@@ -86,6 +99,18 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			epAnalysis.CommentaryTracks = remapped
 		}
 		aggregateComms = append(aggregateComms, remapped...)
+
+		// Record what this file was supposed to end up with. Commentary
+		// disposition only runs when refinement produced a plan, so an
+		// unrefined file expects no comment flags at all.
+		expectation := finalExpectation{key: in.Key, encodedPath: in.Input.Path}
+		if refinement != nil {
+			expectation.keptAudio = len(refinement.KeptIndices)
+			for _, ref := range remapped {
+				expectation.commentary = append(expectation.commentary, ref.Index)
+			}
+		}
+		expectations = append(expectations, expectation)
 		if i == 0 {
 			analysisData.PrimaryTrack = primary
 			if refinement != nil && refinement.PrimaryAudioDescription != "" {
@@ -99,18 +124,22 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	analysisData.CommentaryTracks = aggregateComms
 
 	// Phase 2: duration validation across all encoded outputs.
-	sess.Progress(45, "Phase 2/3 - Audio validation")
-	logger.Info("Phase 2/3 - Audio validation")
+	sess.Progress(45, "Phase 2/4 - Audio validation")
+	logger.Info("Phase 2/4 - Audio validation")
 	var allPaths []string
 	for _, in := range inputs {
 		allPaths = append(allPaths, in.Input.Path)
 	}
-	if err := validateAudioTargetDurations(ctx, allPaths); err != nil {
-		reason := "audio_validation: " + err.Error()
+	encodedDurations, durErr := validateAudioTargetDurations(ctx, allPaths)
+	for i := range expectations {
+		expectations[i].encodedDuration = encodedDurations[expectations[i].encodedPath]
+	}
+	if durErr != nil {
+		reason := "audio_validation: " + durErr.Error()
 		sess.AddReviewReason(reason)
 		logger.Warn("audio validation failed",
 			"event_type", "audio_validation_failed",
-			"error_hint", err.Error(),
+			"error_hint", durErr.Error(),
 			"impact", "item routed to review",
 		)
 		logger.Info("validation failure flagged for review",
@@ -122,8 +151,8 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	// Phase 3: subtitle placement and muxing from the analysis branch's
 	// generated SRTs.
-	sess.Progress(75, "Phase 3/3 - Subtitle muxing")
-	logger.Info("Phase 3/3 - Subtitle muxing")
+	sess.Progress(70, "Phase 3/4 - Subtitle muxing")
+	logger.Info("Phase 3/4 - Subtitle muxing")
 	if h.cfg.Subtitles.Enabled {
 		for _, in := range inputs {
 			if ctx.Err() != nil {
@@ -141,8 +170,20 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		)
 	}
 
+	// Phase 4: probe what the organizer will actually deliver. This is the
+	// only check that sees the file after every rewrite, so it owns the
+	// A/V sync, subtitle layout, commentary label, and audio layout
+	// invariants for the delivered output.
+	sess.Progress(85, "Phase 4/4 - Final validation")
+	logger.Info("Phase 4/4 - Final validation")
+	verdict, err := verifyFinalOutputs(ctx, sess, expectations, sourceAudioIndex)
+	if err != nil {
+		return err
+	}
+
 	env.Attributes.AudioAnalysis = analysisData
-	sess.Progress(95, "Phase 3/3 - Persisting results")
+	env.Attributes.FinalValidation = verdict
+	sess.Progress(95, "Phase 4/4 - Persisting results")
 	return sess.Save()
 }
 
@@ -185,12 +226,18 @@ func (h *Handler) applySubtitles(ctx context.Context, sess *stage.Session, key, 
 	if h.cfg.Subtitles.MuxIntoMKV {
 		muxedPath, err := muxDisplaySubtitle(ctx, logger, encodedPath, sidecarPath, key, record.Language)
 		if err != nil {
+			// Loom ignores sidecar SRTs, so the fallback ships a library file
+			// with no visible subtitles: route it to review rather than
+			// letting it pass as a clean import.
 			logger.Warn("subtitle mux failed",
 				"event_type", "mux_error",
 				"error_hint", err.Error(),
-				"impact", "subtitle remains as sidecar",
+				"impact", "subtitle remains a sidecar Loom cannot see; episode routed to review",
 				"episode_key", key,
 			)
+			if mergeErr := flagForReview(sess, key, "subtitle_mux: "+err.Error()); mergeErr != nil {
+				return mergeErr
+			}
 		} else {
 			subtitledPath = muxedPath
 			subtitlesMuxed = true
@@ -209,6 +256,17 @@ func (h *Handler) applySubtitles(ctx context.Context, sess *stage.Session, key, 
 		Path:           subtitledPath,
 		SubtitlesMuxed: subtitlesMuxed,
 	})
+}
+
+// flagForReview records reason against the episode and against the queue
+// item. The item-level copy carries the episode key, because that is the
+// string the review directory is named after.
+func flagForReview(sess *stage.Session, key, reason string) error {
+	itemReason := reason
+	if sess.AddEpisodeReviewReason(key, reason) {
+		itemReason = reason + " (" + key + ")"
+	}
+	return sess.MergeAddReviewReason(itemReason)
 }
 
 // findSubtitleGenRecord returns the generation record for key, or nil.

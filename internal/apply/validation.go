@@ -13,30 +13,40 @@ import (
 
 const audioDurationToleranceSeconds = 5.0
 
-func validateAudioTargetDurations(ctx context.Context, paths []string) error {
-	seen := make(map[string]bool)
+// validateAudioTargetDurations probes each distinct path and compares audio
+// stream durations against the video. It returns the video duration measured
+// per path (partially filled when validation stops on the first mismatch) so
+// the final verification can detect a mux that changed the runtime.
+func validateAudioTargetDurations(ctx context.Context, paths []string) (map[string]float64, error) {
+	durations := make(map[string]float64, len(paths))
 	for _, path := range paths {
-		if seen[path] {
+		if _, seen := durations[path]; seen {
 			continue
 		}
-		seen[path] = true
 
 		result, err := ffprobe.Inspect(ctx, "", path)
 		if err != nil {
-			return fmt.Errorf("ffprobe %s: %w", path, err)
+			return durations, fmt.Errorf("ffprobe %s: %w", path, err)
 		}
+		durations[path] = videoDurationSeconds(result)
 		if err := validateAudioDurations(filepath.Base(path), result); err != nil {
-			return err
+			return durations, err
 		}
 	}
-	return nil
+	return durations, nil
+}
+
+// videoDurationSeconds resolves a file's video runtime, preferring the
+// container duration and falling back to the first video stream's.
+func videoDurationSeconds(result *ffprobe.Result) float64 {
+	if duration := result.DurationSeconds(); duration > 0 {
+		return duration
+	}
+	return firstStreamDuration(result, "video")
 }
 
 func validateAudioDurations(label string, result *ffprobe.Result) error {
-	videoDuration := result.DurationSeconds()
-	if videoDuration <= 0 {
-		videoDuration = firstStreamDuration(result, "video")
-	}
+	videoDuration := videoDurationSeconds(result)
 	if videoDuration <= 0 {
 		return nil
 	}

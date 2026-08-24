@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/five82/spindle/internal/ripspec"
 )
 
 // Rendering caps keep pathological inputs bounded. Every cap prints an
@@ -33,7 +35,7 @@ func RenderDigest(r *Report, jsonPath string) string {
 	writeDigestTitleSelection(&b, r)
 	writeDigestEpisodeID(&b, r)
 	writeDigestEncoding(&b, r)
-	writeDigestAVSync(&b, r)
+	writeDigestFinalValidation(&b, r)
 	writeDigestOutputMedia(&b, r)
 	writeDigestAudio(&b, r)
 	writeDigestSubtitles(&b, r)
@@ -416,33 +418,51 @@ func cropOrNil(r *Report) *CropAnalysis {
 	return r.Analysis.CropAnalysis
 }
 
-func writeDigestAVSync(b *strings.Builder, r *Report) {
-	if r.Analysis == nil || r.Analysis.AVSync == nil {
+// writeDigestFinalValidation renders the apply stage's persisted verdict on
+// the delivered outputs, including its independent A/V sync comparison
+// against the ripped source.
+func writeDigestFinalValidation(b *strings.Builder, r *Report) {
+	if r.Analysis == nil || r.Analysis.FinalValidation == nil {
 		return
 	}
-	fmt.Fprintln(b, "\n## Audio/video sync (independent source comparison)")
-	for _, entry := range r.Analysis.AVSync.Entries {
+	fmt.Fprintln(b, "\n## Final output validation (apply stage, against ripped source)")
+	for _, entry := range r.Analysis.FinalValidation.Entries {
 		name := entry.EpisodeKey
 		if name == "" {
 			name = filepath.Base(entry.OutputPath)
 		}
-		if entry.Error != "" {
+		switch {
+		case entry.Error != "":
 			fmt.Fprintf(b, "- %s: UNAVAILABLE (%s)\n", name, entry.Error)
-			continue
+		case len(entry.FailedChecks) > 0:
+			fmt.Fprintf(b, "- %s: FAILED | %s\n", name, strings.Join(entry.FailedChecks, "; "))
+		default:
+			fmt.Fprintf(b, "- %s: PASSED\n", name)
 		}
-		status := "PASSED"
-		if !entry.Passed {
-			status = "FAILED"
-		}
-		drift := entry.DriftMilliseconds
-		direction := "later"
-		if drift < 0 {
-			drift = -drift
-			direction = "earlier"
-		}
-		fmt.Fprintf(b, "- %s: %s | source offset %+.0fms -> output %+.0fms | audio %.0fms %s\n",
-			name, status, entry.SourceAudioOffsetSec*1000, entry.OutputAudioOffsetSec*1000, drift, direction)
+		writeDigestAVSync(b, entry.AVSync)
 	}
+}
+
+func writeDigestAVSync(b *strings.Builder, check *ripspec.AVSyncCheck) {
+	if check == nil {
+		return
+	}
+	if check.Error != "" {
+		fmt.Fprintf(b, "  A/V sync: UNAVAILABLE (%s)\n", check.Error)
+		return
+	}
+	status := "PASSED"
+	if !check.Passed {
+		status = "FAILED"
+	}
+	drift := check.DriftMilliseconds
+	direction := "later"
+	if drift < 0 {
+		drift = -drift
+		direction = "earlier"
+	}
+	fmt.Fprintf(b, "  A/V sync: %s | source offset %+.0fms -> output %+.0fms | audio %.0fms %s\n",
+		status, check.SourceAudioOffsetSec*1000, check.OutputAudioOffsetSec*1000, drift, direction)
 }
 
 func writeDigestOutputMedia(b *strings.Builder, r *Report) {
@@ -476,13 +496,8 @@ func writeDigestOutputMedia(b *strings.Builder, r *Report) {
 				fmt.Fprintf(b, "  video: %s %dx%d %s\n", v.Codec, v.Width, v.Height, hdr)
 			}
 			for _, a := range m.Audio {
-				flags := audioFlags(a)
-				label := "label OK"
-				if !a.LabelCorrect {
-					label = "LABEL WRONG"
-				}
-				fmt.Fprintf(b, "  audio #%d: %s %s %dch (%s) %q [%s]%s\n",
-					a.Index, a.Language, a.Codec, a.Channels, a.Layout, a.Title, label, flags)
+				fmt.Fprintf(b, "  audio #%d: %s %s %dch (%s) %q%s\n",
+					a.Index, a.Language, a.Codec, a.Channels, a.Layout, a.Title, audioFlags(a))
 			}
 			for _, s := range m.Subtitles {
 				flags := ""
@@ -492,11 +507,7 @@ func writeDigestOutputMedia(b *strings.Builder, r *Report) {
 				if s.Forced {
 					flags += " FORCED"
 				}
-				label := "label OK"
-				if !s.LabelCorrect {
-					label = "LABEL WRONG"
-				}
-				fmt.Fprintf(b, "  sub #%d: %s %s %q [%s]%s\n", s.Index, s.Language, s.Codec, s.Title, label, flags)
+				fmt.Fprintf(b, "  sub #%d: %s %s %q%s\n", s.Index, s.Language, s.Codec, s.Title, flags)
 			}
 		}
 	}
@@ -537,9 +548,8 @@ func writeDigestAudio(b *strings.Builder, r *Report) {
 	}
 	a := r.Analysis.AudioSummary
 	fmt.Fprintf(b, "\n## Audio\n")
-	fmt.Fprintf(b, "Primary: track %d %s | output tracks: %d (commentary: %d) | commentary labels: %s\n",
-		a.PrimaryTrackIndex, a.PrimaryDescription, a.OutputAudioTracks, a.OutputCommentaryTracks,
-		okOrWrong(a.CommentaryLabelsCorrect))
+	fmt.Fprintf(b, "Primary: track %d %s | output tracks: %d (commentary: %d)\n",
+		a.PrimaryTrackIndex, a.PrimaryDescription, a.OutputAudioTracks, a.OutputCommentaryTracks)
 	for _, ex := range a.ExcludedTracks {
 		line := fmt.Sprintf("- excluded track %d: %s", ex.Index, ex.Reason)
 		if ex.Similarity > 0 {
@@ -555,9 +565,8 @@ func writeDigestSubtitles(b *strings.Builder, r *Report) {
 	}
 	s := r.Analysis.SubtitleSummary
 	fmt.Fprintf(b, "\n## Subtitles\n")
-	fmt.Fprintf(b, "Validation: %d passed, %d needs_review, %d failed, %d skipped | output tracks: %d | labels: %s\n",
-		s.ValidationPassed, s.ValidationNeedsReview, s.ValidationFailed, s.Skipped,
-		s.OutputSubtitleTracks, okOrWrong(s.SubtitleLabelsCorrect))
+	fmt.Fprintf(b, "Validation: %d passed, %d needs_review, %d failed, %d skipped | output tracks: %d\n",
+		s.ValidationPassed, s.ValidationNeedsReview, s.ValidationFailed, s.Skipped, s.OutputSubtitleTracks)
 	for _, res := range s.Results {
 		line := fmt.Sprintf("- %s: %s (%s, %d segments)", res.EpisodeKey, res.ValidationResult, res.Source, res.Segments)
 		if len(res.SevereIssues) > 0 {
@@ -668,13 +677,6 @@ func fmtBytes(n int64) string {
 	default:
 		return "0 B"
 	}
-}
-
-func okOrWrong(ok bool) string {
-	if ok {
-		return "OK"
-	}
-	return "WRONG"
 }
 
 // formatExtras renders an extras map as sorted "k=v" pairs. Long values are

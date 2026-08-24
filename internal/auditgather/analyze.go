@@ -13,7 +13,6 @@ import (
 
 	"github.com/five82/spindle/internal/contentid"
 	"github.com/five82/spindle/internal/encodingstate"
-	"github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
@@ -38,202 +37,52 @@ func pathWithinRoot(path, root string) bool {
 	return strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
-func detectTVRoutingAnomalies(r *Report) []Anomaly {
-	if r == nil || r.Envelope == nil || r.Envelope.Metadata.MediaType != "tv" {
+// detectFinalValidationAnomalies reports the apply stage's persisted verdict
+// on the delivered outputs. The pipeline owns these checks now; the audit's
+// job is to confirm a verdict exists and to surface its failures.
+func detectFinalValidationAnomalies(r *Report) []Anomaly {
+	if r == nil || r.Envelope == nil {
 		return nil
 	}
-	finalByKey := make(map[string]ripspec.Asset)
-	for _, asset := range r.Envelope.Assets.Final {
-		if asset.EpisodeKey != "" {
-			finalByKey[strings.ToLower(asset.EpisodeKey)] = asset
+	verdict := r.Envelope.Attributes.FinalValidation
+	if verdict == nil {
+		if r.Envelope.Assets.CompletedAssetCount(ripspec.AssetKindFinal) == 0 {
+			return nil
 		}
+		return []Anomaly{{
+			Severity: "warning",
+			Category: "final_validation",
+			Message:  "outputs were organized without a persisted final-validation verdict from the apply stage",
+		}}
 	}
 
 	var anomalies []Anomaly
-	misroutedToReview := 0
-	misroutedToLibrary := 0
-	missingFinal := 0
-	cleanEpisodes := 0
-	for _, ep := range r.Envelope.Episodes {
-		if ep.Key == "" {
-			continue
+	var failures []string
+	unavailable := 0
+	for _, entry := range verdict.Entries {
+		name := entry.EpisodeKey
+		if name == "" {
+			name = filepath.Base(entry.OutputPath)
 		}
-		expectedReview := ep.Episode <= 0 || ep.NeedsReview
-		if !expectedReview {
-			cleanEpisodes++
+		if len(entry.FailedChecks) > 0 {
+			failures = append(failures, name+": "+strings.Join(entry.FailedChecks, ", "))
 		}
-		asset, ok := finalByKey[strings.ToLower(ep.Key)]
-		if !ok || !asset.IsCompleted() || asset.Path == "" {
-			missingFinal++
-			continue
-		}
-		inReview := pathWithinRoot(asset.Path, r.Paths.ReviewDir)
-		if expectedReview && !inReview {
-			misroutedToLibrary++
-		}
-		if !expectedReview && inReview {
-			misroutedToReview++
+		if entry.Error != "" || (entry.AVSync != nil && entry.AVSync.Error != "") {
+			unavailable++
 		}
 	}
-	if misroutedToReview > 0 {
-		severity := "warning"
-		if cleanEpisodes > 0 && misroutedToReview == cleanEpisodes {
-			severity = "critical"
-		}
-		anomalies = append(anomalies, Anomaly{
-			Severity: severity,
-			Category: "organization",
-			Message:  fmt.Sprintf("%d clean resolved episode(s) routed to review", misroutedToReview),
-		})
-	}
-	if misroutedToLibrary > 0 {
+	if len(failures) > 0 {
 		anomalies = append(anomalies, Anomaly{
 			Severity: "critical",
-			Category: "organization",
-			Message:  fmt.Sprintf("%d review-required episode(s) routed to library", misroutedToLibrary),
+			Category: "final_validation",
+			Message:  fmt.Sprintf("%d delivered output(s) failed apply-stage validation: %s", len(failures), strings.Join(failures, "; ")),
 		})
 	}
-	if missingFinal > 0 && len(finalByKey) > 0 {
+	if unavailable > 0 {
 		anomalies = append(anomalies, Anomaly{
 			Severity: "warning",
-			Category: "organization",
-			Message:  fmt.Sprintf("%d episode(s) missing final routed asset", missingFinal),
-		})
-	}
-	return anomalies
-}
-
-const avSyncDriftThresholdMilliseconds = 100.0
-
-func compareAVSync(entry AVSyncEntry, source, output *ffprobe.Result, sourceAudioIndex int) AVSyncEntry {
-	sourceVideo, sourceAudio, err := primaryAVStartTimes(source, sourceAudioIndex)
-	if err != nil {
-		entry.Error = "source: " + err.Error()
-		return entry
-	}
-	outputVideo, outputAudio, err := primaryAVStartTimes(output, -1)
-	if err != nil {
-		entry.Error = "output: " + err.Error()
-		return entry
-	}
-
-	entry.SourceVideoStartSec = sourceVideo
-	entry.SourceAudioStartSec = sourceAudio
-	entry.SourceAudioOffsetSec = sourceAudio - sourceVideo
-	entry.OutputVideoStartSec = outputVideo
-	entry.OutputAudioStartSec = outputAudio
-	entry.OutputAudioOffsetSec = outputAudio - outputVideo
-	entry.DriftMilliseconds = (entry.OutputAudioOffsetSec - entry.SourceAudioOffsetSec) * 1000
-	entry.Passed = math.Abs(entry.DriftMilliseconds) <= avSyncDriftThresholdMilliseconds
-	return entry
-}
-
-func primaryAVStartTimes(result *ffprobe.Result, audioIndex int) (float64, float64, error) {
-	if result == nil {
-		return 0, 0, fmt.Errorf("probe unavailable")
-	}
-	var video *ffprobe.Stream
-	var audio, firstAudio, defaultAudio *ffprobe.Stream
-	audioOrdinal := 0
-	for i := range result.Streams {
-		stream := &result.Streams[i]
-		switch stream.CodecType {
-		case "video":
-			if video == nil {
-				video = stream
-			}
-		case "audio":
-			if firstAudio == nil {
-				firstAudio = stream
-			}
-			if defaultAudio == nil && stream.Disposition["default"] == 1 {
-				defaultAudio = stream
-			}
-			if audioOrdinal == audioIndex {
-				audio = stream
-			}
-			audioOrdinal++
-		}
-	}
-	if video == nil {
-		return 0, 0, fmt.Errorf("video stream unavailable")
-	}
-	if audioIndex < 0 {
-		audio = defaultAudio
-		if audio == nil {
-			audio = firstAudio
-		}
-	}
-	if audio == nil {
-		return 0, 0, fmt.Errorf("primary audio stream unavailable")
-	}
-	videoStart, err := strconv.ParseFloat(video.StartTime, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("video start time unavailable")
-	}
-	audioStart, err := strconv.ParseFloat(audio.StartTime, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("primary audio start time unavailable")
-	}
-	return videoStart, audioStart, nil
-}
-
-func detectAVSyncAnomalies(summary *AVSyncSummary) []Anomaly {
-	if summary == nil || summary.Failed == 0 {
-		return nil
-	}
-	maxDrift := 0.0
-	for _, entry := range summary.Entries {
-		if drift := math.Abs(entry.DriftMilliseconds); drift > maxDrift {
-			maxDrift = drift
-		}
-	}
-	return []Anomaly{{
-		Severity: "critical",
-		Category: "av_sync",
-		Message: fmt.Sprintf("%d output(s) changed primary-audio timing relative to source (maximum drift %.0fms; limit %.0fms)",
-			summary.Failed, maxDrift, avSyncDriftThresholdMilliseconds),
-	}}
-}
-
-func detectDefaultAudioLanguageAnomalies(r *Report) []Anomaly {
-	if r == nil {
-		return nil
-	}
-
-	var anomalies []Anomaly
-	for _, media := range r.Media {
-		if media.Probe == nil {
-			continue
-		}
-		audioStreams := media.Probe.AudioStreams()
-		if len(audioStreams) < 2 {
-			continue
-		}
-
-		hasEnglish := false
-		defaultLang := ""
-		for _, st := range audioStreams {
-			langCode := language.ToISO2(language.ExtractFromTags(st.Tags))
-			if strings.HasPrefix(langCode, "en") {
-				hasEnglish = true
-			}
-			if st.Disposition["default"] == 1 && defaultLang == "" {
-				defaultLang = langCode
-			}
-		}
-		if !hasEnglish || defaultLang == "" || strings.HasPrefix(defaultLang, "en") {
-			continue
-		}
-
-		target := media.Path
-		if media.EpisodeKey != "" {
-			target = media.EpisodeKey
-		}
-		anomalies = append(anomalies, Anomaly{
-			Severity: "warning",
-			Category: "media",
-			Message:  fmt.Sprintf("non-English default audio language %q despite English audio present: %s", defaultLang, target),
+			Category: "final_validation",
+			Message:  fmt.Sprintf("%d delivered output(s) could not be fully verified by the apply stage", unavailable),
 		})
 	}
 	return anomalies
@@ -258,6 +107,9 @@ func computeAnalysis(r *Report) *Analysis {
 	a.AudioSummary = computeAudioSummary(r, a.OutputMedia)
 	a.SubtitleSummary = computeSubtitleSummary(r, a.OutputMedia)
 	a.RoutingSummary = computeRoutingSummary(r)
+	if r.Envelope != nil {
+		a.FinalValidation = r.Envelope.Attributes.FinalValidation
+	}
 
 	if len(r.Media) > 0 {
 		a.EpisodeConsistency = computeEpisodeConsistency(r.Media)
@@ -280,8 +132,7 @@ func computeAnalysis(r *Report) *Analysis {
 	}
 
 	a.Anomalies = detectAnomalies(r, a)
-	a.Anomalies = append(a.Anomalies, detectTVRoutingAnomalies(r)...)
-	a.Anomalies = append(a.Anomalies, detectDefaultAudioLanguageAnomalies(r)...)
+	a.Anomalies = append(a.Anomalies, detectFinalValidationAnomalies(r)...)
 
 	return a
 }
@@ -559,26 +410,23 @@ func computeOutputMedia(probes []MediaFileProbe) []MediaSummary {
 			case "audio":
 				commentary := s.Disposition["comment"] == 1 || strings.Contains(strings.ToLower(s.Tags["title"]), "commentary")
 				ms.Audio = append(ms.Audio, AudioStreamSummary{
-					Index:        s.Index,
-					Codec:        s.CodecName,
-					Channels:     s.Channels,
-					Layout:       s.ChannelLayout,
-					Language:     s.Tags["language"],
-					Title:        s.Tags["title"],
-					Default:      s.Disposition["default"] == 1,
-					Commentary:   commentary,
-					LabelCorrect: !commentary || strings.Contains(strings.ToLower(s.Tags["title"]), "commentary"),
+					Index:      s.Index,
+					Codec:      s.CodecName,
+					Channels:   s.Channels,
+					Layout:     s.ChannelLayout,
+					Language:   s.Tags["language"],
+					Title:      s.Tags["title"],
+					Default:    s.Disposition["default"] == 1,
+					Commentary: commentary,
 				})
 			case "subtitle":
-				forced := s.Disposition["forced"] == 1
 				ms.Subtitles = append(ms.Subtitles, SubtitleStreamSummary{
-					Index:        s.Index,
-					Codec:        s.CodecName,
-					Language:     s.Tags["language"],
-					Title:        s.Tags["title"],
-					Default:      s.Disposition["default"] == 1,
-					Forced:       forced,
-					LabelCorrect: subtitleLabelCorrect(s.Tags["language"], s.Tags["title"], forced),
+					Index:    s.Index,
+					Codec:    s.CodecName,
+					Language: s.Tags["language"],
+					Title:    s.Tags["title"],
+					Default:  s.Disposition["default"] == 1,
+					Forced:   s.Disposition["forced"] == 1,
 				})
 			}
 		}
@@ -602,26 +450,11 @@ func mediaStreamHDR(s ffprobe.Stream) bool {
 	return false
 }
 
-func subtitleLabelCorrect(lang, title string, forced bool) bool {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return false
-	}
-	if forced && !strings.Contains(strings.ToLower(title), "forced") {
-		return false
-	}
-	if lang == "" {
-		return true
-	}
-	display := strings.ToLower(language.DisplayName(lang))
-	return display == "" || strings.Contains(strings.ToLower(title), display) || strings.Contains(strings.ToLower(title), strings.ToLower(lang))
-}
-
 func computeAudioSummary(r *Report, outputMedia []MediaSummary) *AudioSummary {
 	if r == nil || r.Envelope == nil {
 		return nil
 	}
-	summary := &AudioSummary{CommentaryLabelsCorrect: true}
+	summary := &AudioSummary{}
 	if aa := r.Envelope.Attributes.AudioAnalysis; aa != nil {
 		summary.PrimaryDescription = aa.PrimaryDescription
 		summary.PrimaryTrackIndex = aa.PrimaryTrack.Index
@@ -634,9 +467,6 @@ func computeAudioSummary(r *Report, outputMedia []MediaSummary) *AudioSummary {
 			summary.OutputAudioTracks++
 			if audio.Commentary {
 				summary.OutputCommentaryTracks++
-				if !audio.LabelCorrect {
-					summary.CommentaryLabelsCorrect = false
-				}
 			}
 		}
 	}
@@ -658,7 +488,7 @@ func computeSubtitleSummary(r *Report, outputMedia []MediaSummary) *SubtitleSumm
 	if r == nil || r.Envelope == nil {
 		return nil
 	}
-	summary := &SubtitleSummary{SubtitleLabelsCorrect: true}
+	summary := &SubtitleSummary{}
 	for _, rec := range r.Envelope.Attributes.SubtitleGenerationResults {
 		summary.Results = append(summary.Results, SubtitleResultSummary{
 			EpisodeKey:       rec.EpisodeKey,
@@ -683,12 +513,7 @@ func computeSubtitleSummary(r *Report, outputMedia []MediaSummary) *SubtitleSumm
 		}
 	}
 	for _, media := range outputMedia {
-		for _, sub := range media.Subtitles {
-			summary.OutputSubtitleTracks++
-			if !sub.LabelCorrect {
-				summary.SubtitleLabelsCorrect = false
-			}
-		}
+		summary.OutputSubtitleTracks += len(media.Subtitles)
 	}
 	if len(summary.Results) == 0 && summary.OutputSubtitleTracks == 0 {
 		return nil
@@ -1357,37 +1182,6 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 		checkStage("subtitled", a.AssetHealth.Subtitled)
 		checkStage("final", a.AssetHealth.Final)
 		checkStage("transcript", a.AssetHealth.Transcript)
-	}
-
-	// Subtitle output layout anomalies.
-	if r.StageGate.PhaseSubtitles {
-		extraSubtitleFiles := 0
-		forcedSubtitleFiles := 0
-		for _, media := range a.OutputMedia {
-			if len(media.Subtitles) > 1 {
-				extraSubtitleFiles++
-			}
-			for _, sub := range media.Subtitles {
-				if sub.Forced {
-					forcedSubtitleFiles++
-					break
-				}
-			}
-		}
-		if extraSubtitleFiles > 0 {
-			anomalies = append(anomalies, Anomaly{
-				Severity: "warning",
-				Category: "subtitles",
-				Message:  fmt.Sprintf("%d output file(s) have more than one subtitle stream", extraSubtitleFiles),
-			})
-		}
-		if forcedSubtitleFiles > 0 {
-			anomalies = append(anomalies, Anomaly{
-				Severity: "warning",
-				Category: "subtitles",
-				Message:  fmt.Sprintf("%d output file(s) have a forced subtitle stream", forcedSubtitleFiles),
-			})
-		}
 	}
 
 	// Cross-episode deviations.

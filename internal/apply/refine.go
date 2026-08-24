@@ -78,9 +78,6 @@ func refineAudioTargets(
 			if err := remuxAudioTracks(ctx, logger, path, keptIndices); err != nil {
 				return nil, fmt.Errorf("remux %s: %w", path, err)
 			}
-			if err := validateRemuxedAudio(ctx, path, len(keptIndices)); err != nil {
-				return nil, err
-			}
 			logger.Info("audio refinement complete",
 				"decision_type", logs.DecisionAudioRefinement,
 				"decision_result", "remuxed",
@@ -142,28 +139,6 @@ func needsDispositionFix(result *ffprobe.Result, primaryIndex int) bool {
 		}
 	}
 	return false
-}
-
-func validateRemuxedAudio(ctx context.Context, path string, expectedAudio int) error {
-	postResult, err := ffprobe.Inspect(ctx, "", path)
-	if err != nil {
-		return fmt.Errorf("post-remux ffprobe %s: %w", path, err)
-	}
-	postAudio := postResult.AudioStreamCount()
-	if postAudio != expectedAudio {
-		return fmt.Errorf("post-remux audio count %d != expected %d for %s", postAudio, expectedAudio, path)
-	}
-	audioStreams := postResult.AudioStreams()
-	for i, st := range audioStreams {
-		isDefault := st.Disposition["default"] == 1
-		if i == 0 && !isDefault {
-			return fmt.Errorf("post-remux first audio stream is not default for %s", path)
-		}
-		if i > 0 && isDefault {
-			return fmt.Errorf("post-remux non-primary audio stream %d is still default for %s", i, path)
-		}
-	}
-	return nil
 }
 
 // remuxAudioTracks creates a new MKV with only the selected audio tracks,

@@ -2,7 +2,6 @@ package auditgather
 
 import (
 	"encoding/json"
-	"math"
 	"strings"
 	"testing"
 
@@ -194,7 +193,7 @@ func TestComputeTitleSelectionFallsBackToRippedAssetTitleID(t *testing.T) {
 	}
 }
 
-func TestComputeOutputMediaSummarizesStreamsAndLabels(t *testing.T) {
+func TestComputeOutputMediaSummarizesStreams(t *testing.T) {
 	media := []MediaFileProbe{{
 		Path:            "/movie.mkv",
 		Role:            "final",
@@ -214,47 +213,70 @@ func TestComputeOutputMediaSummarizesStreamsAndLabels(t *testing.T) {
 	if summary[0].Video == nil || !summary[0].Video.HDR {
 		t.Fatalf("expected HDR video summary: %+v", summary[0].Video)
 	}
-	if len(summary[0].Audio) != 1 || summary[0].Audio[0].LabelCorrect {
-		t.Fatalf("expected unlabeled commentary audio: %+v", summary[0].Audio)
+	if len(summary[0].Audio) != 1 || !summary[0].Audio[0].Commentary || summary[0].Audio[0].Title != "Director" {
+		t.Fatalf("expected commentary audio stream: %+v", summary[0].Audio)
 	}
-	if len(summary[0].Subtitles) != 1 || !summary[0].Subtitles[0].LabelCorrect {
-		t.Fatalf("expected correctly labeled subtitle: %+v", summary[0].Subtitles)
-	}
-}
-
-func TestCompareAVSyncDetectsChangedPrimaryAudioOffset(t *testing.T) {
-	probe := func(audioStart string) *ffprobe.Result {
-		return &ffprobe.Result{Streams: []ffprobe.Stream{
-			{Index: 0, CodecType: "video", StartTime: "0.000000"},
-			{Index: 1, CodecType: "audio", StartTime: audioStart, Disposition: map[string]int{"default": 1}},
-		}}
-	}
-
-	entry := compareAVSync(AVSyncEntry{EpisodeKey: "main", OutputPath: "/movie.mkv"}, probe("0.501000"), probe("0.000000"), 0)
-	if entry.Passed {
-		t.Fatal("A/V sync comparison passed a 501ms timing change")
-	}
-	if math.Abs(entry.DriftMilliseconds-(-501)) > 0.001 {
-		t.Fatalf("drift = %.3fms, want -501ms", entry.DriftMilliseconds)
-	}
-	anomalies := detectAVSyncAnomalies(&AVSyncSummary{Entries: []AVSyncEntry{entry}, Failed: 1})
-	if len(anomalies) != 1 || anomalies[0].Severity != "critical" {
-		t.Fatalf("anomalies = %+v, want one critical", anomalies)
+	if len(summary[0].Subtitles) != 1 || summary[0].Subtitles[0].Codec != "subrip" || summary[0].Subtitles[0].Forced {
+		t.Fatalf("expected one non-forced subrip subtitle: %+v", summary[0].Subtitles)
 	}
 }
 
-func TestCompareAVSyncAcceptsPreservedOffset(t *testing.T) {
-	source := &ffprobe.Result{Streams: []ffprobe.Stream{
-		{CodecType: "video", StartTime: "0"},
-		{CodecType: "audio", StartTime: "0.501", Disposition: map[string]int{"default": 1}},
-	}}
-	output := &ffprobe.Result{Streams: []ffprobe.Stream{
-		{CodecType: "video", StartTime: "0"},
-		{CodecType: "audio", StartTime: "0.5005", Disposition: map[string]int{"default": 1}},
-	}}
-	entry := compareAVSync(AVSyncEntry{}, source, output, 0)
-	if !entry.Passed || math.Abs(entry.DriftMilliseconds-(-0.5)) > 0.001 {
-		t.Fatalf("entry = %+v, want passed with -0.5ms drift", entry)
+func TestDetectFinalValidationAnomalies_ReportsFailuresAndUnavailable(t *testing.T) {
+	r := &Report{Envelope: &ripspec.Envelope{Attributes: ripspec.EnvelopeAttributes{
+		FinalValidation: &ripspec.FinalValidation{Entries: []ripspec.FinalValidationEntry{
+			{EpisodeKey: "s01e01", OutputPath: "/library/s01e01.mkv", Passed: true},
+			{
+				EpisodeKey:   "s01e02",
+				OutputPath:   "/library/s01e02.mkv",
+				FailedChecks: []string{"av_sync drift 501ms exceeds 100ms"},
+			},
+			{
+				EpisodeKey: "s01e03",
+				OutputPath: "/library/s01e03.mkv",
+				Passed:     true,
+				AVSync:     &ripspec.AVSyncCheck{Error: "ripped source asset unavailable"},
+			},
+		}},
+	}}}
+
+	anomalies := detectFinalValidationAnomalies(r)
+	if len(anomalies) != 2 {
+		t.Fatalf("anomalies = %+v, want 2", anomalies)
+	}
+	if anomalies[0].Severity != "critical" || !strings.Contains(anomalies[0].Message, "av_sync drift 501ms") {
+		t.Fatalf("first anomaly = %+v, want critical with the failed check", anomalies[0])
+	}
+	if anomalies[1].Severity != "warning" || !strings.Contains(anomalies[1].Message, "1 delivered output(s) could not be fully verified") {
+		t.Fatalf("second anomaly = %+v, want unavailable warning", anomalies[1])
+	}
+}
+
+func TestDetectFinalValidationAnomalies_MissingVerdictAfterOrganize(t *testing.T) {
+	organized := &Report{Envelope: &ripspec.Envelope{Assets: ripspec.Assets{
+		Final: []ripspec.Asset{{EpisodeKey: "main", Path: "/library/movie.mkv", Status: ripspec.AssetStatusCompleted}},
+	}}}
+	anomalies := detectFinalValidationAnomalies(organized)
+	if len(anomalies) != 1 || anomalies[0].Severity != "warning" {
+		t.Fatalf("anomalies = %+v, want one warning for the missing verdict", anomalies)
+	}
+
+	// An item that never reached apply has no verdict and no finding.
+	if got := detectFinalValidationAnomalies(&Report{Envelope: &ripspec.Envelope{}}); len(got) != 0 {
+		t.Fatalf("anomalies = %+v, want none before organizing", got)
+	}
+}
+
+func TestDetectFinalValidationAnomalies_CleanVerdict(t *testing.T) {
+	r := &Report{Envelope: &ripspec.Envelope{Attributes: ripspec.EnvelopeAttributes{
+		FinalValidation: &ripspec.FinalValidation{
+			Passed: true,
+			Entries: []ripspec.FinalValidationEntry{
+				{EpisodeKey: "main", OutputPath: "/library/movie.mkv", Passed: true, AVSync: &ripspec.AVSyncCheck{Passed: true}},
+			},
+		},
+	}}}
+	if got := detectFinalValidationAnomalies(r); len(got) != 0 {
+		t.Fatalf("anomalies = %+v, want none", got)
 	}
 }
 
@@ -530,57 +552,6 @@ func TestDetectAnomalies_ContentIDSummaryPresent(t *testing.T) {
 	}
 }
 
-func TestDetectTVRoutingAnomalies_FlagsCleanEpisodesInReview(t *testing.T) {
-	r := &Report{
-		Paths: AuditPaths{ReviewDir: "/review"},
-		Envelope: &ripspec.Envelope{
-			Metadata: ripspec.Metadata{MediaType: "tv"},
-			Episodes: []ripspec.Episode{
-				{Key: "s01e01", Episode: 1},
-				{Key: "s01e02", Episode: 2, NeedsReview: true},
-			},
-			Assets: ripspec.Assets{Final: []ripspec.Asset{
-				{EpisodeKey: "s01e01", Path: "/review/show/Show - S01E01.mkv", Status: ripspec.AssetStatusCompleted},
-				{EpisodeKey: "s01e02", Path: "/review/show/Show - S01E02.mkv", Status: ripspec.AssetStatusCompleted},
-			}},
-		},
-	}
-	anomalies := detectTVRoutingAnomalies(r)
-	found := false
-	for _, an := range anomalies {
-		if an.Message == "1 clean resolved episode(s) routed to review" {
-			found = true
-			if an.Severity != "critical" {
-				t.Fatalf("severity = %s, want critical", an.Severity)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("expected routing anomaly for clean episode in review")
-	}
-}
-
-func TestDetectTVRoutingAnomalies_FlagsReviewEpisodesInLibrary(t *testing.T) {
-	r := &Report{
-		Paths: AuditPaths{ReviewDir: "/review"},
-		Envelope: &ripspec.Envelope{
-			Metadata: ripspec.Metadata{MediaType: "tv"},
-			Episodes: []ripspec.Episode{{Key: "s01e02", Episode: 2, NeedsReview: true}},
-			Assets:   ripspec.Assets{Final: []ripspec.Asset{{EpisodeKey: "s01e02", Path: "/library/tv/Show/Season 01/Show - S01E02.mkv", Status: ripspec.AssetStatusCompleted}}},
-		},
-	}
-	anomalies := detectTVRoutingAnomalies(r)
-	found := false
-	for _, an := range anomalies {
-		if an.Message == "1 review-required episode(s) routed to library" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("expected routing anomaly for review episode in library")
-	}
-}
-
 func TestCompressMediaProbes(t *testing.T) {
 	majority := ProfileSummary{VideoCodec: "av1", Width: 1920, Height: 1080}
 
@@ -631,48 +602,6 @@ func TestCompressMediaProbes_NilConsistency(t *testing.T) {
 	}
 	if len(result) != 1 {
 		t.Errorf("result count: got %d, want 1", len(result))
-	}
-}
-
-func TestDetectDefaultAudioLanguageAnomalies_FlagsNonEnglishDefault(t *testing.T) {
-	r := &Report{Media: []MediaFileProbe{{
-		EpisodeKey: "s03_009",
-		Path:       "/review/Batman - s03_009.mkv",
-		Probe: &ffprobe.Result{Streams: []ffprobe.Stream{
-			{CodecType: "audio", Tags: map[string]string{"language": "ita"}, Disposition: map[string]int{"default": 1}},
-			{CodecType: "audio", Tags: map[string]string{"language": "eng"}, Disposition: map[string]int{"default": 0}},
-			{CodecType: "audio", Tags: map[string]string{"language": "ger"}, Disposition: map[string]int{"default": 0}},
-		}},
-	}}}
-
-	anomalies := detectDefaultAudioLanguageAnomalies(r)
-	if len(anomalies) != 1 {
-		t.Fatalf("expected 1 anomaly, got %d", len(anomalies))
-	}
-	if anomalies[0].Severity != "warning" {
-		t.Fatalf("severity = %s, want warning", anomalies[0].Severity)
-	}
-	if anomalies[0].Category != "media" {
-		t.Fatalf("category = %s, want media", anomalies[0].Category)
-	}
-	want := "non-English default audio language \"it\" despite English audio present: s03_009"
-	if anomalies[0].Message != want {
-		t.Fatalf("message = %q, want %q", anomalies[0].Message, want)
-	}
-}
-
-func TestDetectDefaultAudioLanguageAnomalies_IgnoresEnglishDefault(t *testing.T) {
-	r := &Report{Media: []MediaFileProbe{{
-		EpisodeKey: "s03e21",
-		Probe: &ffprobe.Result{Streams: []ffprobe.Stream{
-			{CodecType: "audio", Tags: map[string]string{"language": "eng"}, Disposition: map[string]int{"default": 1}},
-			{CodecType: "audio", Tags: map[string]string{"language": "ita"}, Disposition: map[string]int{"default": 0}},
-		}},
-	}}}
-
-	anomalies := detectDefaultAudioLanguageAnomalies(r)
-	if len(anomalies) != 0 {
-		t.Fatalf("expected 0 anomalies, got %d: %+v", len(anomalies), anomalies)
 	}
 }
 

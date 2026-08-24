@@ -250,6 +250,135 @@ func TestPartitionTVOrganizationKeys(t *testing.T) {
 	}
 }
 
+func TestVerifyRouting(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Paths.LibraryDir = "/library"
+	cfg.Paths.ReviewDir = "/review"
+
+	tvEnv := func(final ...ripspec.Asset) *ripspec.Envelope {
+		return &ripspec.Envelope{
+			Metadata: ripspec.Metadata{MediaType: "tv"},
+			Episodes: []ripspec.Episode{
+				{Key: "s01e01", Episode: 1},
+				{Key: "s01e02", Episode: 2, NeedsReview: true},
+				{Key: "s01_003"},
+			},
+			Assets: ripspec.Assets{Final: final},
+		}
+	}
+	completed := func(key, path string) ripspec.Asset {
+		return ripspec.Asset{EpisodeKey: key, Path: path, Status: ripspec.AssetStatusCompleted}
+	}
+
+	tests := []struct {
+		name        string
+		item        *queue.Item
+		env         *ripspec.Envelope
+		wantErrPart string
+	}{
+		{
+			name: "tv split between library and review",
+			item: &queue.Item{ID: 1, NeedsReview: 1},
+			env: tvEnv(
+				completed("s01e01", "/library/tv/Show/Season 01/Show - S01E01.mkv"),
+				completed("s01e02", "/review/reason_abc/Show - S01E02.mkv"),
+				completed("s01_003", "/review/reason_abc/Show - s01_003.mkv"),
+			),
+		},
+		{
+			name: "review-required episode delivered to the library",
+			item: &queue.Item{ID: 2, NeedsReview: 1},
+			env: tvEnv(
+				completed("s01e01", "/library/tv/Show/Season 01/Show - S01E01.mkv"),
+				completed("s01e02", "/library/tv/Show/Season 01/Show - S01E02.mkv"),
+				completed("s01_003", "/review/reason_abc/Show - s01_003.mkv"),
+			),
+			wantErrPart: "s01e02: expected under /review",
+		},
+		{
+			name: "clean episode swept into review",
+			item: &queue.Item{ID: 3, NeedsReview: 1},
+			env: tvEnv(
+				completed("s01e01", "/review/reason_abc/Show - S01E01.mkv"),
+				completed("s01e02", "/review/reason_abc/Show - S01E02.mkv"),
+				completed("s01_003", "/review/reason_abc/Show - s01_003.mkv"),
+			),
+			wantErrPart: "s01e01: expected under /library",
+		},
+		{
+			name:        "missing final asset",
+			item:        &queue.Item{ID: 4, NeedsReview: 1},
+			env:         tvEnv(completed("s01e01", "/library/tv/Show/Season 01/Show - S01E01.mkv")),
+			wantErrPart: "no completed final asset for s01e02, s01_003",
+		},
+		{
+			name: "failed final asset counts as missing",
+			item: &queue.Item{ID: 5},
+			env: &ripspec.Envelope{
+				Metadata: ripspec.Metadata{MediaType: "movie"},
+				Assets: ripspec.Assets{Final: []ripspec.Asset{
+					{EpisodeKey: "main", Path: "/library/movies/Movie.mkv", Status: ripspec.AssetStatusFailed},
+				}},
+			},
+			wantErrPart: "no completed final asset for main",
+		},
+		{
+			name: "clean movie in the library",
+			item: &queue.Item{ID: 6},
+			env: &ripspec.Envelope{
+				Metadata: ripspec.Metadata{MediaType: "movie"},
+				Assets:   ripspec.Assets{Final: []ripspec.Asset{completed("main", "/library/movies/Movie (1999)/Movie.mkv")}},
+			},
+		},
+		{
+			name: "flagged movie in the library",
+			item: &queue.Item{ID: 7, NeedsReview: 1},
+			env: &ripspec.Envelope{
+				Metadata: ripspec.Metadata{MediaType: "movie"},
+				Assets:   ripspec.Assets{Final: []ripspec.Asset{completed("main", "/library/movies/Movie (1999)/Movie.mkv")}},
+			},
+			wantErrPart: "main: expected under /review",
+		},
+	}
+
+	h := &Handler{cfg: cfg}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := h.verifyRouting(logger, &stage.Session{Item: tt.item, Env: tt.env})
+			if tt.wantErrPart == "" {
+				if err != nil {
+					t.Fatalf("verifyRouting() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErrPart) {
+				t.Fatalf("verifyRouting() = %v, want error containing %q", err, tt.wantErrPart)
+			}
+		})
+	}
+}
+
+func TestPathWithinRoot(t *testing.T) {
+	tests := []struct {
+		path, root string
+		want       bool
+	}{
+		{path: "/library/tv/Show/ep.mkv", root: "/library", want: true},
+		{path: "/library", root: "/library", want: true},
+		{path: "/library/tv/../tv/ep.mkv", root: "/library/tv", want: true},
+		{path: "/library-other/ep.mkv", root: "/library", want: false},
+		{path: "/review/ep.mkv", root: "/library", want: false},
+		{path: "", root: "/library", want: false},
+		{path: "/library/ep.mkv", root: "", want: false},
+	}
+	for _, tt := range tests {
+		if got := pathWithinRoot(tt.path, tt.root); got != tt.want {
+			t.Errorf("pathWithinRoot(%q, %q) = %v, want %v", tt.path, tt.root, got, tt.want)
+		}
+	}
+}
+
 func TestReviewPathForItemUsesBoundedPrimaryReviewReason(t *testing.T) {
 	item := &queue.Item{ID: 9, DiscFingerprint: "5483099ec8089977f7b31644c5898356b4173617ab9a2f62d997a6187d95cf91"}
 	item.AppendReviewReason("srt_validation: high_reading_speed (s01e01)")

@@ -34,6 +34,7 @@ const (
 	DecisionEpisodePlaceholders      = "episode_placeholders"
 	DecisionFileDiscovery            = "file_discovery"
 	DecisionFileProbe                = "file_probe"
+	DecisionFinalValidation          = "final_validation"
 	DecisionFingerprintStrategy      = "fingerprint_strategy"
 	DecisionKeyDBLookup              = "keydb_lookup"
 	DecisionMakeMKVSettings          = "makemkv_settings"

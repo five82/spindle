@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/five82/spindle/internal/logs"
-	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
@@ -89,55 +88,6 @@ func applyCommentaryDisposition(
 		"tracks", indices,
 	)
 
-	return nil
-}
-
-// validateCommentaryLabeling verifies both the disposition and title label.
-func validateCommentaryLabeling(
-	ctx context.Context,
-	logger *slog.Logger,
-	path string,
-	expectedIndices []int,
-) error {
-	logger = logs.Default(logger)
-	if len(expectedIndices) == 0 {
-		return nil
-	}
-
-	result, err := ffprobe.Inspect(ctx, "", path)
-	if err != nil {
-		return fmt.Errorf("ffprobe validate: %w", err)
-	}
-
-	expected := make(map[int]bool)
-	for _, idx := range expectedIndices {
-		expected[idx] = true
-	}
-
-	var issues []string
-	for audioIdx, s := range result.AudioStreams() {
-		if expected[audioIdx] {
-			disp, ok := s.Disposition["comment"]
-			if !ok || disp != 1 {
-				issues = append(issues, fmt.Sprintf("audio track %d missing comment disposition", audioIdx))
-			}
-			title := s.Tags["title"]
-			if !strings.Contains(strings.ToLower(title), "commentary") {
-				issues = append(issues, fmt.Sprintf("audio track %d title %q lacks Commentary label", audioIdx, title))
-			}
-		}
-	}
-
-	if len(issues) > 0 {
-		return fmt.Errorf("commentary labeling validation failed: %s", strings.Join(issues, "; "))
-	}
-
-	logger.Info("commentary labeling validated",
-		"decision_type", logs.DecisionCommentaryDisposition,
-		"decision_result", "valid",
-		"decision_reason", fmt.Sprintf("verified %d tracks", len(expectedIndices)),
-		"path", path,
-	)
 	return nil
 }
 

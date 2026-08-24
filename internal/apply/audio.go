@@ -12,9 +12,9 @@ import (
 )
 
 // applyPostRefinementAudio selects the primary audio track after refinement,
-// remaps commentary indices, and applies commentary metadata. Disposition and
-// validation failures are degraded because preserving an unlabeled track is
-// safer than dropping it.
+// remaps commentary indices, and applies commentary metadata. A disposition
+// failure is degraded because preserving an unlabeled track is safer than
+// dropping it; the stage's final verification catches the unlabeled result.
 func applyPostRefinementAudio(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -55,18 +55,6 @@ func applyPostRefinementAudio(
 					"error_hint", err.Error(),
 					"impact", "commentary tracks not labeled",
 				)
-			} else {
-				var remappedIndices []int
-				for _, t := range targets {
-					remappedIndices = append(remappedIndices, t.Index)
-				}
-				if err := validateCommentaryLabeling(ctx, logger, path, remappedIndices); err != nil {
-					logger.Warn("commentary labeling validation failed",
-						"event_type", "commentary_validation_error",
-						"error_hint", err.Error(),
-						"impact", "commentary labels may be incorrect",
-					)
-				}
 			}
 		}
 	}

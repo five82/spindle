@@ -169,22 +169,25 @@ type MediaFileProbe struct {
 
 // Analysis holds pre-computed summaries derived from gathered data.
 type Analysis struct {
-	DecisionGroups     []DecisionGroup        `json:"decision_groups,omitempty"`
-	NotableDecisions   []LogDecision          `json:"notable_decisions,omitempty"`
-	StageTimings       []StageTiming          `json:"stage_timings,omitempty"`
-	SourceSummary      *SourceSummary         `json:"source_summary,omitempty"`
-	TitleSelection     *TitleSelectionSummary `json:"title_selection,omitempty"`
-	OutputMedia        []MediaSummary         `json:"output_media,omitempty"`
-	AVSync             *AVSyncSummary         `json:"av_sync,omitempty"`
-	AudioSummary       *AudioSummary          `json:"audio_summary,omitempty"`
-	SubtitleSummary    *SubtitleSummary       `json:"subtitle_summary,omitempty"`
-	RoutingSummary     *RoutingSummary        `json:"routing_summary,omitempty"`
-	EpisodeConsistency *EpisodeConsistency    `json:"episode_consistency,omitempty"`
-	CropAnalysis       *CropAnalysis          `json:"crop_analysis,omitempty"`
-	EpisodeStats       *EpisodeStats          `json:"episode_stats,omitempty"`
-	MediaStats         *MediaStats            `json:"media_stats,omitempty"`
-	AssetHealth        *AssetHealth           `json:"asset_health,omitempty"`
-	Anomalies          []Anomaly              `json:"anomalies,omitempty"`
+	DecisionGroups   []DecisionGroup        `json:"decision_groups,omitempty"`
+	NotableDecisions []LogDecision          `json:"notable_decisions,omitempty"`
+	StageTimings     []StageTiming          `json:"stage_timings,omitempty"`
+	SourceSummary    *SourceSummary         `json:"source_summary,omitempty"`
+	TitleSelection   *TitleSelectionSummary `json:"title_selection,omitempty"`
+	OutputMedia      []MediaSummary         `json:"output_media,omitempty"`
+	// FinalValidation is the apply stage's persisted verdict on the delivered
+	// outputs, not a re-derivation: the ripped source it was measured against
+	// is deleted with staging when the item completes.
+	FinalValidation    *ripspec.FinalValidation `json:"final_validation,omitempty"`
+	AudioSummary       *AudioSummary            `json:"audio_summary,omitempty"`
+	SubtitleSummary    *SubtitleSummary         `json:"subtitle_summary,omitempty"`
+	RoutingSummary     *RoutingSummary          `json:"routing_summary,omitempty"`
+	EpisodeConsistency *EpisodeConsistency      `json:"episode_consistency,omitempty"`
+	CropAnalysis       *CropAnalysis            `json:"crop_analysis,omitempty"`
+	EpisodeStats       *EpisodeStats            `json:"episode_stats,omitempty"`
+	MediaStats         *MediaStats              `json:"media_stats,omitempty"`
+	AssetHealth        *AssetHealth             `json:"asset_health,omitempty"`
+	Anomalies          []Anomaly                `json:"anomalies,omitempty"`
 }
 
 // StageTiming is a compact per-stage timing summary.
@@ -254,61 +257,34 @@ type VideoSummary struct {
 
 // AudioStreamSummary describes a single output audio stream.
 type AudioStreamSummary struct {
-	Index        int    `json:"index"`
-	Codec        string `json:"codec,omitempty"`
-	Channels     int    `json:"channels,omitempty"`
-	Layout       string `json:"layout,omitempty"`
-	Language     string `json:"language,omitempty"`
-	Title        string `json:"title,omitempty"`
-	Default      bool   `json:"default,omitempty"`
-	Commentary   bool   `json:"commentary,omitempty"`
-	LabelCorrect bool   `json:"label_correct"`
-}
-
-// AVSyncSummary independently compares source and output primary-audio timing.
-type AVSyncSummary struct {
-	Entries     []AVSyncEntry `json:"entries,omitempty"`
-	Passed      int           `json:"passed,omitempty"`
-	Failed      int           `json:"failed,omitempty"`
-	Unavailable int           `json:"unavailable,omitempty"`
-}
-
-// AVSyncEntry records one source-to-output A/V start-offset comparison.
-type AVSyncEntry struct {
-	EpisodeKey           string  `json:"episode_key,omitempty"`
-	SourcePath           string  `json:"source_path,omitempty"`
-	OutputPath           string  `json:"output_path"`
-	SourceVideoStartSec  float64 `json:"source_video_start_sec"`
-	SourceAudioStartSec  float64 `json:"source_audio_start_sec"`
-	SourceAudioOffsetSec float64 `json:"source_audio_offset_sec"`
-	OutputVideoStartSec  float64 `json:"output_video_start_sec"`
-	OutputAudioStartSec  float64 `json:"output_audio_start_sec"`
-	OutputAudioOffsetSec float64 `json:"output_audio_offset_sec"`
-	DriftMilliseconds    float64 `json:"drift_milliseconds"`
-	Passed               bool    `json:"passed"`
-	Error                string  `json:"error,omitempty"`
+	Index      int    `json:"index"`
+	Codec      string `json:"codec,omitempty"`
+	Channels   int    `json:"channels,omitempty"`
+	Layout     string `json:"layout,omitempty"`
+	Language   string `json:"language,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Default    bool   `json:"default,omitempty"`
+	Commentary bool   `json:"commentary,omitempty"`
 }
 
 // SubtitleStreamSummary describes a single output subtitle stream.
 type SubtitleStreamSummary struct {
-	Index        int    `json:"index"`
-	Codec        string `json:"codec,omitempty"`
-	Language     string `json:"language,omitempty"`
-	Title        string `json:"title,omitempty"`
-	Default      bool   `json:"default,omitempty"`
-	Forced       bool   `json:"forced,omitempty"`
-	LabelCorrect bool   `json:"label_correct"`
+	Index    int    `json:"index"`
+	Codec    string `json:"codec,omitempty"`
+	Language string `json:"language,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Default  bool   `json:"default,omitempty"`
+	Forced   bool   `json:"forced,omitempty"`
 }
 
 // AudioSummary condenses audio selection/refinement and commentary evidence.
 type AudioSummary struct {
-	PrimaryDescription      string          `json:"primary_description,omitempty"`
-	PrimaryTrackIndex       int             `json:"primary_track_index"`
-	OutputAudioTracks       int             `json:"output_audio_tracks,omitempty"`
-	OutputCommentaryTracks  int             `json:"output_commentary_tracks,omitempty"`
-	ExcludedTracks          []ExcludedTrack `json:"excluded_tracks,omitempty"`
-	CommentaryDecisions     []LogDecision   `json:"commentary_decisions,omitempty"`
-	CommentaryLabelsCorrect bool            `json:"commentary_labels_correct"`
+	PrimaryDescription     string          `json:"primary_description,omitempty"`
+	PrimaryTrackIndex      int             `json:"primary_track_index"`
+	OutputAudioTracks      int             `json:"output_audio_tracks,omitempty"`
+	OutputCommentaryTracks int             `json:"output_commentary_tracks,omitempty"`
+	ExcludedTracks         []ExcludedTrack `json:"excluded_tracks,omitempty"`
+	CommentaryDecisions    []LogDecision   `json:"commentary_decisions,omitempty"`
 }
 
 // ExcludedTrack summarizes an audio track intentionally removed during refinement.
@@ -326,7 +302,6 @@ type SubtitleSummary struct {
 	ValidationFailed      int                     `json:"validation_failed,omitempty"`
 	Skipped               int                     `json:"skipped,omitempty"`
 	OutputSubtitleTracks  int                     `json:"output_subtitle_tracks,omitempty"`
-	SubtitleLabelsCorrect bool                    `json:"subtitle_labels_correct"`
 }
 
 // SubtitleResultSummary is the actionable part of one subtitle-generation record.

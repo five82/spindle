@@ -50,7 +50,7 @@ The JSON report schema may evolve with this skill; treat it as diagnostic input 
 - **`encoding`**: Encoding details snapshot (crop, validation, config, result). Spindle always uses Reel target-quality mode, so the snapshot carries the full Reel-reported config summary (`encoder`, `quality`, `preset`, `tune`, `audio_codec`) plus crop and validation (pass/fail) — nothing is omitted
 - **`media`**: ffprobe output for encoded files. For TV, only the representative probe (matching majority profile, marked `representative: true`), deviation probes, and error probes are included. `media_omitted` indicates how many clean probes were dropped.
 - **`errors`**: Any gathering errors (missing logs, parse failures, etc.)
-- **`analysis`**: Pre-computed summaries — decision groups, episode consistency, crop analysis, episode stats, media stats, asset health, anomaly flags (see Analysis Reference below)
+- **`analysis`**: Pre-computed summaries — decision groups, episode consistency, crop analysis, episode stats, media stats, asset health, the apply stage's final-output validation verdict, anomaly flags (see Analysis Reference below)
 
 **The `stage_gate` object tells you exactly which phases to run.** Each `phase_*` boolean is pre-computed from the item's task states (which lead the coarse item stage during rip/encode overlap), media type, and disc source. Do not re-derive these — trust the gate.
 
@@ -65,11 +65,11 @@ The `analysis` object (always present; sub-fields omitted when empty) contains p
 | `stage_timings` | Stage events exist | One row per stage with start, completion, duration, start count, and completion count. Prefer this over raw `logs.stages` for the timing table. |
 | `source_summary` | Source/output traits known | Disc source, UHD-likely flag, input/output resolution, input codecs, output codec, HDR/dynamic range. |
 | `title_selection` | Movie titles exist | Feature-length candidates, selected title, selection decision/reason, and similar-runtime candidate count. Prefer this over hand-parsing `envelope.titles`. |
-| `output_media` | Valid probes exist | Compact stream summaries (video/audio/subtitle labels and flags) derived from ffprobe. Prefer this for normal stream checks; use raw `media[]` only for missing details. |
-| `av_sync` | Encoded output and ripped source are probeable | Independent source-to-output primary-audio timing comparison. Per-output entries carry source/output video and audio starts, relative A/V offsets, signed drift in milliseconds, and pass/fail at 100 ms. This is independent of Reel's persisted validation verdict. |
-| `audio_summary` | Audio evidence exists | Primary track, output/excluded/commentary counts, commentary decisions, and commentary label status. |
-| `subtitle_summary` | Subtitle evidence exists | Subtitle pipeline metadata: per-title source (`opensubtitles`/`none`), validation counts, skipped count, output subtitle count, and label status. It is not evidence for auditing subtitle text. |
-| `routing_summary` | Final assets exist | Final output destination classification and expected-vs-actual route per output. |
+| `output_media` | Valid probes exist | Compact stream summaries (video/audio/subtitle titles, languages, and dispositions) derived from ffprobe. Prefer this for normal stream checks; use raw `media[]` only for missing details. Label and disposition correctness is judged by `final_validation`, not here. |
+| `final_validation` | The apply stage ran | The pipeline's own verdict on each delivered output, copied from `envelope.attributes.final_validation`. Per-output entries carry `output_path`, `passed`, `failed_checks[]`, an `error` when the file could not be probed, and an `av_sync` block (source/output A/V offsets, signed drift in milliseconds, pass/fail at 100 ms). The apply stage probes the delivered file against the ripped source after every rewrite, so this stays independent of Reel's persisted validation verdict. |
+| `audio_summary` | Audio evidence exists | Primary track, output/excluded/commentary counts, and commentary decisions. Whether the labels are correct comes from `final_validation`. |
+| `subtitle_summary` | Subtitle evidence exists | Subtitle pipeline metadata: per-title source (`opensubtitles`/`none`), validation counts, skipped count, and output subtitle count. Stream layout and label correctness come from `final_validation`. It is not evidence for auditing subtitle text. |
+| `routing_summary` | Final assets exist | Display-only classification of each final output's destination and its expected-vs-actual route. The organizer enforces routing itself and fails the stage on a mismatch, so this table is context, not the check. |
 | `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_streams with codec/language/is_forced), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. |
 | `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`. |
 | `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `placeholder_only`, `confidence_min/max/mean`, `below_070/080/090` (cumulative), `sequence_contiguous`, `episode_range`. |
@@ -135,7 +135,7 @@ Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors
 3. **Data flow anomalies**:
    - Track counts changing unexpectedly between stages
    - Reconcile TV counts across `makemkv_scan_complete.titles_found`, title-selection decisions, `episode_placeholders`, the episode manifest, and ripped assets. A contiguous resolved sequence does not prove the first or last episode is present.
-   - For a DVD, any `duplicate_detection` decision carrying `title_id`/`duplicate_of` is a **CRITICAL missing-episode risk**: DVD segment maps are title-local and TitleHash is metadata-only, so neither proves equal content. Compare source sizes when available, but never accept a DVD title reduction solely as deduplication.
+   - Title-level TV deduplication only runs on Blu-ray segment maps: DVD maps are title-local and TitleHash is metadata-only, so identification refuses to dedup non-Blu-ray titles at all. A `duplicate_detection` decision carrying `title_id`/`duplicate_of` on a DVD should never appear — if one does, treat it as a CRITICAL missing-episode risk and a bug in the dedup gate.
    - Episode counts not matching expectations
    - File sizes that seem wrong for the content
 
@@ -212,33 +212,27 @@ Analyze the `rip_cache` section from the audit output:
 
 ### Phase 3c: Final Output Routing Validation (post-organizing items, especially TV with review flags)
 
-Analyze the actual final routing outcome, not just item-level review flags:
+The organizer enforces routing itself: after copying, it re-derives each output's expected destination from the review flags (TV: resolved + no episode review flag -> library, otherwise review; movie: the item's review flag) and fails the organize stage when a recorded final asset is missing or sits under the wrong root. A misrouted item therefore surfaces as a FAILED item at `organizing`, not as a quietly wrong library.
 
-1. **Read `envelope.assets.final`** and map final paths by `episode_key`. The digest's "Final routing" section pre-computes expected-vs-actual per output.
-2. **For TV, compute expected destination per episode**:
-   - resolved + no episode review flag -> library
-   - unresolved -> review
-   - resolved + episode review flag -> review
-3. **Compare expected vs actual destination** using final paths and, when needed, direct filesystem inspection of the review/library directories.
-4. **Escalate any mismatch as a primary finding**, especially:
-   - all episodes routed to review when only a subset required review
-   - review-required episodes routed to library
-   - missing final outputs for episodes that should have been organized
-5. If the structured audit data is incomplete or suspicious, **inspect the actual directories on disk** rather than assuming the envelope tells the whole story.
+1. **Read `envelope.assets.final`** and map final paths by `episode_key`. The digest's "Final routing" section shows expected-vs-actual per output for display.
+2. **If the item failed at `organizing` with `routing verification failed`**, that message names the keys and the expected root: diagnose why the flags and the routing branch disagree (it indicates an organizer bug, not a content problem).
+3. For a completed item, confirm the routing summary agrees with the per-episode review flags; a disagreement here means the check and the summary disagree, which is itself a finding.
+4. If the structured audit data is incomplete or suspicious, **inspect the actual directories on disk** rather than assuming the envelope tells the whole story.
 
 ### Phase 4: Encoded File Analysis (when `phase_encoded` is true)
 
 Analyze the `media` array from the audit output. Each entry contains full ffprobe results.
 
-**TV note:** The encoding snapshot only contains data for the last episode encoded (the snapshot is overwritten per-episode during encoding). The `media[]` array is compressed for TV: only the representative probe (matching the majority profile, marked `representative: true`), deviation probes, and error probes are included. Use `media_omitted` to see how many clean probes were dropped. The representative probe is sufficient for stream-level checks (items 2-6 below); `analysis.av_sync` still checks every output before probe compression, and `analysis.episode_consistency` confirms all omitted episodes match the same profile. The snapshot is still useful for crop detection, encoding config, and validation results (which are consistent across episodes from the same disc).
+**TV note:** The encoding snapshot only contains data for the last episode encoded (the snapshot is overwritten per-episode during encoding). The `media[]` array is compressed for TV: only the representative probe (matching the majority profile, marked `representative: true`), deviation probes, and error probes are included. Use `media_omitted` to see how many clean probes were dropped. The representative probe is sufficient for stream-level checks (items 2-6 below); `analysis.final_validation` carries a per-output verdict for every episode regardless of probe compression, and `analysis.episode_consistency` confirms all omitted episodes match the same profile. The snapshot is still useful for crop detection, encoding config, and validation results (which are consistent across episodes from the same disc).
 
 **For movies** (single entry) or **the representative probe for TV**:
 
-1. **Verify A/V sync independently** from `analysis.av_sync`:
-   - Require every available entry to pass. The audit compares the primary audio's offset relative to video in the ripped source against the final output; absolute drift over 100 ms is CRITICAL.
-   - This check is separate from Reel's persisted `encoding.snapshot.validation` result. Never accept the Reel validation line as proof of sync by itself.
-   - A negative `drift_milliseconds` means output audio moved earlier; positive means it moved later.
-   - Investigate `unavailable` entries rather than silently claiming sync is valid. The source normally comes from the rip cache after staging cleanup.
+1. **Check the pipeline's final-output verdict** in `analysis.final_validation`:
+   - The apply stage probes each delivered file after every rewrite and compares the primary audio's offset relative to video against the ripped source; absolute drift over 100 ms fails the output and routes it to review. This is measured independently of Reel's persisted `encoding.snapshot.validation` result — never accept the Reel validation line as proof of sync by itself, but do not recompute the comparison here either: the ripped source is deleted with staging when the item completes.
+   - Do not re-derive the verdict. Verify it exists, then investigate every entry with `failed_checks` (each names the invariant that broke) and correlate it with the episode's review reasons and the `final_validation` decision logs.
+   - A negative `av_sync.drift_milliseconds` means output audio moved earlier; positive means it moved later.
+   - An entry with `error` (or `av_sync.error`) is UNAVAILABLE, not passing: the file or its source could not be probed. Investigate rather than claiming the output is verified.
+   - A missing `analysis.final_validation` on an item whose outputs were organized is itself a finding — the apply stage always persists a verdict.
 
 2. **Verify video stream** (from `media[].probe.streams` where `codec_type=video`):
    - Resolution matches expected (SD/HD/4K)
@@ -247,23 +241,17 @@ Analyze the `media` array from the audit output. Each entry contains full ffprob
    - Static HDR signaling present if expected (`color_primaries`, transfer characteristics, and mastering metadata)
    - Reel intentionally does not preserve HDR10+ dynamic metadata (SMPTE ST 2094-40) because the target playback environment does not consume it. An HDR10+ source producing a static-HDR AV1 output is expected; do not flag missing HDR10+ side data or an external HDR10+ vs output static-HDR difference.
 
-3. **Verify audio streams** (from `media[].probe.streams` where `codec_type=audio`):
-   - Primary audio is first and has `disposition.default=1`
-   - Commentary tracks have `disposition.comment=1` AND title contains "Commentary"
-   - Track count matches expected (primary + commentary tracks)
-   - No unexpected stereo downmix tracks
+3. **Verify audio streams** (verdict first, then `media[].probe.streams` where `codec_type=audio`):
+   - The apply stage already enforces this layout on the delivered file: exactly the refinement plan's track count, stream 0 default and no other, an English default whenever an English track exists, and commentary flags on exactly the tracks it labeled. A violation appears as a `final_validation` failed check, not as something to rediscover here.
+   - Use the probe to add context the verdict cannot: unexpected stereo downmix tracks, a track count that disagrees with the disc's known audio layout, odd channel layouts.
 
-4. **Check commentary labeling** (recent bug area):
-   - For each audio stream with `disposition.comment=1`:
-     - Stream `tags.title` exists and contains "Commentary" (case-insensitive)
-     - If original title was blank, it should now be exactly "Commentary"
-     - If original title existed without "commentary", it should have " (Commentary)" appended
-   - Cross-reference with commentary decisions in `analysis.decision_groups`
+4. **Check commentary labeling**:
+   - The apply stage verifies every track it marked carries `disposition.comment=1` and a title containing "Commentary", and that no other track carries the comment flag. Read `analysis.final_validation` for the verdict.
+   - The remaining judgment call is whether the right tracks were classified as commentary: cross-reference commentary decisions in `analysis.decision_groups` and, when `phase_external_validation` is true, the disc review's commentary count.
 
-5. **Check subtitle streams** (from `media[].probe.streams` where `codec_type=subtitle`):
-   - Verify exactly one display subtitle track exists with correct language when the title's subtitle was adopted; a skipped title (`source=none`) has none
-   - Subtitle title should contain the language name (e.g., "English")
-   - Adopted subtitle tracks should not have `disposition.forced=1`
+5. **Check subtitle streams** (verdict first, then `media[].probe.streams` where `codec_type=subtitle`):
+   - The apply stage enforces the layout for the delivered file: an adopted title (`source=opensubtitles`) that was muxed must carry exactly one `subrip` stream with a language tag, a label naming that language, and neither the forced nor the default flag; a skipped title (`source=none`) must carry no subtitle stream. Failures appear in `analysis.final_validation`.
+   - Use the probe only to explain a failed check or to look at an output the verdict marked unavailable.
 
 6. **Parse encoding details** from `encoding.snapshot`:
    - Check `validation.passed` and individual step results
@@ -334,12 +322,9 @@ Analyze only structural subtitle evidence from `media[].probe.streams` (codec_ty
 
 **For movies** or **per-episode for TV**:
 
-1. **Verify embedded subtitles** from the ffprobe data in `media[]`:
-   - Exactly one display subtitle track should exist per output when a subtitle was adopted (`source=opensubtitles`) and muxing succeeded
-   - A title with `source=none` (skipped) legitimately has NO subtitle stream — cross-check the skip record before flagging a missing track
-   - Check `disposition.default` is not unexpectedly enabled for the adopted subtitle
-   - Check `disposition.forced` is not enabled for the adopted subtitle
-   - **Check labeling**: subtitle title should contain the language name (e.g., "English")
+1. **Verify embedded subtitles**, primarily from `analysis.final_validation`:
+   - The apply stage already reconciles each output's subtitle streams against that title's adoption record: one `subrip` stream, language tag present, label naming the language, no forced flag, no default flag for an adopted-and-muxed title; no subtitle stream at all for `source=none`. Read the verdict rather than re-deriving it from `media[]`.
+   - A mux failure falls back to a sidecar SRT that Loom ignores, so it flags the episode for review with a `final_validation`/`subtitle_mux` review reason. Report it as a real defect, not a cosmetic one.
    - Never treat Matroska's subtitle `tags.DURATION` as the subtitle's absolute end timestamp. It is the cue span (`last cue end - first cue start`). For a suspected tail gap, use ffprobe packet metadata for the subtitle stream and calculate `max(pts_time + duration_time)`. Do not inspect packet payloads or cue text. A gap from that timestamp to video duration is not itself a finding: valid display subtitles stop before long credits, and sparse WhisperX end-credit hallucinations can extend the raw reference. For an adopted track, trust a `reference_tail_gap_s` at or below the 600-second gate unless other structural validation failed.
 
 2. **Subtitle adoption outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `analysis.decision_groups`):
@@ -349,13 +334,13 @@ Analyze only structural subtitle evidence from `media[].probe.streams` (codec_ty
    - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config.
    - `decision_type=transcription_asset` and `decision_type=transcription_profile` show which asset/profile WhisperX processed for the sync reference. Use `logs.events` entries (`transcription_extract_complete`, `transcription_whisperx_complete`, `transcription_complete`) for transcription timing before falling back to the raw files in `logs.paths`.
    - `decision_type=subtitle_transcript_source` with `decision_result=artifact_reused` means the stage reused the shared per-episode transcript artifact (`envelope.assets.transcript`) and ran no WhisperX of its own — absent transcription events in the subtitling stage are then expected, not a defect. For TV, verify transcript asset count matches episode count in `analysis.asset_health`.
-   - Treat additional subtitle tracks, forced dispositions, or "Forced" subtitle labels as defects or stale outputs unless there is clear evidence they came from outside the current Spindle subtitle stage.
+   - Additional subtitle tracks, forced dispositions, and "Forced" subtitle labels fail the apply stage's layout check and route the output to review; if you see them without a matching `final_validation` failure, the output was not produced by the current pipeline (a stale file) — say so.
 
 3. **Per-episode subtitle asset status** (TV only, from `envelope.assets.subtitled`):
    - Check for `status: "failed"` entries with `error_msg`
    - Verify `subtitles_muxed` flag per episode
    - Check `envelope.attributes["subtitle_generation_results"]` for per-episode details
-   - Treat `validation_result` as the actionable summary: `passed` is clean, `needs_review` is actionable, `failed` means the adopted subtitle failed validation, `skipped` accompanies `source=none` and is the no-subtitle outcome, not a failure
+   - Treat `validation_result` as the actionable summary: `passed` is clean, `needs_review` is actionable, and `skipped` accompanies `source=none` and is the no-subtitle outcome, not a failure. A severe issue rejects the candidate before any record is written, so an adopted record never reads `failed`
    - Treat `qc_observations` as telemetry only. Do not list below-threshold observations (for example `high_reading_speed`, `short_cue_duration`, `long_cue_duration`) as Issues Found unless they also appear in `review_issues`/`severe_issues` or caused review routing.
 
 4. **Cross-episode subtitle consistency** (TV only):
@@ -392,20 +377,20 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 | Pattern | Stage | Evidence in Audit Output | Impact |
 |---------|-------|--------------------------|--------|
 | Duplicate disc detection | Identification/Disc Monitor | `decision_type=duplicate_detection` groups | Item rejected or enqueue skipped |
-| DVD TV title falsely deduplicated | Identification | `decision_type=duplicate_detection` with `title_id`/`duplicate_of` on a DVD; scan/title/placeholder counts decrease | Episode omitted even when the resolved episode sequence remains contiguous |
 | TMDB match rejected or weakly accepted | Identification | `decision_type=tmdb_match` groups with score/threshold details in `decision_reason` | Wrong title match, or item failed at identification |
 | Unresolved placeholder episodes | Episode ID | `envelope.episodes` with `episode=0` and placeholder keys after episodeid | Episodes land in review_dir |
 | Wrong crop detection | Encoding | `encoding.snapshot.crop_filter` aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
-| A/V sync changed by encoding | Encoding | `analysis.av_sync.entries[].passed=false`; source/output relative A/V start offsets differ by more than 100 ms | Audio leads or lags video; CRITICAL even if Reel's persisted validation says passed |
+| A/V sync changed after encoding | Encoding/Apply | `analysis.final_validation.entries[].failed_checks` names `av_sync drift ...`; the entry's `av_sync` block shows source vs output offsets | Audio leads or lags video; CRITICAL even if Reel's persisted validation says passed |
+| Final output never verified | Apply | `analysis.final_validation` absent on an organized item, or an entry with `error`/`av_sync.error` | The delivered file shipped without the pipeline's own checks; investigate why the probe or ripped source was unavailable |
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review using `media[].probe.streams` | Commentary tracks not preserved |
-| Unlabeled commentary | Audio Analysis | Audio stream with `disposition.comment=1` but no "Commentary" in `tags.title` | Commentary track is not clearly labeled |
+| Unlabeled commentary | Apply | `final_validation` failed check `commentary track N ... lacks a Commentary label` or `... missing the comment flag` | Commentary track is not clearly labeled; output routed to review |
 | Stereo downmix kept | Audio Analysis | Extra 2ch audio track in `media[].probe.streams` | Unnecessary audio bloat |
 | Subtitle skipped | Subtitles | `subtitle_generation_results[].source` is `none`; WARN `event_type=subtitle_skipped`; pre-flagged warning anomaly | Title has no subtitles; WARNING not CRITICAL — recovery is the whisperx-subtitles skill or a `spindle subtitle` retry |
-| SRT validation review/failure | Subtitles | `subtitle_generation_results[].validation_result` is `needs_review` or `failed`; `review_issues`/`severe_issues` populated; review routing present | Subtitle pipeline flagged output for separate review; do not inspect its text here |
+| SRT validation review | Subtitles | `subtitle_generation_results[].validation_result` is `needs_review`; `review_issues` populated; review routing present | Subtitle pipeline flagged output for separate review; do not inspect its text here |
 | Subtitle tail mismatch | Subtitles | An adopted `subtitle_source` reports `reference_tail_gap_s` over 600 seconds despite the gate, or other structural validation explicitly rejected/review-routed the tail; do not use Matroska `tags.DURATION`, video-tail length, or a below-threshold raw WhisperX tail alone | Incomplete or wrong candidate adopted despite the gate |
-| Extra/forced subtitle | Subtitles | More than one display subtitle stream, `disposition.forced=1`, or "Forced" subtitle labels in current outputs | Stale or incorrect subtitle output; current pipeline should produce one non-forced display SRT |
-| Subtitles not muxed | Subtitles | Adopted record (`source=opensubtitles`) but no subtitle streams in `media[].probe.streams` | Loom ignores external subtitle files; a `source=none` title with no subtitle stream is NOT this pattern |
-| Unlabeled subtitles | Subtitles | Missing or incorrect `tags.title` on subtitle stream | Subtitle display issue |
+| Extra/forced/default subtitle | Apply | `final_validation` failed check naming the stream count, the forced flag, or the default flag | Incorrect subtitle output; the apply stage routes it to review. Without a matching failed check the file is stale, not pipeline output |
+| Subtitles not muxed | Apply | WARN `event_type=mux_error` with a `subtitle_mux:` review reason, or a `final_validation` failed check reporting 0 subtitle streams for an adopted title | Loom ignores sidecar subtitle files, so the delivered file has no visible subtitles; a `source=none` title with no subtitle stream is NOT this pattern |
+| Unlabeled subtitles | Apply | `final_validation` failed check `subtitle label ... does not identify language ...` | Subtitle display issue; output routed to review |
 | Low episode match confidence | Episode ID | `envelope.episodes[].match_confidence` < 0.70 | Episodes may be mislabeled |
 | Decisive low-similarity episode match | Episode ID | `decision_type=episode_match` with `confidence_quality=decisive_low_similarity` and strong margins | Usually not a defect; explain as lower transcript/reference overlap rather than confusion with another episode |
 | Episodes unresolved | Episode ID | `item.needs_review=true`, episodes with `episode=0` | Placeholder names in review_dir |
@@ -422,7 +407,7 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 | Validation failed but continued | Encoding | `decision_type=validation_failure_route` with `decision_result=flagged_for_review` | Item routed to review |
 | Commentary tracks lost in refinement | Audio Analysis | `decision_type=commentary_remapping` with remapped count 0 | Commentary detection effort wasted |
 | Source stage fallback to encoded | Organization | `decision_type=source_stage_selection` with `decision_result=encoded` when subtitles enabled | Subtitles may be missing from output |
-| Audio selection non-english fallback | Audio Analysis | `decision_type=audio_selection` with `decision_result=fallback_non_english` | Primary audio track is not English |
+| Audio selection non-english fallback | Audio Analysis | `decision_type=audio_selection` with `decision_result=fallback_non_english`; a `final_validation` failed check when an English track survived but is not the default | Primary audio track is not English |
 | Commentary disposition applied | Audio Analysis | `decision_type=commentary_disposition` with `decision_result=applied` | Commentary tracks marked in output |
 | KeyDB stale fallback | Identification | WARN `event_type=keydb_download_error` with message `KeyDB download failed, using stale catalog` | Report as WARNING; identification may miss a newly added or corrected disc title |
 | KeyDB lookup miss | Identification | `decision_type=keydb_lookup` with `decision_result=miss` | Disc ID not in KeyDB, fallback to title parsing |
@@ -543,7 +528,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 
 #### Encoded File (if phase_encoded)
 
-- Independent A/V sync: <from analysis.av_sync: pass/fail, source offset, output offset, signed drift; explain unavailable entries>
+- Final output validation: <from analysis.final_validation: per-output pass/fail, any failed_checks, and the av_sync source offset -> output offset with signed drift; explain unavailable entries and a missing verdict>
 
 **Movie:**
 - Video: <codec> <resolution> <HDR status> | Duration: <seconds>s | Size: <bytes>
@@ -562,9 +547,9 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 #### Subtitle Pipeline (if phase_subtitles)
 - Source: <per-title adoption outcome from subtitle_generation_results[].source — opensubtitles/none; for skips, the subtitle_source rejection reasons>
 - Tracks: <count and config from media probes>
-- Labels correct: <yes/no>
-- Validation result: <aggregate subtitle_generation_results.validation_result; list structured review_issues/severe_issues only when they affected routing, without inspecting cue text>
-- Subtitle mux/output: <mux status and single-display-subtitle checks; skipped titles legitimately have no subtitle stream>
+- Stream layout and labels: <from analysis.final_validation: passed, or the failed_checks naming the stream count, codec, language tag, label, or forced/default flag>
+- Validation result: <aggregate subtitle_generation_results.validation_result; list structured review_issues only when they affected routing, without inspecting cue text>
+- Subtitle mux/output: <mux status and the apply stage's subtitle layout verdict; skipped titles legitimately have no subtitle stream>
 - Content review: <not performed; subtitle text is out of scope. For skipped titles recommend the whisperx-subtitles skill or a later `spindle subtitle` retry>
 
 #### Commentary (if phase_commentary)
@@ -590,7 +575,6 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] Reported any `keydb_download_error` stale-catalog fallback as a WARNING
 - [ ] Analyzed logs/decisions for anomalies beyond simple error counts, drilling into the full JSON wherever the digest flagged an omission or something looked off
 - [ ] If TV: reconciled scanned, selected, placeholder, manifest, ripped, and final episode counts; investigated every reduction
-- [ ] If TV DVD: treated any title-level duplicate skip as critical rather than trusting contiguous episode numbering
 - [ ] For failed items: diagnosed failure cause from `item.error_message` and log events
 
 ### Post-Ripping (phase_rip_cache)
@@ -605,10 +589,10 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] Verified `envelope.attributes.content_id.episodes_synchronized` flag
 
 ### Post-Encoding (phase_encoded, phase_crop)
-- [ ] Checked independent source-to-output A/V timing in `analysis.av_sync`; did not rely solely on Reel's persisted validation verdict
+- [ ] Read `analysis.final_validation`: confirmed a verdict exists for every output, investigated failed checks and unavailable entries, and did not rely solely on Reel's persisted validation verdict
 - [ ] Analyzed streams from `media[]` entries (video, audio, subtitle)
 - [ ] Validated crop detection from `encoding.snapshot.crop_filter`
-- [ ] Verified commentary labeling
+- [ ] Reviewed the apply stage's commentary, audio layout, and subtitle layout verdicts
 - [ ] If TV: checked cross-episode consistency
 
 ### Post-Audio-Analysis (phase_commentary)
@@ -616,8 +600,7 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] If TV: verified cross-episode audio stream count consistency
 
 ### Post-Subtitling (phase_subtitles)
-- [ ] Verified subtitle tracks in media probes (adopted titles only; reconciled `source=none` skips against missing streams)
-- [ ] Verified subtitle track labels
+- [ ] Read the apply stage's subtitle layout verdict (adopted titles only; `source=none` skips legitimately have no stream)
 - [ ] Checked only aggregate adoption/validation outcomes and routing
 - [ ] Did not open, extract, sample, quote, compare, or judge subtitle/transcript content
 - [ ] If TV: checked per-episode subtitle asset status

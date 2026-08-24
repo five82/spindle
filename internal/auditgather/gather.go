@@ -110,11 +110,8 @@ func Gather(ctx context.Context, cfg *config.Config, item *httpapi.ItemResponse)
 		}
 	}
 
-	// Pre-computed analysis. A/V sync is intentionally re-derived from the
-	// cached source and final output rather than trusting the encoder verdict.
+	// Pre-computed analysis.
 	r.Analysis = computeAnalysis(r)
-	r.Analysis.AVSync = gatherAVSync(ctx, r, &env)
-	r.Analysis.Anomalies = append(r.Analysis.Anomalies, detectAVSyncAnomalies(r.Analysis.AVSync)...)
 
 	// Compress TV probes.
 	r.Media, r.MediaOmitted = compressMediaProbes(r.Media, r.Analysis.EpisodeConsistency)
@@ -781,65 +778,4 @@ func probeFile(ctx context.Context, path, role, episodeKey string) MediaFileProb
 		SizeBytes:       result.SizeBytes(),
 		DurationSeconds: result.DurationSeconds(),
 	}
-}
-
-func gatherAVSync(ctx context.Context, r *Report, env *ripspec.Envelope) *AVSyncSummary {
-	if r == nil || env == nil || len(r.Media) == 0 {
-		return nil
-	}
-
-	summary := &AVSyncSummary{}
-	for _, output := range r.Media {
-		entry := AVSyncEntry{EpisodeKey: output.EpisodeKey, OutputPath: output.Path}
-		ripped, ok := env.Assets.FindAsset(ripspec.AssetKindRipped, output.EpisodeKey)
-		if !ok || strings.TrimSpace(ripped.Path) == "" {
-			entry.Error = "ripped source asset unavailable"
-			summary.Entries = append(summary.Entries, entry)
-			summary.Unavailable++
-			continue
-		}
-
-		sourcePath := ripped.Path
-		if r.RipCache != nil && r.RipCache.Found && r.RipCache.Path != "" {
-			cachedPath := filepath.Join(r.RipCache.Path, filepath.Base(ripped.Path))
-			if _, err := os.Stat(cachedPath); err == nil {
-				sourcePath = cachedPath
-			}
-		}
-		entry.SourcePath = sourcePath
-		source, err := ffprobe.Inspect(ctx, "", sourcePath)
-		if err != nil {
-			entry.Error = err.Error()
-			summary.Entries = append(summary.Entries, entry)
-			summary.Unavailable++
-			continue
-		}
-		if output.Probe == nil {
-			entry.Error = output.Error
-			if entry.Error == "" {
-				entry.Error = "output probe unavailable"
-			}
-			summary.Entries = append(summary.Entries, entry)
-			summary.Unavailable++
-			continue
-		}
-
-		sourceAudioIndex := -1
-		if env.Attributes.AudioAnalysis != nil {
-			sourceAudioIndex = env.Attributes.AudioAnalysis.PrimaryTrack.Index
-		}
-		entry = compareAVSync(entry, source, output.Probe, sourceAudioIndex)
-		summary.Entries = append(summary.Entries, entry)
-		if entry.Error != "" {
-			summary.Unavailable++
-		} else if entry.Passed {
-			summary.Passed++
-		} else {
-			summary.Failed++
-		}
-	}
-	if len(summary.Entries) == 0 {
-		return nil
-	}
-	return summary
 }

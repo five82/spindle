@@ -210,11 +210,46 @@ type ContentIDSummary struct {
 	Completed            bool    `json:"completed,omitempty"`
 }
 
+// FinalValidation is the apply stage's verdict on the files the organizer
+// will deliver, measured after every encoded-file rewrite has completed. It is
+// persisted because staging (and the ripped source it is measured against) is
+// deleted once the item completes, so the verdict cannot be recomputed later.
+type FinalValidation struct {
+	Entries []FinalValidationEntry `json:"entries,omitempty"`
+	Passed  bool                   `json:"passed"`
+}
+
+// FinalValidationEntry is the verdict for one delivered output. FailedChecks
+// names the checks that did not hold; Error records why the output could not
+// be probed at all (unavailable, not failed).
+type FinalValidationEntry struct {
+	EpisodeKey   string       `json:"episode_key,omitempty"`
+	OutputPath   string       `json:"output_path"`
+	Passed       bool         `json:"passed"`
+	FailedChecks []string     `json:"failed_checks,omitempty"`
+	Error        string       `json:"error,omitempty"`
+	AVSync       *AVSyncCheck `json:"av_sync,omitempty"`
+}
+
+// AVSyncCheck compares the primary audio's start offset relative to video in
+// the ripped source against the delivered output. It is deliberately
+// independent of the encoder's own sync validation, which cannot see the
+// rewrites the apply stage performs after encoding.
+type AVSyncCheck struct {
+	SourcePath           string  `json:"source_path,omitempty"`
+	SourceAudioOffsetSec float64 `json:"source_audio_offset_sec"`
+	OutputAudioOffsetSec float64 `json:"output_audio_offset_sec"`
+	DriftMilliseconds    float64 `json:"drift_milliseconds"`
+	Passed               bool    `json:"passed"`
+	Error                string  `json:"error,omitempty"`
+}
+
 // EnvelopeAttributes holds cross-cutting flags and analysis results.
 type EnvelopeAttributes struct {
 	AudioAnalysis             *AudioAnalysisData  `json:"audio_analysis,omitempty"`
 	SubtitleGenerationResults []SubtitleGenRecord `json:"subtitle_generation_results,omitempty"`
 	ContentID                 *ContentIDSummary   `json:"content_id,omitempty"`
+	FinalValidation           *FinalValidation    `json:"final_validation,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

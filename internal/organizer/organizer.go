@@ -71,6 +71,9 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			if err := h.routeToReview(ctx, logger, sess, &meta, keys); err != nil {
 				return err
 			}
+			if err := h.verifyRouting(logger, sess); err != nil {
+				return err
+			}
 			reviewCount = len(keys)
 			h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
 			return nil
@@ -84,6 +87,9 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 				"decision_reason", "all resolved episodes flagged for review",
 			)
 			if err := h.routeToReview(ctx, logger, sess, &meta, reviewKeys); err != nil {
+				return err
+			}
+			if err := h.verifyRouting(logger, sess); err != nil {
 				return err
 			}
 			reviewCount = len(reviewKeys)
@@ -121,6 +127,9 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		}
 	}
 
+	if err := h.verifyRouting(logger, sess); err != nil {
+		return err
+	}
 	return h.finalize(ctx, logger, sess, libraryCount, reviewCount)
 }
 
@@ -170,6 +179,70 @@ func (h *Handler) finalize(ctx context.Context, logger *slog.Logger, sess *stage
 	h.sendTerminalNotification(ctx, logger, sess, libraryCount, reviewCount)
 	h.cleanupStaging(logger, sess.Item)
 	return nil
+}
+
+// verifyRouting re-derives each output's expected destination from review
+// state alone and confirms the recorded final asset landed under that root.
+// It is deliberately independent of the branch the stage actually took: a
+// mismatch means the routing code disagrees with the flags it routes on, so
+// it fails the stage loudly instead of quietly delivering the wrong file.
+func (h *Handler) verifyRouting(logger *slog.Logger, sess *stage.Session) error {
+	env := sess.Env
+	var missing, misrouted []string
+	for _, key := range env.AssetKeys() {
+		expectedReview := sess.Item.NeedsReview == 1
+		if env.Metadata.MediaType == "tv" {
+			ep := env.EpisodeByKey(key)
+			expectedReview = ep == nil || ep.Episode <= 0 || ep.NeedsReview
+		}
+		expectedRoot := h.cfg.Paths.LibraryDir
+		if expectedReview {
+			expectedRoot = h.cfg.Paths.ReviewDir
+		}
+
+		asset, ok := env.Assets.FindAsset(ripspec.AssetKindFinal, key)
+		if !ok || !asset.IsCompleted() {
+			missing = append(missing, key)
+			continue
+		}
+		if !pathWithinRoot(asset.Path, expectedRoot) {
+			misrouted = append(misrouted, fmt.Sprintf("%s: expected under %s, got %s", key, expectedRoot, asset.Path))
+		}
+	}
+
+	if len(missing) == 0 && len(misrouted) == 0 {
+		logger.Info("routing verified",
+			"decision_type", logs.DecisionOrganizeRoute,
+			"decision_result", "verified",
+			"decision_reason", fmt.Sprintf("%d output(s) under their expected root", len(env.AssetKeys())),
+		)
+		return nil
+	}
+
+	var parts []string
+	if len(missing) > 0 {
+		parts = append(parts, "no completed final asset for "+strings.Join(missing, ", "))
+	}
+	if len(misrouted) > 0 {
+		parts = append(parts, "misrouted "+strings.Join(misrouted, "; "))
+	}
+	err := fmt.Errorf("routing verification failed: %s", strings.Join(parts, "; "))
+	logger.Error("routing verification failed",
+		"event_type", "organize_routing_mismatch",
+		"error_hint", "final outputs do not match the destinations their review flags require",
+		"error", err,
+	)
+	return err
+}
+
+// pathWithinRoot reports whether path is root itself or lies beneath it.
+func pathWithinRoot(path, root string) bool {
+	if path == "" || root == "" {
+		return false
+	}
+	path = filepath.Clean(path)
+	root = filepath.Clean(root)
+	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
 func partitionTVOrganizationKeys(env *ripspec.Envelope) (libraryKeys, reviewKeys []string) {
@@ -370,6 +443,12 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 						"decision_reason", "file already exists",
 						"path", destPath,
 					)
+					// The existing file is this key's delivered output, so
+					// record it: the routing check and the audit both read
+					// the final asset as the record of where it landed.
+					if err := sess.SaveAssetSuccess(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath}); err != nil {
+						return "", copied, err
+					}
 					continue
 				}
 			}
