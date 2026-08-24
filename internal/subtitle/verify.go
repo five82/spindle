@@ -34,10 +34,10 @@ const (
 	adoptMinSpanCoverage   = 0.6
 	// An absolute tail bound prevents high proportional span coverage on long
 	// movies from hiding a substantially missing ending. Compare against the
-	// spoken reference rather than video duration so long credits remain valid.
-	// Err toward rejecting incomplete tracks: a two-minute spoken-reference
-	// gap is enough to require another candidate or an operator retry.
-	adoptMaxReferenceTailGapSeconds = 2 * 60
+	// ASR reference rather than video duration so long credits remain valid.
+	// The generous bound tolerates sparse WhisperX hallucinations during end
+	// credits; a larger gap still indicates a substantially missing ending.
+	adoptMaxReferenceTailGapSeconds = 10 * 60
 	// adoptRefineMinSimilarity gates the anchor-based timing refinement: only
 	// a candidate whose text already proves it is this title's subtitle may
 	// have its timing repaired and re-verified.

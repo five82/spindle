@@ -340,7 +340,7 @@ Analyze only structural subtitle evidence from `media[].probe.streams` (codec_ty
    - Check `disposition.default` is not unexpectedly enabled for the adopted subtitle
    - Check `disposition.forced` is not enabled for the adopted subtitle
    - **Check labeling**: subtitle title should contain the language name (e.g., "English")
-   - Never treat Matroska's subtitle `tags.DURATION` as the subtitle's absolute end timestamp. It is the cue span (`last cue end - first cue start`). For a suspected tail gap, use ffprobe packet metadata for the subtitle stream and calculate `max(pts_time + duration_time)`; compare that actual last cue end with the logged `reference_tail_gap_s`. Do not inspect packet payloads or cue text.
+   - Never treat Matroska's subtitle `tags.DURATION` as the subtitle's absolute end timestamp. It is the cue span (`last cue end - first cue start`). For a suspected tail gap, use ffprobe packet metadata for the subtitle stream and calculate `max(pts_time + duration_time)`. Do not inspect packet payloads or cue text. A gap from that timestamp to video duration is not itself a finding: valid display subtitles stop before long credits, and sparse WhisperX end-credit hallucinations can extend the raw reference. For an adopted track, trust a `reference_tail_gap_s` at or below the 600-second gate unless other structural validation failed.
 
 2. **Subtitle adoption outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `analysis.decision_groups`):
    - The pipeline downloads the identified title's OpenSubtitles candidates, cleans them, retimes against the rip's WhisperX transcript with ffsubsync, and adopts the first candidate that passes the verification gate. When no candidate verifies (or none exists, or the title is multi-episode), it records `source=none` and the title completes WITHOUT subtitles. Spindle never generates subtitles itself.
@@ -402,7 +402,7 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 | Stereo downmix kept | Audio Analysis | Extra 2ch audio track in `media[].probe.streams` | Unnecessary audio bloat |
 | Subtitle skipped | Subtitles | `subtitle_generation_results[].source` is `none`; WARN `event_type=subtitle_skipped`; pre-flagged warning anomaly | Title has no subtitles; WARNING not CRITICAL — recovery is the whisperx-subtitles skill or a `spindle subtitle` retry |
 | SRT validation review/failure | Subtitles | `subtitle_generation_results[].validation_result` is `needs_review` or `failed`; `review_issues`/`severe_issues` populated; review routing present | Subtitle pipeline flagged output for separate review; do not inspect its text here |
-| Subtitle tail mismatch | Subtitles | An adopted `subtitle_source` reports `reference_tail_gap_s` over 120 seconds, or the actual last subtitle packet end contradicts the logged metric; do not use Matroska `tags.DURATION` as an end timestamp | Incomplete or wrong candidate adopted despite the gate |
+| Subtitle tail mismatch | Subtitles | An adopted `subtitle_source` reports `reference_tail_gap_s` over 600 seconds despite the gate, or other structural validation explicitly rejected/review-routed the tail; do not use Matroska `tags.DURATION`, video-tail length, or a below-threshold raw WhisperX tail alone | Incomplete or wrong candidate adopted despite the gate |
 | Extra/forced subtitle | Subtitles | More than one display subtitle stream, `disposition.forced=1`, or "Forced" subtitle labels in current outputs | Stale or incorrect subtitle output; current pipeline should produce one non-forced display SRT |
 | Subtitles not muxed | Subtitles | Adopted record (`source=opensubtitles`) but no subtitle streams in `media[].probe.streams` | Jellyfin may not auto-load; a `source=none` title with no subtitle stream is NOT this pattern |
 | Unlabeled subtitles | Subtitles | Missing or incorrect `tags.title` on subtitle stream | Jellyfin display issue |
@@ -481,6 +481,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Inconsistent source audio track counts across titles on the same disc — different playlists routinely carry different language sets
 - Audio refinement stripping non-English tracks — that's its job
 - Subtitle `qc_observations` that are below review thresholds and have `validation_result=passed`
+- An adopted subtitle ending before long credits, or a `reference_tail_gap_s` at or below 600 seconds — Matroska duration is a cue span and sparse WhisperX end-credit hallucinations can make the raw reference appear longer
 - Missing HDR10+ dynamic metadata in encoded output — Reel intentionally emits static HDR because the target playback environment does not consume it
 - A movie's encoding task holding the `encode` claim with no encoded output while its rip runs — the deferred plan is expected; see Stage Gating above
 - An identification-failed item having no rip, encode, or staging artifacts — that is the fatal no-TMDB-match rule working, not missing work

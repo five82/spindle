@@ -93,22 +93,28 @@ func TestVerifyAdoptionCandidateRejectsMissingEndingDespiteHighSpanCoverage(t *t
 	}
 }
 
-func TestVerifyAdoptionCandidateRejectsNineMinuteReferenceTail(t *testing.T) {
-	// Rush covered 92% of its reference and matched strongly, but omitted the
-	// final 9.5 minutes. That used to pass just inside the former ten-minute
-	// bound and ship an incomplete display track.
-	reference := dialogueCues(100, 10, 71)
-	candidate := reference[:92]
+func TestVerifyAdoptionCandidateAllowsSparseNineMinuteASRTail(t *testing.T) {
+	// Rush's downloaded track ends with the final dialogue. WhisperX then emits
+	// isolated end-credit hallucinations for another 9.5 minutes; those must not
+	// make an otherwise strongly matching candidate fail its tail check.
+	candidate := dialogueCues(100, 10, 65)
+	reference := append([]srtutil.Cue(nil), candidate...)
+	lastEnd := candidate[len(candidate)-1].End
+	for i, offset := range []float64{52, 264, 487, 535, 568} {
+		reference = append(reference, srtutil.Cue{
+			Index: len(reference) + 1,
+			Start: lastEnd + offset - 1,
+			End:   lastEnd + offset,
+			Text:  fmt.Sprintf("isolated credit hallucination %d", i),
+		})
+	}
 
-	check := verifyAdoptionCandidate(candidate, reference, 7120)
-	if check.Passed || !strings.Contains(check.FailureReason, "before the spoken reference") {
+	check := verifyAdoptionCandidate(candidate, reference, lastEnd+600)
+	if !check.Passed {
 		t.Fatalf("check = %+v", check)
 	}
-	if check.SpanCoverage < 0.9 {
-		t.Fatalf("span coverage %.3f does not exercise the proportional-coverage bug", check.SpanCoverage)
-	}
-	if check.ReferenceTailGap <= adoptMaxReferenceTailGapSeconds || check.ReferenceTailGap >= 10*60 {
-		t.Fatalf("reference tail gap = %.1fs, want between %ds and 600s", check.ReferenceTailGap, adoptMaxReferenceTailGapSeconds)
+	if check.ReferenceTailGap != 568 {
+		t.Fatalf("reference tail gap = %.1fs, want 568s", check.ReferenceTailGap)
 	}
 }
 
