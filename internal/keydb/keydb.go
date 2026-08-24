@@ -19,6 +19,8 @@ import (
 	"github.com/five82/spindle/internal/logs"
 )
 
+const refreshAge = 7 * 24 * time.Hour
+
 // Entry represents a KeyDB catalog entry.
 type Entry struct {
 	DiscID string
@@ -27,13 +29,15 @@ type Entry struct {
 
 // Catalog holds the parsed KeyDB data.
 type Catalog struct {
-	entries map[string]string // discID -> title
-	logger  *slog.Logger
+	entries    map[string]string // discID -> title
+	sourcePath string
+	modTime    time.Time
 }
 
-// Lookup finds a title by disc ID. Returns empty string if not found.
-// The disc ID is normalized (0X prefix stripped, uppercased, validated as 40 hex chars).
-func (c *Catalog) Lookup(discID string) string {
+// Lookup finds a title by disc ID and logs the item-scoped decision. It returns
+// empty string if not found. The disc ID is normalized (0X prefix stripped,
+// uppercased, validated as 40 hex chars).
+func (c *Catalog) Lookup(discID string, logger *slog.Logger) string {
 	if c == nil {
 		return ""
 	}
@@ -41,9 +45,10 @@ func (c *Catalog) Lookup(discID string) string {
 	if !ok {
 		return ""
 	}
+	logger = logs.Default(logger)
 	title := c.entries[normalized]
 	if title != "" {
-		c.logger.Info("KeyDB lookup hit",
+		logger.Info("KeyDB lookup hit",
 			"decision_type", logs.DecisionKeyDBLookup,
 			"decision_result", "hit",
 			"decision_reason", fmt.Sprintf("matched title=%q", title),
@@ -51,7 +56,7 @@ func (c *Catalog) Lookup(discID string) string {
 			"title", title,
 		)
 	} else {
-		c.logger.Info("KeyDB lookup miss",
+		logger.Info("KeyDB lookup miss",
 			"decision_type", logs.DecisionKeyDBLookup,
 			"decision_result", "miss",
 			"decision_reason", "not in catalog",
@@ -75,18 +80,17 @@ func (c *Catalog) Size() int {
 // Disc IDs are normalized (0X prefix stripped, uppercased, validated as 40 hex chars).
 // Titles are cleaned via the title extraction chain.
 // If stale is true, the file is older than 7 days and should be re-downloaded.
-func LoadFromFile(path string, logger *slog.Logger) (cat *Catalog, stale bool, err error) {
-	logger = logs.Default(logger)
-
+func LoadFromFile(path string) (cat *Catalog, stale bool, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, false, fmt.Errorf("keydb: open %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
 
-	// Check staleness.
+	var modTime time.Time
 	if info, statErr := f.Stat(); statErr == nil {
-		stale = time.Since(info.ModTime()) > 7*24*time.Hour
+		modTime = info.ModTime()
+		stale = time.Since(modTime) > refreshAge
 	}
 	entries := make(map[string]string)
 	scanner := bufio.NewScanner(f)
@@ -114,7 +118,11 @@ func LoadFromFile(path string, logger *slog.Logger) (cat *Catalog, stale bool, e
 		return nil, false, fmt.Errorf("keydb: scan %s: %w", path, err)
 	}
 
-	return &Catalog{entries: entries, logger: logger}, stale, nil
+	return &Catalog{
+		entries:    entries,
+		sourcePath: path,
+		modTime:    modTime,
+	}, stale, nil
 }
 
 // normalizeDiscID strips a 0X prefix, validates exactly 40 hex characters,
@@ -312,20 +320,34 @@ func extractFile(zf *zip.File, dest string) error {
 	return nil
 }
 
-// LoadOrDownload tries to load a catalog from path. If the file does not exist
-// or is stale (older than 7 days), it downloads a fresh copy from url, extracts
-// it to the directory containing path, then loads the result.
-func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration, logger *slog.Logger) (*Catalog, bool, error) {
+// LoadOrDownload returns current when it still represents the fresh file at
+// path. Otherwise it loads the file and, if it is missing or older than 7 days,
+// downloads a fresh copy before loading it. A stale current catalog remains
+// available as the fallback when the refresh fails.
+func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration, current *Catalog, logger *slog.Logger) (*Catalog, bool, error) {
 	logger = logs.Default(logger)
 
-	cat, stale, err := LoadFromFile(path, logger)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, false, err
-	}
-
-	missing := os.IsNotExist(err)
-	if !missing && !stale {
-		return cat, false, nil
+	var cat *Catalog
+	var stale bool
+	info, statErr := os.Stat(path)
+	if statErr == nil && current != nil && current.sourcePath == path && current.modTime.Equal(info.ModTime()) {
+		stale = time.Since(info.ModTime()) > refreshAge
+		if !stale {
+			return current, false, nil
+		}
+		cat = current
+	} else {
+		var err error
+		cat, stale, err = LoadFromFile(path)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, false, err
+		}
+		if err == nil && !stale {
+			return cat, false, nil
+		}
+		if os.IsNotExist(err) && current != nil && current.sourcePath == path {
+			cat = current
+		}
 	}
 
 	reason := "file_missing"
@@ -351,6 +373,6 @@ func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration
 		}
 		return nil, false, dlErr
 	}
-	cat, stale, err = LoadFromFile(path, logger)
+	cat, stale, err := LoadFromFile(path)
 	return cat, stale, err
 }

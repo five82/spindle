@@ -114,7 +114,8 @@ Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors
    - Unexpected fallbacks (encoding retries)
    - Decisions that contradict expected behavior for the content type
    - Look up groups by `decision_type` to find specific categories (`commentary_classification`, `tmdb_match`, etc.)
-   - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=duplicate_detection` (duplicate guard), `decision_type=episode_id_skip` (episode-ID skips), `decision_type=rip_cache` (hit/miss/incomplete — misses log explicitly)
+   - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=duplicate_detection` (duplicate guard), `decision_type=episode_id_skip` (episode-ID skips), `decision_type=rip_cache` (hit/miss/incomplete — misses log explicitly), `decision_type=keydb_refresh` (point-of-use catalog freshness)
+   - A WARN `event_type=keydb_download_error` means identification continued with a stale KeyDB catalog. Always report it as a **WARNING** because a newly added or corrected disc title may have been missed. A `keydb_refresh` decision with `decision_result=catalog_stale` followed by a successful `keydb_download_complete` is normal recovery, not a finding.
    - Movie title selection: `decision_type=title_selection_funnel` records each elimination stage (rule, `candidates_before/after`, `eliminated_title_ids`, `evidence` with the threshold values); the winner is the `decision_type=title_selection` "primary title decision" line. When the wrong cut/title was picked, the funnel shows which rule eliminated the right one.
    - Scheduler resource waits: `decision_type=stage_execution` with `decision_result=blocked` / `unblocked` shows a task waiting on GPU/drive/encode claims (`claims` attr) and the `waited` duration on grant. "stage started" lines also carry the resolved `claims` (so the GPU-for-TV choice is visible per dispatch). The `encode` claim has capacity 1 — encodes never run concurrently. A movie's encoding task takes that claim when identification completes and then polls without work until its rip finishes (`encoding_plan` logs `decision_result=deferred` for this; TV logs `streaming`). That idle hold is by design and is NOT a finding: ready tasks are ordered by item `created_at`, so the claim always goes to the oldest item still needing it, and under sequential ripping that is also the item whose rip completes first.
    - Warnings/errors include `extras` maps with non-standard log fields for diagnostic context; decisions use structured fields only (full log lines available at the files in `logs.paths`)
@@ -422,6 +423,7 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 | Source stage fallback to encoded | Organization | `decision_type=source_stage_selection` with `decision_result=encoded` when subtitles enabled | Subtitles may be missing from output |
 | Audio selection non-english fallback | Audio Analysis | `decision_type=audio_selection` with `decision_result=fallback_non_english` | Primary audio track is not English |
 | Commentary disposition applied | Audio Analysis | `decision_type=commentary_disposition` with `decision_result=applied` | Commentary tracks marked in output |
+| KeyDB stale fallback | Identification | WARN `event_type=keydb_download_error` with message `KeyDB download failed, using stale catalog` | Report as WARNING; identification may miss a newly added or corrected disc title |
 | KeyDB lookup miss | Identification | `decision_type=keydb_lookup` with `decision_result=miss` | Disc ID not in KeyDB, fallback to title parsing |
 
 ### DEBUG/Raw Log Context
@@ -583,6 +585,7 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] Checked gathering errors (digest header) for incomplete data
 - [ ] Reviewed `stage_gate` to determine applicable phases
 - [ ] Reviewed pre-flagged anomalies
+- [ ] Reported any `keydb_download_error` stale-catalog fallback as a WARNING
 - [ ] Analyzed logs/decisions for anomalies beyond simple error counts, drilling into the full JSON wherever the digest flagged an omission or something looked off
 - [ ] If TV: reconciled scanned, selected, placeholder, manifest, ripped, and final episode counts; investigated every reduction
 - [ ] If TV DVD: treated any title-level duplicate skip as critical rather than trusting contiguous episode numbering

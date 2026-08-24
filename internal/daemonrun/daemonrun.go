@@ -23,7 +23,6 @@ import (
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/jellyfin"
-	"github.com/five82/spindle/internal/keydb"
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/notify"
@@ -150,13 +149,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		}
 	}
 
-	var keydbCat *keydb.Catalog
-	if cat, _, loadErr := keydb.LoadOrDownload(ctx, cfg.MakeMKV.KeyDBPath, cfg.MakeMKV.KeyDBDownloadURL,
-		cfg.MakeMKV.KeyDBTimeout(), logger); loadErr == nil {
-		keydbCat = cat
-		logger.Debug("KeyDB catalog loaded", "entries", keydbCat.Size())
-	}
-
 	var ripCacheStore *ripcache.Store
 	if cfg.RipCache.Enabled {
 		ripCacheStore = ripcache.New(cfg.RipCacheDir(), cfg.RipCache.MaxGiB)
@@ -177,7 +169,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// Create stage handlers.
-	identifyHandler := identify.New(cfg, tmdbClient, notifier, discIDStore, keydbCat)
+	identifyHandler := identify.New(cfg, tmdbClient, notifier, discIDStore)
 	ripperHandler := ripper.New(cfg, notifier, ripCacheStore, discMon, ripper.NoTitleOverride)
 	contentidHandler := contentid.New(cfg, llmClient, osClient, tmdbClient, transcriber)
 	encoderHandler := encoder.New(cfg)

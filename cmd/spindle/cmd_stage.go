@@ -17,7 +17,6 @@ import (
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/fingerprint"
 	"github.com/five82/spindle/internal/identify"
-	"github.com/five82/spindle/internal/keydb"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
@@ -78,18 +77,11 @@ func newIdentifyCmd() *cobra.Command {
 				logger.Debug("disc ID cache unavailable", "error", cacheErr)
 			}
 
-			// Load KeyDB catalog (optional).
-			var keydbCat *keydb.Catalog
-			if cat, _, loadErr := keydb.LoadOrDownload(ctx, cfg.MakeMKV.KeyDBPath, cfg.MakeMKV.KeyDBDownloadURL,
-				cfg.MakeMKV.KeyDBTimeout(), logger); loadErr == nil {
-				keydbCat = cat
-			}
-
 			// Build TMDB client.
 			tmdbClient := tmdb.New(cfg.TMDB.APIKey, cfg.TMDB.BaseURL, cfg.TMDB.Language, nil)
 
 			// Construct the identification handler (nil for notifier).
-			handler := identify.New(cfg, tmdbClient, nil, discIDStore, keydbCat)
+			handler := identify.New(cfg, tmdbClient, nil, discIDStore)
 
 			// Build a temporary queue item for identification.
 			item := &queue.Item{

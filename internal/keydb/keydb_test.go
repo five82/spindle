@@ -1,6 +1,11 @@
 package keydb
 
 import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,7 +14,7 @@ import (
 
 func TestLookupNilCatalog(t *testing.T) {
 	var c *Catalog
-	if got := c.Lookup("anything"); got != "" {
+	if got := c.Lookup("anything", nil); got != "" {
 		t.Errorf("Lookup on nil catalog = %q, want empty", got)
 	}
 }
@@ -47,7 +52,7 @@ func TestLoadFromFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat, stale, err := LoadFromFile(path, nil)
+	cat, stale, err := LoadFromFile(path)
 	if err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
@@ -67,7 +72,7 @@ func TestLookupFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat, _, err := LoadFromFile(path, nil)
+	cat, _, err := LoadFromFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +86,7 @@ func TestLookupFound(t *testing.T) {
 		{hexID3, "Blade Runner 2049"},
 	}
 	for _, tt := range tests {
-		if got := cat.Lookup(tt.discID); got != tt.want {
+		if got := cat.Lookup(tt.discID, nil); got != tt.want {
 			t.Errorf("Lookup(%q) = %q, want %q", tt.discID, got, tt.want)
 		}
 	}
@@ -94,18 +99,18 @@ func TestLookupWithPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat, _, err := LoadFromFile(path, nil)
+	cat, _, err := LoadFromFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Lookup with 0X prefix should still find the entry.
-	if got := cat.Lookup("0X" + hexID1); got != "The Matrix" {
+	if got := cat.Lookup("0X"+hexID1, nil); got != "The Matrix" {
 		t.Errorf("Lookup with 0X prefix = %q, want %q", got, "The Matrix")
 	}
 	// Lowercase should also work.
 	lower := "0x" + "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
-	if got := cat.Lookup(lower); got != "The Matrix" {
+	if got := cat.Lookup(lower, nil); got != "The Matrix" {
 		t.Errorf("Lookup with lowercase = %q, want %q", got, "The Matrix")
 	}
 }
@@ -117,17 +122,17 @@ func TestLookupNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat, _, err := LoadFromFile(path, nil)
+	cat, _, err := LoadFromFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Valid hex but not in catalog.
-	if got := cat.Lookup("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"); got != "" {
+	if got := cat.Lookup("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", nil); got != "" {
 		t.Errorf("Lookup(nonexistent) = %q, want empty", got)
 	}
 	// Invalid (not 40 hex chars) returns empty.
-	if got := cat.Lookup("NONEXISTENT"); got != "" {
+	if got := cat.Lookup("NONEXISTENT", nil); got != "" {
 		t.Errorf("Lookup(invalid) = %q, want empty", got)
 	}
 }
@@ -146,7 +151,7 @@ func TestMalformedLinesSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat, _, err := LoadFromFile(path, nil)
+	cat, _, err := LoadFromFile(path)
 	if err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
@@ -154,7 +159,7 @@ func TestMalformedLinesSkipped(t *testing.T) {
 	if got := cat.Size(); got != 1 {
 		t.Errorf("Size = %d, want 1 (only valid line)", got)
 	}
-	if got := cat.Lookup(validID); got != "Good Title" {
+	if got := cat.Lookup(validID, nil); got != "Good Title" {
 		t.Errorf("Lookup(%s) = %q, want %q", validID, got, "Good Title")
 	}
 }
@@ -172,7 +177,7 @@ func TestCommentLinesSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cat, _, err := LoadFromFile(path, nil)
+	cat, _, err := LoadFromFile(path)
 	if err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
@@ -180,13 +185,13 @@ func TestCommentLinesSkipped(t *testing.T) {
 	if got := cat.Size(); got != 1 {
 		t.Errorf("Size = %d, want 1", got)
 	}
-	if got := cat.Lookup(validID); got != "Real Entry" {
+	if got := cat.Lookup(validID, nil); got != "Real Entry" {
 		t.Errorf("Lookup(%s) = %q, want %q", validID, got, "Real Entry")
 	}
 }
 
 func TestLoadFromFileNotExist(t *testing.T) {
-	_, _, err := LoadFromFile("/nonexistent/path/KEYDB.cfg", nil)
+	_, _, err := LoadFromFile("/nonexistent/path/KEYDB.cfg")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
 	}
@@ -208,7 +213,7 @@ func TestStaleness(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stale, err := LoadFromFile(path, nil)
+	_, stale, err := LoadFromFile(path)
 	if err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
@@ -217,11 +222,115 @@ func TestStaleness(t *testing.T) {
 	}
 }
 
+func TestLoadOrDownloadReusesFreshCurrentCatalog(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "KEYDB.cfg")
+	if err := os.WriteFile(path, []byte(hexID1+" | Original Title\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	current, _, err := LoadFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, stale, err := LoadOrDownload(context.Background(), path, "", time.Second, current, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale {
+		t.Fatal("fresh catalog reported stale")
+	}
+	if got != current {
+		t.Fatal("fresh unchanged catalog was reparsed")
+	}
+}
+
+func TestLoadOrDownloadRefreshesStaleCurrentCatalog(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "KEYDB.cfg")
+	if err := os.WriteFile(path, []byte(hexID1+" | Old Title\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-8 * 24 * time.Hour)
+	if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	current, stale, err := LoadFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stale {
+		t.Fatal("test catalog is not stale")
+	}
+
+	var body bytes.Buffer
+	zw := zip.NewWriter(&body)
+	entry, err := zw.Create("KEYDB.cfg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write([]byte(hexID1 + " | Fresh Title\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(body.Bytes())
+	}))
+	defer srv.Close()
+
+	got, stale, err := LoadOrDownload(context.Background(), path, srv.URL, time.Second, current, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale {
+		t.Fatal("downloaded catalog reported stale")
+	}
+	if got == current {
+		t.Fatal("stale catalog was not replaced")
+	}
+	if title := got.Lookup(hexID1, nil); title != "Fresh Title" {
+		t.Fatalf("title = %q, want Fresh Title", title)
+	}
+}
+
+func TestLoadOrDownloadKeepsStaleCurrentCatalogOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "KEYDB.cfg")
+	if err := os.WriteFile(path, []byte(hexID1+" | Old Title\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-8 * 24 * time.Hour)
+	if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	current, _, err := LoadFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	got, stale, err := LoadOrDownload(context.Background(), path, srv.URL, time.Second, current, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stale {
+		t.Fatal("failed refresh did not report stale fallback")
+	}
+	if got != current {
+		t.Fatal("failed refresh did not retain current catalog")
+	}
+}
+
 func TestNormalizeDiscID(t *testing.T) {
 	tests := []struct {
-		input   string
-		want    string
-		wantOK  bool
+		input  string
+		want   string
+		wantOK bool
 	}{
 		{"ABCDEF1234567890ABCDEF1234567890ABCDEF12", "ABCDEF1234567890ABCDEF1234567890ABCDEF12", true},
 		{"abcdef1234567890abcdef1234567890abcdef12", "ABCDEF1234567890ABCDEF1234567890ABCDEF12", true},

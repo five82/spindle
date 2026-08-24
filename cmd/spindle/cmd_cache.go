@@ -17,7 +17,6 @@ import (
 	"github.com/five82/spindle/internal/discmonitor"
 	"github.com/five82/spindle/internal/fingerprint"
 	"github.com/five82/spindle/internal/identify"
-	"github.com/five82/spindle/internal/keydb"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
@@ -174,15 +173,9 @@ func newCacheRipCmd() *cobra.Command {
 				logger.Debug("disc ID cache unavailable", "error", cacheErr)
 			}
 
-			var keydbCat *keydb.Catalog
-			if cat, _, loadErr := keydb.LoadOrDownload(ctx, cfg.MakeMKV.KeyDBPath, cfg.MakeMKV.KeyDBDownloadURL,
-				cfg.MakeMKV.KeyDBTimeout(), logger); loadErr == nil {
-				keydbCat = cat
-			}
-
 			// Run identification stage.
 			printCommandOutput(out, "Identifying disc on %s...\n", device)
-			identifyHandler := identify.New(cfg, tmdbClient, nil, discIDStore, keydbCat)
+			identifyHandler := identify.New(cfg, tmdbClient, nil, discIDStore)
 			if err := executeOneShotStage(identifyHandler); err != nil {
 				return fmt.Errorf("identification: %w", err)
 			}

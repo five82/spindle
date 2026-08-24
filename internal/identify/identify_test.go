@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/discidcache"
@@ -57,7 +58,7 @@ func TestResolveTitle_PriorityChain(t *testing.T) {
 			h := &Handler{}
 			item := &queue.Item{DiscTitle: tt.itemTitle}
 			discInfo := &makemkv.DiscInfo{Name: tt.discName}
-			got, _ := h.resolveTitle(item, discInfo, nil)
+			got, _ := h.resolveTitle(item, discInfo, nil, discardLogger())
 			if got != tt.want {
 				t.Errorf("resolveTitle() = %q, want %q", got, tt.want)
 			}
@@ -68,7 +69,7 @@ func TestResolveTitle_PriorityChain(t *testing.T) {
 func TestResolveTitle_NilDiscInfo(t *testing.T) {
 	h := &Handler{}
 	item := &queue.Item{DiscTitle: ""}
-	got, _ := h.resolveTitle(item, nil, nil)
+	got, _ := h.resolveTitle(item, nil, nil, discardLogger())
 	if got != "Unknown Disc" {
 		t.Errorf("resolveTitle(nil discInfo) = %q, want %q", got, "Unknown Disc")
 	}
@@ -81,7 +82,7 @@ func TestResolveTitle_UsesKeyDBDiscID(t *testing.T) {
 	if err := os.WriteFile(path, []byte(discID+" | Star Trek: The Next Generation | extra\n"), 0o644); err != nil {
 		t.Fatalf("write keydb: %v", err)
 	}
-	cat, _, err := keydb.LoadFromFile(path, discardLogger())
+	cat, _, err := keydb.LoadFromFile(path)
 	if err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
@@ -89,12 +90,41 @@ func TestResolveTitle_UsesKeyDBDiscID(t *testing.T) {
 	h := &Handler{keydbCat: cat}
 	item := &queue.Item{DiscTitle: "STAR TREK TNG S1 D1", DiscFingerprint: "not-the-disc-id"}
 	bdInfo := &BDInfoResult{DiscID: discID, DiscName: "BDINFO NAME"}
-	got, source := h.resolveTitle(item, &makemkv.DiscInfo{Name: "MAKEMKV NAME"}, bdInfo)
+	got, source := h.resolveTitle(item, &makemkv.DiscInfo{Name: "MAKEMKV NAME"}, bdInfo, discardLogger())
 	if got != "Star Trek: The Next Generation" {
 		t.Fatalf("resolveTitle() = %q, want %q", got, "Star Trek: The Next Generation")
 	}
 	if source != "keydb" {
 		t.Fatalf("source = %q, want keydb", source)
+	}
+}
+
+func TestRefreshKeyDBReloadsChangedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "KEYDB.cfg")
+	discID := "DCB2FF29F40C9CD4702BC163A3F4511A492E54A4"
+	if err := os.WriteFile(path, []byte(discID+" | Old Title\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{MakeMKV: config.MakeMKVConfig{KeyDBPath: path}}
+	h := New(cfg, nil, nil, nil)
+	bdInfo := &BDInfoResult{DiscID: discID}
+	h.refreshKeyDB(context.Background(), bdInfo, discardLogger())
+	if got := h.keydbCat.Lookup(discID, discardLogger()); got != "Old Title" {
+		t.Fatalf("initial title = %q, want Old Title", got)
+	}
+
+	if err := os.WriteFile(path, []byte(discID+" | Corrected Title\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.refreshKeyDB(context.Background(), bdInfo, discardLogger())
+	if got := h.keydbCat.Lookup(discID, discardLogger()); got != "Corrected Title" {
+		t.Fatalf("reloaded title = %q, want Corrected Title", got)
 	}
 }
 

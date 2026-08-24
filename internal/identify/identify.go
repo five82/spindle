@@ -89,14 +89,12 @@ func New(
 	tmdbClient *tmdb.Client,
 	notifier *notify.Notifier,
 	discIDCache *discidcache.Store,
-	keydbCat *keydb.Catalog,
 ) *Handler {
 	return &Handler{
 		cfg:         cfg,
 		tmdbClient:  tmdbClient,
 		notifier:    notifier,
 		discIDCache: discIDCache,
-		keydbCat:    keydbCat,
 	}
 }
 
@@ -222,6 +220,7 @@ func (h *Handler) scanDisc(ctx context.Context, item *queue.Item, logger *slog.L
 // small phase mutating the shared IdentifyResult accumulator; the sequence
 // here is the whole pipeline.
 func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result *IdentifyResult, logger *slog.Logger) error {
+	h.refreshKeyDB(ctx, result.BDInfo, logger)
 	h.resolveSearchTitle(item, result, logger)
 	if h.applyCachedIdentity(ctx, item, result, logger) {
 		return nil
@@ -234,11 +233,42 @@ func (h *Handler) resolveMetadata(ctx context.Context, item *queue.Item, result 
 	return nil
 }
 
+// refreshKeyDB checks the catalog only when a Blu-ray disc ID makes a lookup
+// possible. LoadOrDownload reuses the in-memory catalog while its source file
+// is unchanged and fresh, so the normal per-disc check is only a stat.
+func (h *Handler) refreshKeyDB(ctx context.Context, bdInfo *BDInfoResult, logger *slog.Logger) {
+	if h.cfg == nil || bdInfo == nil || strings.TrimSpace(bdInfo.DiscID) == "" || h.cfg.MakeMKV.KeyDBPath == "" {
+		return
+	}
+
+	current := h.keydbCat
+	cat, _, err := keydb.LoadOrDownload(ctx, h.cfg.MakeMKV.KeyDBPath, h.cfg.MakeMKV.KeyDBDownloadURL,
+		h.cfg.MakeMKV.KeyDBTimeout(), current, logger)
+	if err != nil {
+		logger.Warn("KeyDB catalog refresh failed",
+			"event_type", "keydb_refresh_error",
+			"error_hint", err.Error(),
+			"impact", "disc identification may use outdated data or fall back to disc metadata",
+		)
+		return
+	}
+
+	h.keydbCat = cat
+	if cat != current {
+		logger.Info("KeyDB catalog loaded",
+			"decision_type", "keydb_refresh",
+			"decision_result", "loaded",
+			"decision_reason", "point-of-use freshness check",
+			"entries", cat.Size(),
+		)
+	}
+}
+
 // resolveSearchTitle resolves the raw title through the priority chain,
 // cleans it into a TMDB query, and detects the media type hint used for
 // both cache validation and search routing.
 func (h *Handler) resolveSearchTitle(item *queue.Item, result *IdentifyResult, logger *slog.Logger) {
-	result.RawTitle, result.TitleSource = h.resolveTitle(item, result.DiscInfo, result.BDInfo)
+	result.RawTitle, result.TitleSource = h.resolveTitle(item, result.DiscInfo, result.BDInfo, logger)
 	result.QueryTitle = CleanQueryTitle(result.RawTitle)
 	result.MediaHint = detectMediaTypeHint(result.RawTitle)
 	logger.Info("title resolved for TMDB search",
@@ -471,10 +501,10 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 // resolveTitle implements the title priority chain and returns both the
 // resolved title and the source that was used for observability.
-func (h *Handler) resolveTitle(item *queue.Item, discInfo *makemkv.DiscInfo, bdInfo *BDInfoResult) (string, string) {
+func (h *Handler) resolveTitle(item *queue.Item, discInfo *makemkv.DiscInfo, bdInfo *BDInfoResult, logger *slog.Logger) (string, string) {
 	if h.keydbCat != nil && bdInfo != nil {
 		if discID := strings.TrimSpace(bdInfo.DiscID); discID != "" {
-			if title := h.keydbCat.Lookup(discID); title != "" {
+			if title := h.keydbCat.Lookup(discID, logger); title != "" {
 				return title, "keydb"
 			}
 		}
