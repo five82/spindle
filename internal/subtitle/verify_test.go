@@ -93,6 +93,25 @@ func TestVerifyAdoptionCandidateRejectsMissingEndingDespiteHighSpanCoverage(t *t
 	}
 }
 
+func TestVerifyAdoptionCandidateRejectsNineMinuteReferenceTail(t *testing.T) {
+	// Rush covered 92% of its reference and matched strongly, but omitted the
+	// final 9.5 minutes. That used to pass just inside the former ten-minute
+	// bound and ship an incomplete display track.
+	reference := dialogueCues(100, 10, 71)
+	candidate := reference[:92]
+
+	check := verifyAdoptionCandidate(candidate, reference, 7120)
+	if check.Passed || !strings.Contains(check.FailureReason, "before the spoken reference") {
+		t.Fatalf("check = %+v", check)
+	}
+	if check.SpanCoverage < 0.9 {
+		t.Fatalf("span coverage %.3f does not exercise the proportional-coverage bug", check.SpanCoverage)
+	}
+	if check.ReferenceTailGap <= adoptMaxReferenceTailGapSeconds || check.ReferenceTailGap >= 10*60 {
+		t.Fatalf("reference tail gap = %.1fs, want between %ds and 600s", check.ReferenceTailGap, adoptMaxReferenceTailGapSeconds)
+	}
+}
+
 func TestVerifyAdoptionCandidateAllowsLongCreditsAfterReferenceTail(t *testing.T) {
 	reference := dialogueCues(20, 10, 10)
 	check := verifyAdoptionCandidate(reference, reference, 1000)

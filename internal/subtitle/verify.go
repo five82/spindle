@@ -35,7 +35,9 @@ const (
 	// An absolute tail bound prevents high proportional span coverage on long
 	// movies from hiding a substantially missing ending. Compare against the
 	// spoken reference rather than video duration so long credits remain valid.
-	adoptMaxReferenceTailGapSeconds = 10 * 60
+	// Err toward rejecting incomplete tracks: a two-minute spoken-reference
+	// gap is enough to require another candidate or an operator retry.
+	adoptMaxReferenceTailGapSeconds = 2 * 60
 	// adoptRefineMinSimilarity gates the anchor-based timing refinement: only
 	// a candidate whose text already proves it is this title's subtitle may
 	// have its timing repaired and re-verified.
