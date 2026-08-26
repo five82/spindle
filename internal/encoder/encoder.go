@@ -354,6 +354,8 @@ const throttleInterval = 2 * time.Second
 // encodingProgressLogInterval is the minimum interval between INFO progress logs.
 const encodingProgressLogInterval = 3 * time.Minute
 
+const sourceTimelineNormalizationStep = "Source timeline normalization"
+
 // spindleReporter implements reel.Reporter, adapting Reel progress events into
 // encodingstate.Snapshot updates on the queue item. Progress persistence is
 // throttled to every 2 seconds.
@@ -559,6 +561,18 @@ func (r *spindleReporter) ValidationComplete(s reel.ValidationSummary) {
 			passed++
 		} else {
 			failed++
+		}
+		if step.Name == sourceTimelineNormalizationStep {
+			result := "bounded_to_video"
+			if !step.Passed {
+				result = "failed"
+			}
+			r.logger.Info("MakeMKV source timeline handled",
+				"decision_type", logs.DecisionSourceTimeline,
+				"decision_result", result,
+				"decision_reason", "MakeMKV rip: "+step.Details,
+				"episode_key", r.episodeKey,
+			)
 		}
 	}
 	decisionResult := "passed"

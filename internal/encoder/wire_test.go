@@ -37,7 +37,7 @@ func TestWireRoundTrip(t *testing.T) {
 	// summary is aliased), so construct it through JSON -- which is exactly
 	// what the wire does.
 	var validation reel.ValidationSummary
-	if err := json.Unmarshal([]byte(`{"Passed":true,"Steps":[{"Name":"duration","Passed":true}]}`), &validation); err != nil {
+	if err := json.Unmarshal([]byte(`{"Passed":true,"Steps":[{"Name":"duration","Passed":true},{"Name":"Source timeline normalization","Passed":true,"Details":"1 source audio track ended 35.562s past video; output bounded to the video endpoint"}]}`), &validation); err != nil {
 		t.Fatalf("build validation summary: %v", err)
 	}
 	rep.ValidationComplete(validation)
@@ -54,7 +54,8 @@ func TestWireRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	sess.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	var logBuf bytes.Buffer
+	sess.Logger = slog.New(slog.NewJSONHandler(io.MultiWriter(io.Discard, &logBuf), nil))
 	daemonRep := newSpindleReporter(sess, sess.Logger, "s01_001", 0, 1)
 	daemonRep.now = func() time.Time { return time.Now().Add(time.Hour) } // defeat throttle
 
@@ -124,6 +125,10 @@ func TestWireRoundTrip(t *testing.T) {
 	}
 	if snap.Validation == nil || !snap.Validation.Passed {
 		t.Fatalf("validation not applied: %+v", snap)
+	}
+	if !bytes.Contains(logBuf.Bytes(), []byte(`"decision_type":"source_timeline_normalization"`)) ||
+		!bytes.Contains(logBuf.Bytes(), []byte(`"decision_result":"bounded_to_video"`)) {
+		t.Fatalf("source timeline decision not logged: %s", logBuf.String())
 	}
 	if snap.Substage != "complete" || snap.EncodedSize != 400 {
 		t.Fatalf("completion not applied: %+v", snap)

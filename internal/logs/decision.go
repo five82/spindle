@@ -47,6 +47,7 @@ const (
 	DecisionRipCacheTitles           = "rip_cache_titles"
 	DecisionSidecarSubtitleCopy      = "sidecar_subtitle_copy"
 	DecisionSourceStageSelection     = "source_stage_selection"
+	DecisionSourceTimeline           = "source_timeline_normalization"
 	DecisionSRTValidation            = "srt_validation"
 	DecisionStageExecution           = "stage_execution"
 	DecisionStagingCleanup           = "staging_cleanup"

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -13,11 +12,10 @@ import (
 
 const audioDurationToleranceSeconds = 5.0
 
-// validateAudioTargetDurations probes each distinct path and compares audio
-// stream durations against the video. It returns the video duration measured
-// per path (partially filled when validation stops on the first mismatch) so
-// the final verification can detect a mux that changed the runtime.
-func validateAudioTargetDurations(ctx context.Context, paths []string) (map[string]float64, error) {
+// measureVideoDurations probes each distinct encoded path before subtitle
+// muxing. The final verification uses these measurements to detect a mux that
+// changed the video runtime.
+func measureVideoDurations(ctx context.Context, paths []string) (map[string]float64, error) {
 	durations := make(map[string]float64, len(paths))
 	for _, path := range paths {
 		if _, seen := durations[path]; seen {
@@ -29,20 +27,18 @@ func validateAudioTargetDurations(ctx context.Context, paths []string) (map[stri
 			return durations, fmt.Errorf("ffprobe %s: %w", path, err)
 		}
 		durations[path] = videoDurationSeconds(result)
-		if err := validateAudioDurations(filepath.Base(path), result); err != nil {
-			return durations, err
-		}
 	}
 	return durations, nil
 }
 
-// videoDurationSeconds resolves a file's video runtime, preferring the
-// container duration and falling back to the first video stream's.
+// videoDurationSeconds resolves a file's actual video-stream runtime. The
+// container duration is only a fallback because an overlong audio stream or
+// chapter can extend the Matroska container past the final video frame.
 func videoDurationSeconds(result *ffprobe.Result) float64 {
-	if duration := result.DurationSeconds(); duration > 0 {
+	if duration := firstStreamDuration(result, "video"); duration > 0 {
 		return duration
 	}
-	return firstStreamDuration(result, "video")
+	return result.DurationSeconds()
 }
 
 func validateAudioDurations(label string, result *ffprobe.Result) error {

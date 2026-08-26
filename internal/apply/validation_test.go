@@ -68,6 +68,25 @@ func TestValidateAudioDurationsAcceptsMatchingAudio(t *testing.T) {
 	}
 }
 
+func TestValidateAudioDurationsRejectsAudioExtendedContainer(t *testing.T) {
+	result := &ffprobe.Result{
+		Format: ffprobe.Format{Duration: "6541.736000"},
+		Streams: []ffprobe.Stream{
+			{CodecType: "video", Tags: map[string]string{"DURATION": "01:48:26.167000000"}},
+			{CodecType: "audio", Tags: map[string]string{"DURATION": "01:49:01.729000000"}},
+			{CodecType: "audio", Tags: map[string]string{"DURATION": "01:48:55.201000000"}, Disposition: map[string]int{"comment": 1}},
+		},
+	}
+
+	err := validateAudioDurations("movie.mkv", result)
+	if err == nil {
+		t.Fatal("expected overlong audio duration error")
+	}
+	if !strings.Contains(err.Error(), "audio stream 0 duration 6541.729s differs from video 6506.167s by 35.562s") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateAudioDurationsToleratesShortCommentary(t *testing.T) {
 	// The Secret of My Success (Kino): source commentary ends 34s before the
 	// video does. Commentary-flagged streams may run short of the video.

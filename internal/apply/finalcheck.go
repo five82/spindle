@@ -139,6 +139,9 @@ func checkFinalOutput(
 		entry.FailedChecks = append(entry.FailedChecks, fmt.Sprintf(
 			"av_sync drift %.0fms exceeds %.0fms", entry.AVSync.DriftMilliseconds, avSyncDriftToleranceMS))
 	}
+	if err := validateAudioDurations(exp.key, output); err != nil {
+		entry.FailedChecks = append(entry.FailedChecks, err.Error())
+	}
 	entry.FailedChecks = append(entry.FailedChecks, checkSubtitleLayout(env, exp.key, muxed, output)...)
 	entry.FailedChecks = append(entry.FailedChecks, checkCommentaryLabels(exp.commentary, output)...)
 	entry.FailedChecks = append(entry.FailedChecks, checkAudioLayout(exp.keptAudio, output)...)

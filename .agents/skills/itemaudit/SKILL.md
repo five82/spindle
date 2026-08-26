@@ -61,7 +61,7 @@ The `analysis` object (always present; sub-fields omitted when empty) contains p
 | Field | Present When | Contents |
 |-------|-------------|----------|
 | `decision_groups` | Decisions exist | Groups by (type, result, reason) with count, in log order. `entries` always carries every grouped decision with its timestamp — this is the only record of individual decisions and their spacing. |
-| `notable_decisions` | Notable decisions exist | Curated subset of decisions most useful for reporting (TMDB/title/crop/validation/audio/subtitle/routing/episode match), avoiding noisy full decision scans. |
+| `notable_decisions` | Notable decisions exist | Curated subset of decisions most useful for reporting (TMDB/title/crop/validation/source normalization/audio/subtitle/routing/episode match), avoiding noisy full decision scans. |
 | `stage_timings` | Stage events exist | One row per stage with start, completion, duration, start count, and completion count. Prefer this over raw `logs.stages` for the timing table. |
 | `source_summary` | Source/output traits known | Disc source, UHD-likely flag, input/output resolution, input codecs, output codec, HDR/dynamic range. |
 | `title_selection` | Movie titles exist | Feature-length candidates, selected title, selection decision/reason, and similar-runtime candidate count. Prefer this over hand-parsing `envelope.titles`. |
@@ -115,6 +115,7 @@ Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors
    - Decisions that contradict expected behavior for the content type
    - Look up groups by `decision_type` to find specific categories (`commentary_classification`, `tmdb_match`, etc.)
    - Infrastructure decisions to check: `decision_type=tmdb_match` (acceptance/rejection), `decision_type=title_resolution` (source priority), `decision_type=fingerprint_strategy` (disc type detection), `decision_type=disc_id_cache` (cache hit/miss), `decision_type=duplicate_detection` (duplicate guard), `decision_type=episode_id_skip` (episode-ID skips), `decision_type=rip_cache` (hit/miss/incomplete — misses log explicitly), `decision_type=keydb_refresh` (point-of-use catalog freshness)
+   - `decision_type=source_timeline_normalization` with `decision_result=bounded_to_video` means Reel detected audio in the MakeMKV rip extending materially beyond the video endpoint and bounded it during encoding. Treat it as corrected source-artifact context, not a delivered-output defect, when Reel validation and apply final validation both pass. If either validation fails, report the remaining endpoint mismatch.
    - A WARN `event_type=keydb_download_error` means identification continued with a stale KeyDB catalog. Always report it as a **WARNING** because a newly added or corrected disc title may have been missed. A `keydb_refresh` decision with `decision_result=catalog_stale` followed by a successful `keydb_download_complete` is normal recovery, not a finding.
    - Movie title selection: `decision_type=title_selection_funnel` records each elimination stage (rule, `candidates_before/after`, `eliminated_title_ids`, `evidence` with the threshold values); the winner is the `decision_type=title_selection` "primary title decision" line. When the wrong cut/title was picked, the funnel shows which rule eliminated the right one.
    - Scheduler resource waits: `decision_type=stage_execution` with `decision_result=blocked` / `unblocked` shows a task waiting on GPU/drive/encode claims (`claims` attr) and the `waited` duration on grant. "stage started" lines also carry the resolved `claims` (so the GPU-for-TV choice is visible per dispatch). The `encode` claim has capacity 1 — encodes never run concurrently. A movie's encoding task takes that claim when identification completes and then polls without work until its rip finishes (`encoding_plan` logs `decision_result=deferred` for this; TV logs `streaming`). That idle hold is by design and is NOT a finding: ready tasks are ordered by item `created_at`, so the claim always goes to the oldest item still needing it, and under sequential ripping that is also the item whose rip completes first.
@@ -258,6 +259,7 @@ Analyze the `media` array from the audit output. Each entry contains full ffprob
    - Review crop detection from `crop` fields
    - Check for `warning` or `error` in snapshot
    - Check encoding config: `encoder`, `quality` (Reel target-quality summary), `preset`, `tune`, `audio_codec`. These come from Reel's target-quality mode, not Spindle config (there is no `[encoding]` config block); `preset`/`quality` reflect what Reel chose internally, so there is no per-resolution CRF to verify
+   - A passed validation step named `Source timeline normalization` records the source track count and maximum post-video overrun that Reel corrected. Correlate it with the structured `source_timeline_normalization` decision and the apply final verdict; do not call the delivered file defective when its endpoint checks pass.
    - Encoder-library warnings/errors surface as `event_type=reel_warning` in `logs.warnings` and `event_type=reel_error` in `logs.errors`; the persisted copy is in `encoding.snapshot.warning`/`error`
    - Check `decision_type=file_probe` for pre-encoding resolution and codec detection
    - Check `decision_type=crop_detection` for crop decision visibility
@@ -381,6 +383,7 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 | Unresolved placeholder episodes | Episode ID | `envelope.episodes` with `episode=0` and placeholder keys after episodeid | Episodes land in review_dir |
 | Wrong crop detection | Encoding | `encoding.snapshot.crop_filter` aspect ratio mismatch vs blu-ray.com | Black bars or cut content |
 | A/V sync changed after encoding | Encoding/Apply | `analysis.final_validation.entries[].failed_checks` names `av_sync drift ...`; the entry's `av_sync` block shows source vs output offsets | Audio leads or lags video; CRITICAL even if Reel's persisted validation says passed |
+| MakeMKV audio extends past video | Ripping/Encoding | INFO source anomaly plus `decision_type=source_timeline_normalization` and Reel validation step `Source timeline normalization` | Corrected by Reel when `bounded_to_video` and final validation passes; otherwise report the remaining endpoint mismatch |
 | Final output never verified | Apply | `analysis.final_validation` absent on an organized item, or an entry with `error`/`av_sync.error` | The delivered file shipped without the pipeline's own checks; investigate why the probe or ripped source was unavailable |
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review using `media[].probe.streams` | Commentary tracks not preserved |
 | Unlabeled commentary | Apply | `final_validation` failed check `commentary track N ... lacks a Commentary label` or `... missing the comment flag` | Commentary track is not clearly labeled; output routed to review |
@@ -593,6 +596,7 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] Analyzed streams from `media[]` entries (video, audio, subtitle)
 - [ ] Validated crop detection from `encoding.snapshot.crop_filter`
 - [ ] Reviewed the apply stage's commentary, audio layout, and subtitle layout verdicts
+- [ ] Correlated any `source_timeline_normalization` decision with Reel's normalization step and the final audio endpoint verdict
 - [ ] If TV: checked cross-episode consistency
 
 ### Post-Audio-Analysis (phase_commentary)

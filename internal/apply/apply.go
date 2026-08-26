@@ -123,29 +123,29 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	}
 	analysisData.CommentaryTracks = aggregateComms
 
-	// Phase 2: duration validation across all encoded outputs.
-	sess.Progress(45, "Phase 2/4 - Audio validation")
-	logger.Info("Phase 2/4 - Audio validation")
+	// Phase 2: capture the video runtime before subtitle muxing.
+	sess.Progress(45, "Phase 2/4 - Pre-mux measurement")
+	logger.Info("Phase 2/4 - Pre-mux measurement")
 	var allPaths []string
 	for _, in := range inputs {
 		allPaths = append(allPaths, in.Input.Path)
 	}
-	encodedDurations, durErr := validateAudioTargetDurations(ctx, allPaths)
+	encodedDurations, measureErr := measureVideoDurations(ctx, allPaths)
 	for i := range expectations {
 		expectations[i].encodedDuration = encodedDurations[expectations[i].encodedPath]
 	}
-	if durErr != nil {
-		reason := "audio_validation: " + durErr.Error()
+	if measureErr != nil {
+		reason := "pre_mux_measurement: " + measureErr.Error()
 		sess.AddReviewReason(reason)
-		logger.Warn("audio validation failed",
-			"event_type", "audio_validation_failed",
-			"error_hint", durErr.Error(),
-			"impact", "item routed to review",
+		logger.Warn("pre-mux measurement failed",
+			"event_type", "pre_mux_measurement_failed",
+			"error_hint", measureErr.Error(),
+			"impact", "subtitle mux duration change cannot be checked; item routed to review",
 		)
-		logger.Info("validation failure flagged for review",
+		logger.Info("measurement failure flagged for review",
 			"decision_type", logs.DecisionValidationFailureRoute,
 			"decision_result", "flagged_for_review",
-			"decision_reason", "audio duration validation did not pass",
+			"decision_reason", "pre-mux video duration could not be measured",
 		)
 	}
 

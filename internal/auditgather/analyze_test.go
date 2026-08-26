@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
 )
@@ -479,6 +480,24 @@ func TestDetectAnomalies_CleanItem(t *testing.T) {
 	anomalies := detectAnomalies(r, a)
 	if len(anomalies) != 0 {
 		t.Errorf("expected 0 anomalies for clean item, got %d", len(anomalies))
+	}
+}
+
+func TestDetectAnomalies_SourceTimelineNormalizationIsInformational(t *testing.T) {
+	r := &Report{Logs: &LogAnalysis{Decisions: []LogDecision{
+		{
+			DecisionType:   logs.DecisionSourceTimeline,
+			DecisionResult: "bounded_to_video",
+			DecisionReason: "MakeMKV rip: 2 source audio tracks ended 35.562s past video; output bounded to the video endpoint",
+		},
+	}}}
+
+	anomalies := detectAnomalies(r, &Analysis{})
+	if len(anomalies) != 1 || anomalies[0].Severity != "info" || anomalies[0].Category != "source" {
+		t.Fatalf("anomalies = %+v, want informational source normalization", anomalies)
+	}
+	if !strings.Contains(anomalies[0].Message, "Reel bounded overlong audio") {
+		t.Fatalf("unexpected anomaly message: %s", anomalies[0].Message)
 	}
 }
 

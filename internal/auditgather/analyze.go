@@ -208,6 +208,7 @@ func selectNotableDecisions(decisions []LogDecision) []LogDecision {
 		logs.DecisionSubtitleSource:           true,
 		logs.DecisionSRTValidation:            true,
 		logs.DecisionSourceStageSelection:     true,
+		logs.DecisionSourceTimeline:           true,
 		logs.DecisionEpisodeIDSkip:            true,
 		logs.DecisionEpisodePlaceholders:      true,
 		logs.DecisionEpisodeMatch:             true,
@@ -1136,6 +1137,25 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 				Severity: "warning",
 				Category: "episodes",
 				Message:  fmt.Sprintf("non-contiguous episode sequence: %s", a.EpisodeStats.EpisodeRange),
+			})
+		}
+	}
+
+	// Source timeline normalization is a corrected MakeMKV artifact, not a
+	// delivered-output defect. Keep it visible as audit context so a clean
+	// final validation does not erase the source anomaly.
+	if r.Logs != nil {
+		normalized := 0
+		for _, decision := range r.Logs.Decisions {
+			if decision.DecisionType == logs.DecisionSourceTimeline && decision.DecisionResult == "bounded_to_video" {
+				normalized++
+			}
+		}
+		if normalized > 0 {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "info",
+				Category: "source",
+				Message:  fmt.Sprintf("Reel bounded overlong audio in %d MakeMKV rip(s) to the video endpoint", normalized),
 			})
 		}
 	}
