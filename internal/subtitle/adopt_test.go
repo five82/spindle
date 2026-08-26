@@ -358,6 +358,67 @@ func TestAdoptForFileAdoptsAndReportsRejections(t *testing.T) {
 	}
 }
 
+func TestAdoptForFileUsesSourceAwareAttemptSet(t *testing.T) {
+	stubAdoptEnvironment(t, "140.0")
+	origInspect := inspectSubtitleMedia
+	t.Cleanup(func() { inspectSubtitleMedia = origInspect })
+	inspectSubtitleMedia = func(context.Context, string, string) (*ffprobe.Result, error) {
+		return &ffprobe.Result{
+			Streams: []ffprobe.Stream{{CodecType: "video", Width: 3840, Height: 2160}},
+			Format:  ffprobe.Format{Duration: "140.0"},
+		}, nil
+	}
+	cacheRoot := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+	reference := dialogueCues(12, 10, 10)
+	transcriptDir := t.TempDir()
+	transcriptSRT := filepath.Join(transcriptDir, "audio.srt")
+	if err := os.WriteFile(transcriptSRT, []byte(srtutil.Format(reference)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := newCandidateSearchServer(t, `{"data":[
+		{"id":"a","attributes":{"download_count":999999,"files":[{"file_id":1}]}},
+		{"id":"b","attributes":{"release":"Movie DVDRip","download_count":900000,"files":[{"file_id":2}]}},
+		{"id":"c","attributes":{"download_count":800000,"files":[{"file_id":3}]}},
+		{"id":"d","attributes":{"release":"Movie 2160p UHD","download_count":10,"files":[{"file_id":4}]}},
+		{"id":"e","attributes":{"release":"Movie 2160p UHD Song Lyrics Only","download_count":1000000,"files":[{"file_id":5}]}}
+	]}`)
+	defer server.Close()
+
+	cfg := &config.Config{}
+	cacheDir := cfg.OpenSubtitlesCacheDir()
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wrong := dialogueCues(12, 10, 10)
+	for i := range wrong {
+		wrong[i].Text = "Unrelated dialogue that must not be adopted"
+	}
+	for _, fileID := range []int{1, 2, 3} {
+		if err := os.WriteFile(filepath.Join(cacheDir, fmt.Sprintf("%d.srt", fileID)), []byte(srtutil.Format(wrong)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "4.srt"), []byte(srtutil.Format(reference)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := New(cfg, nil, opensubtitles.New(opensubtitles.Params{APIKey: "key", BaseURL: server.URL}, discardLogger()))
+	result, err := h.AdoptForFile(context.Background(), AdoptFileRequest{
+		VideoPath:  "/staging/Movie.mkv",
+		WorkDir:    t.TempDir(),
+		TMDBID:     42,
+		Transcript: &transcription.TranscribeResult{SRTPath: transcriptSRT, Duration: 140},
+		Logger:     discardLogger(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Candidate, "file_id=4") || len(result.RejectedCandidates) != 0 {
+		t.Fatalf("manual source-aware adoption = %+v", result)
+	}
+}
+
 func TestAdoptForFileRequiresIdentity(t *testing.T) {
 	h := New(&config.Config{}, nil, opensubtitles.New(opensubtitles.Params{APIKey: "key"}, discardLogger()))
 	if _, err := h.AdoptForFile(context.Background(), AdoptFileRequest{VideoPath: "/a.mkv", WorkDir: t.TempDir()}); err == nil || !strings.Contains(err.Error(), "TMDB identity") {

@@ -3,6 +3,7 @@ package subtitle
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,7 +35,7 @@ func (c subtitleCandidate) label() string {
 
 // listSubtitleCandidates returns adoption candidates for the job in
 // preference order, or a skip reason when the item cannot have any.
-func (h *Handler) listSubtitleCandidates(ctx context.Context, sess *stage.Session, key string) ([]subtitleCandidate, string) {
+func (h *Handler) listSubtitleCandidates(ctx context.Context, sess *stage.Session, key, videoPath string) ([]subtitleCandidate, string) {
 	if h.osClient == nil {
 		return nil, "OpenSubtitles is not configured"
 	}
@@ -82,7 +83,8 @@ func (h *Handler) listSubtitleCandidates(ctx context.Context, sess *stage.Sessio
 	for _, c := range candidates {
 		seen[c.FileID] = true
 	}
-	for _, c := range rankSearchCandidates(results, season, episode) {
+	profile := subtitleSourceProfile(ctx, sess.Logger, videoPath, meta.DiscSource)
+	for _, c := range rankSearchCandidatesForSource(results, season, episode, profile) {
 		if seen[c.FileID] {
 			continue
 		}
@@ -94,6 +96,21 @@ func (h *Handler) listSubtitleCandidates(ctx context.Context, sess *stage.Sessio
 	if len(candidates) == 0 {
 		return nil, "OpenSubtitles returned no usable candidates"
 	}
+	fileIDs := make([]int, len(candidates))
+	for i, candidate := range candidates {
+		fileIDs[i] = candidate.FileID
+	}
+	sess.Logger.Info("subtitle candidate attempt set selected",
+		"decision_type", "subtitle_candidate_ranking",
+		"decision_result", "selected",
+		"decision_reason", "source affinity orders release/file matches before generic or conflicting candidates",
+		"episode_key", key,
+		"source_profile", profile.class,
+		"disc_source", meta.DiscSource,
+		"input_resolution", profile.resolution(),
+		"candidate_file_ids", fmt.Sprint(fileIDs),
+		"attempt_count", len(candidates),
+	)
 	return candidates, ""
 }
 
@@ -114,17 +131,83 @@ func (h *Handler) contentIDReference(sess *stage.Session, ep *ripspec.Episode) (
 	return subtitleCandidate{FileID: fileID, LocalPath: matches[0], Language: "en", Origin: "contentid_reference"}, true
 }
 
-// rankSearchCandidates orders downloadable search results: full (not
-// foreign-parts-only) tracks, exact-episode-marker names first for TV, then
-// non-hearing-impaired, then by download count, with file ID as the
-// deterministic tiebreak. TV candidates whose release/file names carry a
-// marker for a DIFFERENT episode are dropped outright: OpenSubtitles episode
-// metadata is sometimes wrong, and a conflicting name is the one signal of a
-// mislabeled upload available before download (mirrors contentid's reference
-// vetting, which stage isolation keeps us from importing).
+// subtitleSource describes the release class expected for the actual video
+// being subtitled. UHD comes from the media itself; DiscSource distinguishes
+// SD DVD from non-UHD Blu-ray when the resolution alone is ambiguous.
+type subtitleSource struct {
+	class         string
+	width, height int
+}
+
+func (s subtitleSource) resolution() string {
+	if s.width == 0 || s.height == 0 {
+		return "unknown"
+	}
+	return fmt.Sprintf("%dx%d", s.width, s.height)
+}
+
+func subtitleSourceProfile(ctx context.Context, logger *slog.Logger, videoPath, discSource string) subtitleSource {
+	var source subtitleSource
+	if videoPath != "" {
+		probe, err := inspectSubtitleMedia(ctx, "", videoPath)
+		if err != nil {
+			logger.Warn("subtitle source profile probe failed",
+				"event_type", "subtitle_source_profile_probe_failed",
+				"error_hint", "ffprobe unavailable",
+				"impact", "candidate ranking uses disc source or unknown profile",
+				"error", err,
+				"video_path", videoPath,
+			)
+		} else {
+			for _, stream := range probe.Streams {
+				if stream.CodecType == "video" && stream.Width*stream.Height > source.width*source.height {
+					source.width, source.height = stream.Width, stream.Height
+				}
+			}
+		}
+	}
+	if source.width >= 3840 || source.height >= 2160 {
+		source.class = "uhd"
+		return source
+	}
+	switch strings.ToLower(strings.TrimSpace(discSource)) {
+	case "dvd":
+		source.class = "dvd"
+	case "bluray", "blu-ray":
+		source.class = "bluray"
+	case "":
+		if source.height > 0 && source.height <= 576 {
+			source.class = "dvd"
+		} else if source.height > 576 && source.height <= 1080 {
+			source.class = "bluray"
+		}
+	default:
+		source.class = "unknown"
+	}
+	if source.class == "" {
+		source.class = "unknown"
+	}
+	return source
+}
+
+// rankSearchCandidates preserves the default deterministic order for callers
+// without a known video source.
 func rankSearchCandidates(results []opensubtitles.SubtitleResult, season, episode int) []subtitleCandidate {
+	return rankSearchCandidatesForSource(results, season, episode, subtitleSource{class: "unknown"})
+}
+
+// rankSearchCandidatesForSource orders downloadable search results: full
+// (not partial-display) tracks first, then exact episode markers for TV,
+// source release affinity, non-hearing-impaired, download count, and file ID.
+// TV candidates whose release/file names carry a marker for a DIFFERENT
+// episode are dropped outright: OpenSubtitles episode metadata is sometimes
+// wrong, and a conflicting name is the one signal of a mislabeled upload
+// available before download.
+func rankSearchCandidatesForSource(results []opensubtitles.SubtitleResult, season, episode int, source subtitleSource) []subtitleCandidate {
 	type ranked struct {
 		candidate   subtitleCandidate
+		affinity    int
+		partial     bool
 		exactMarker bool
 		nonHI       bool
 		downloads   int
@@ -139,6 +222,7 @@ func rankSearchCandidates(results []opensubtitles.SubtitleResult, season, episod
 			if file.FileID <= 0 {
 				continue
 			}
+			metadata := strings.ToLower(attrs.Release + " " + file.FileName)
 			exactMarker := false
 			if season > 0 && episode > 0 {
 				// The file name is the truth-teller for pack uploads whose
@@ -155,6 +239,8 @@ func rankSearchCandidates(results []opensubtitles.SubtitleResult, season, episod
 			}
 			all = append(all, ranked{
 				candidate:   subtitleCandidate{FileID: file.FileID, Language: attrs.Language, Origin: "opensubtitles"},
+				affinity:    source.affinity(metadata),
+				partial:     partialSubtitleNamePattern.MatchString(metadata),
 				exactMarker: exactMarker,
 				nonHI:       !attrs.HearingImpaired,
 				downloads:   attrs.DownloadCount,
@@ -162,8 +248,14 @@ func rankSearchCandidates(results []opensubtitles.SubtitleResult, season, episod
 		}
 	}
 	sort.Slice(all, func(i, j int) bool {
+		if all[i].partial != all[j].partial {
+			return !all[i].partial
+		}
 		if all[i].exactMarker != all[j].exactMarker {
 			return all[i].exactMarker
+		}
+		if all[i].affinity != all[j].affinity {
+			return all[i].affinity > all[j].affinity
 		}
 		if all[i].nonHI != all[j].nonHI {
 			return all[i].nonHI
@@ -179,6 +271,47 @@ func rankSearchCandidates(results []opensubtitles.SubtitleResult, season, episod
 	}
 	return candidates
 }
+
+// affinity ranks a release/file name against the source without giving a
+// generic, highly downloaded upload a path ahead of a positive format match.
+func (s subtitleSource) affinity(metadata string) int {
+	if s.class == "unknown" {
+		return 1
+	}
+	hasUHD := strings.Contains(metadata, "2160p") || strings.Contains(metadata, "uhd")
+	hasBluRay := strings.Contains(metadata, "bluray") || strings.Contains(metadata, "blu-ray") || strings.Contains(metadata, "bdrip") || strings.Contains(metadata, "remux")
+	has1080p := strings.Contains(metadata, "1080p")
+	hasDVD := strings.Contains(metadata, "dvdrip") || strings.Contains(metadata, "dvd") || strings.Contains(metadata, "480p") || strings.Contains(metadata, "576p")
+	switch s.class {
+	case "uhd":
+		if hasUHD {
+			return 2
+		}
+		if has1080p || hasDVD {
+			return 0
+		}
+	case "bluray":
+		if hasUHD {
+			return 0
+		}
+		if hasBluRay || has1080p {
+			return 2
+		}
+		if hasDVD {
+			return 0
+		}
+	case "dvd":
+		if hasDVD {
+			return 2
+		}
+		if hasUHD || hasBluRay || has1080p {
+			return 0
+		}
+	}
+	return 1
+}
+
+var partialSubtitleNamePattern = regexp.MustCompile(`(?:song[\s._-]+)?lyrics[\s._-]+only`)
 
 // episodeMarkerPatterns match SxxEyy / NxM episode markers in release and
 // file names.

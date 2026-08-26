@@ -149,7 +149,7 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 
 	startSubtitleJob(sess, job)
 
-	candidates, skipReason := h.listSubtitleCandidates(ctx, sess, key)
+	candidates, skipReason := h.listSubtitleCandidates(ctx, sess, key, job.Input.Path)
 	if len(candidates) == 0 {
 		return subtitleOutcomeSkipped, recordSubtitleSkip(sess, key, skipReason)
 	}
