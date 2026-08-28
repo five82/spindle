@@ -2,6 +2,7 @@ package encoder
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -313,6 +314,15 @@ func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, 
 		return encodeJobResult{}, err
 	}
 
+	if stats := encodeStatsFromResult(job.Key, result); stats != nil {
+		if err := sess.MergeSave(func(env *ripspec.Envelope) error {
+			env.Attributes.SetEncodeStats(*stats)
+			return nil
+		}); err != nil {
+			return encodeJobResult{}, err
+		}
+	}
+
 	logger.Info("encoding completed",
 		"event_type", "encode_complete",
 		"episode_key", job.Key,
@@ -346,6 +356,61 @@ func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, 
 		originalSize: int64(result.OriginalSize),
 		encodedSize:  int64(result.EncodedSize),
 	}, nil
+}
+
+// encodeStatsFromResult flattens Reel's per-encode stats into the envelope's
+// per-episode record for the item-completion metrics line. Returns nil when
+// Reel reported no stats (older pin, or the encode skipped the pipeline).
+func encodeStatsFromResult(key string, result *reel.Result) *ripspec.EncodeStats {
+	s := result.Stats
+	if s == nil {
+		return nil
+	}
+	rec := &ripspec.EncodeStats{
+		EpisodeKey:            key,
+		Width:                 int(s.Width),
+		Height:                int(s.Height),
+		HDR:                   s.HDR,
+		ResolutionClass:       resolutionClass(int(s.Width)),
+		VideoDurationSeconds:  s.DurationSeconds,
+		EncodeSeconds:         s.TotalSeconds,
+		Speed:                 float64(result.EncodingSpeed),
+		Chunks:                s.Chunks,
+		Frames:                s.Frames,
+		OriginalSizeBytes:     int64(result.OriginalSize),
+		EncodedSizeBytes:      int64(result.EncodedSize),
+		SizeReductionPercent:  result.SizeReductionPercent,
+		WorkerMeanActive:      s.Workers.MeanActive,
+		WorkerPeakActive:      s.Workers.PeakActive,
+		WorkerMax:             s.MaxAdaptiveWorkers,
+		EncodeSlotWaitSeconds: s.Workers.EncodeSlotWaitSeconds,
+	}
+	if len(s.Phases) > 0 {
+		rec.PhaseSeconds = make(map[string]float64, len(s.Phases))
+		for _, p := range s.Phases {
+			rec.PhaseSeconds[p.Name] += p.DurationSeconds
+		}
+	}
+	if s.TargetQualityStats != nil {
+		if raw, err := json.Marshal(s.TargetQualityStats); err == nil {
+			rec.TargetQuality = raw
+		}
+	}
+	return rec
+}
+
+// resolutionClass buckets source width into the operator's disc tiers:
+// 2160p (4K Blu-ray), 1080p (Blu-ray), sd (DVD). Thresholds sit between the
+// tiers so slightly nonstandard widths still land in the right bucket.
+func resolutionClass(width int) string {
+	switch {
+	case width >= 3000:
+		return "2160p"
+	case width >= 1600:
+		return "1080p"
+	default:
+		return "sd"
+	}
 }
 
 // throttleInterval is the minimum interval between progress persists.

@@ -181,6 +181,12 @@ func (c *Config) QueueDBPath() string {
 	return filepath.Join(c.Paths.StateDir, "queue.db")
 }
 
+// MetricsPath returns the append-only per-item metrics log (JSONL). Unlike
+// the transient queue DB it is durable across schema changes and queue clears.
+func (c *Config) MetricsPath() string {
+	return filepath.Join(c.Paths.StateDir, "metrics.jsonl")
+}
+
 // SocketPath returns the daemon Unix socket path.
 func (c *Config) SocketPath() string {
 	return filepath.Join(runtimeDir(), "spindle.sock")

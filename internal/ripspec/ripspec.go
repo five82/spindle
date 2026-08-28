@@ -244,12 +244,64 @@ type AVSyncCheck struct {
 	Error                string  `json:"error,omitempty"`
 }
 
+// RipStats records how a fresh rip performed: which physical drive read the
+// disc and its throughput. Cache-restored rips record nothing (no drive was
+// involved). It feeds the per-item metrics record written at item completion.
+type RipStats struct {
+	Device      string  `json:"device,omitempty"`
+	DriveVendor string  `json:"drive_vendor,omitempty"`
+	DriveModel  string  `json:"drive_model,omitempty"`
+	Bytes       int64   `json:"bytes"`
+	Seconds     float64 `json:"seconds"`
+	Titles      int     `json:"titles"`
+}
+
+// EncodeStats summarizes one episode's encode for the metrics record. It is
+// persisted per episode because encodingstate.Snapshot is single-slot and a
+// TV disc would otherwise lose every episode's stats but the last.
+// TargetQuality is Reel's aggregate CRF-search summary, stored verbatim.
+type EncodeStats struct {
+	EpisodeKey            string             `json:"episode_key"`
+	Width                 int                `json:"width,omitempty"`
+	Height                int                `json:"height,omitempty"`
+	HDR                   bool               `json:"hdr,omitempty"`
+	ResolutionClass       string             `json:"resolution_class,omitempty"`
+	VideoDurationSeconds  float64            `json:"video_duration_seconds,omitempty"`
+	EncodeSeconds         float64            `json:"encode_seconds,omitempty"`
+	Speed                 float64            `json:"speed,omitempty"`
+	Chunks                int                `json:"chunks,omitempty"`
+	Frames                int                `json:"frames,omitempty"`
+	OriginalSizeBytes     int64              `json:"original_size_bytes,omitempty"`
+	EncodedSizeBytes      int64              `json:"encoded_size_bytes,omitempty"`
+	SizeReductionPercent  float64            `json:"size_reduction_percent,omitempty"`
+	PhaseSeconds          map[string]float64 `json:"phase_seconds,omitempty"`
+	WorkerMeanActive      float64            `json:"worker_mean_active,omitempty"`
+	WorkerPeakActive      int                `json:"worker_peak_active,omitempty"`
+	WorkerMax             int                `json:"worker_max,omitempty"`
+	EncodeSlotWaitSeconds float64            `json:"encode_slot_wait_seconds,omitempty"`
+	TargetQuality         json.RawMessage    `json:"target_quality,omitempty"`
+}
+
 // EnvelopeAttributes holds cross-cutting flags and analysis results.
 type EnvelopeAttributes struct {
 	AudioAnalysis             *AudioAnalysisData  `json:"audio_analysis,omitempty"`
 	SubtitleGenerationResults []SubtitleGenRecord `json:"subtitle_generation_results,omitempty"`
 	ContentID                 *ContentIDSummary   `json:"content_id,omitempty"`
 	FinalValidation           *FinalValidation    `json:"final_validation,omitempty"`
+	Rip                       *RipStats           `json:"rip,omitempty"`
+	EncodeStats               []EncodeStats       `json:"encode_stats,omitempty"`
+}
+
+// SetEncodeStats adds or replaces the encode stats for one episode key, so a
+// retried encode overwrites its previous record instead of duplicating it.
+func (a *EnvelopeAttributes) SetEncodeStats(stats EncodeStats) {
+	for i, existing := range a.EncodeStats {
+		if strings.EqualFold(existing.EpisodeKey, stats.EpisodeKey) {
+			a.EncodeStats[i] = stats
+			return
+		}
+	}
+	a.EncodeStats = append(a.EncodeStats, stats)
 }
 
 // ---------------------------------------------------------------------------

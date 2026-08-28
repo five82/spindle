@@ -78,6 +78,25 @@ Local dev uses a gitignored `go.work` referencing `../reel`; CI uses the
 runner). After pushing reel changes:
 `go get github.com/five82/reel@latest && go mod tidy`.
 
+## Metrics
+
+`<state_dir>/metrics.jsonl` is the durable performance record: one
+self-describing JSON object appended per completed item (the queue DB is
+transient and daemon logs expire; this file accumulates). Use it to answer
+performance questions — stage durations and resource-wait seconds, rip
+throughput with `rip.drive_vendor`/`rip.drive_model` identifying the physical
+drive, and per-episode encode stats (`encodes[]`: `resolution_class`
+2160p/1080p/sd, `speed` as video-seconds per wall-second, `phase_seconds`,
+Reel's `target_quality` CRF-search aggregate including the
+`ssimu2_calibration_offset` grain/complexity proxy). Records are append-only;
+fields may be added over time, so query by field name, not position. Example:
+
+```sh
+jq -s '[.[] | .encodes[]] | group_by(.resolution_class)
+  | map({class: .[0].resolution_class, mean_speed: (map(.speed) | add/length)})' \
+  ~/.local/state/spindle/metrics.jsonl
+```
+
 ## Documentation
 
 `README.md` is the operator guide. Cobra help and the generated config sample

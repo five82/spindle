@@ -71,8 +71,20 @@ type Manager struct {
 	// blocked tracks when each ready task first failed to reserve its
 	// resource claims, so resource waits are logged once on entry and once
 	// with the wait duration on grant, not on every scheduler pass.
+	// waits accumulates those grant-time durations per item and stage for
+	// the completion metrics record; entries are consumed at item completion.
 	blockedMu sync.Mutex
 	blocked   map[int64]time.Time
+	waits     map[int64]map[queue.Stage]float64
+
+	// metricsPath, when set, is the JSONL file that receives one record per
+	// completed item (see metrics.go). Empty disables metrics.
+	metricsPath string
+}
+
+// SetMetricsPath enables the per-item completion metrics log at path.
+func (m *Manager) SetMetricsPath(path string) {
+	m.metricsPath = path
 }
 
 // New creates a workflow manager. statusTracker may be nil.
@@ -85,6 +97,7 @@ func New(store *queue.Store, notifier *notify.Notifier, statusTracker *httpapi.S
 		wake:                make(chan struct{}, 1),
 		running:             make(map[int64]map[int64]context.CancelFunc),
 		blocked:             make(map[int64]time.Time),
+		waits:               make(map[int64]map[queue.Stage]float64),
 		pipeline: &pipelineState{
 			logger: logs.Default(logger),
 		},
@@ -550,6 +563,12 @@ func (m *Manager) noteTaskGranted(task *queue.Task, claims map[string]int) {
 	since, ok := m.blocked[task.ID]
 	if ok {
 		delete(m.blocked, task.ID)
+		per := m.waits[task.ItemID]
+		if per == nil {
+			per = make(map[queue.Stage]float64)
+			m.waits[task.ItemID] = per
+		}
+		per[task.Type] += time.Since(since).Seconds()
 	}
 	m.blockedMu.Unlock()
 	if !ok {
@@ -754,6 +773,7 @@ func (m *Manager) finalizeItem(itemID int64) {
 	)
 	if derived == queue.StageCompleted {
 		m.logItemCompleted(item, tasks)
+		m.writeMetricsRecord(item, tasks)
 	}
 }
 

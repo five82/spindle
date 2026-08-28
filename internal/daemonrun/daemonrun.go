@@ -183,6 +183,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// Create workflow manager and configure stages.
 	manager := workflow.New(store, notifier, statusTracker, logger)
+	manager.SetMetricsPath(cfg.MetricsPath())
 	// Encoding streams completed rips while the analysis branch reads the
 	// same immutable ripped assets. Apply joins both branches and is the only
 	// stage allowed to rewrite encoded files. Permanent rip-time asset keys

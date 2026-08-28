@@ -204,7 +204,10 @@ Locations come from the generated configuration:
 - `staging_dir`: per-item ripped, encoded, transcript, and subtitle artifacts
 - `library_dir`: clean movie and TV outputs using Loom-style names
 - `review_dir`: outputs requiring operator inspection, grouped by reason
-- `state_dir`: timestamped JSON daemon logs and the transient queue database
+- `state_dir`: timestamped JSON daemon logs, the transient queue database, and
+  `metrics.jsonl` (one appended record per completed item: stage durations and
+  resource waits, rip throughput per physical drive, and per-episode encode
+  stats; durable across queue clears, queryable with `jq` or an LLM)
 - XDG cache: rip cache, disc-ID cache, and OpenSubtitles cache
 - XDG runtime directory, with `/tmp` fallback: daemon socket and lock
 

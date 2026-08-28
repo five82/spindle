@@ -75,9 +75,11 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return err
 	}
 
+	ripStart := time.Now()
 	if err := h.ripTitles(ctx, sess, rippedDir, targets); err != nil {
 		return err
 	}
+	ripSeconds := time.Since(ripStart).Seconds()
 	sess.ClearActiveEpisode()
 
 	if err := h.mapAndValidateAssets(ctx, logger, sess, rippedDir, nil); err != nil {
@@ -86,6 +88,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	if err := persistRipResults(sess); err != nil {
 		return err
 	}
+	h.recordRipStats(logger, sess, rippedDir, len(targets), ripSeconds)
 
 	h.cacheFreshRip(logger, sess, rippedDir, len(targets))
 	h.notifyRipComplete(ctx, logger, sess, len(targets))
@@ -355,6 +358,66 @@ func (h *Handler) discoverNewRippedFile(logger *slog.Logger, rippedDir string, t
 		"size_bytes", newFileSize,
 	)
 	return newFile, nil
+}
+
+// recordRipStats persists drive identity and throughput for a fresh rip into
+// the envelope for the item-completion metrics record. Best-effort: a failure
+// here must not fail a rip that already succeeded.
+func (h *Handler) recordRipStats(logger *slog.Logger, sess *stage.Session, rippedDir string, titles int, seconds float64) {
+	var bytes int64
+	for path := range listMKVFiles(rippedDir) {
+		if fi, err := os.Stat(path); err == nil {
+			bytes += fi.Size()
+		}
+	}
+	device := h.cfg.MakeMKV.OpticalDrive
+	vendor, model := driveInfo(device)
+	stats := &ripspec.RipStats{
+		Device:      device,
+		DriveVendor: vendor,
+		DriveModel:  model,
+		Bytes:       bytes,
+		Seconds:     seconds,
+		Titles:      titles,
+	}
+	if err := sess.MergeSave(func(env *ripspec.Envelope) error {
+		env.Attributes.Rip = stats
+		return nil
+	}); err != nil {
+		logger.Warn("rip stats not persisted",
+			"event_type", "rip_stats_error",
+			"error_hint", err.Error(),
+			"impact", "metrics record will lack drive and rip throughput data",
+		)
+		return
+	}
+	logger.Debug("rip stats",
+		"drive_vendor", vendor,
+		"drive_model", model,
+		"device", device,
+		"bytes", bytes,
+		"seconds", seconds,
+	)
+}
+
+// driveInfo reads the drive's vendor and model strings from sysfs so rip
+// throughput can be compared across physical drives; device paths like
+// /dev/sr0 are assignment-order dependent and identify nothing.
+func driveInfo(device string) (vendor, model string) {
+	if resolved, err := filepath.EvalSymlinks(device); err == nil {
+		device = resolved
+	}
+	if !strings.HasPrefix(device, "/dev/") {
+		return "", ""
+	}
+	read := func(field string) string {
+		data, err := os.ReadFile(filepath.Join("/sys/class/block", filepath.Base(device), "device", field))
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(data))
+	}
+	return read("vendor"), read("model")
 }
 
 func (h *Handler) cacheFreshRip(logger *slog.Logger, sess *stage.Session, rippedDir string, rippedCount int) {
