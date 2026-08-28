@@ -50,6 +50,12 @@ The deploy script builds the working tree, keeps the previous binary beside the
 installed one, and preserves daemon state: a running daemon is restarted while
 a stopped daemon remains stopped.
 
+Stopping the daemon (including for a deploy) drains by default: nothing new
+is dispatched, encode and GPU stages are cancelled and resume from persisted
+state on the next start (encodes continue from their last completed chunk),
+and any in-flight disc rip finishes before the daemon exits — so a deploy
+waits at most for the current rip. `spindle stop --force` skips the drain.
+
 ## Configure
 
 Generate the complete commented configuration:

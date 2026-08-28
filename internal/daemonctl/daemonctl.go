@@ -123,10 +123,14 @@ type StopOptions struct {
 	LockPath   string
 	SocketPath string
 	Token      string // Bearer token for API authentication.
+	// Force kills in-flight stage work instead of draining. The default
+	// drain lets in-flight drive work (identification, ripping) finish, so
+	// Stop waits without a timeout; Force keeps the 10-second budget.
+	Force bool
 }
 
 // Stop sends a stop request to the daemon via HTTP API and waits for it
-// to shut down. Polls IsRunning() up to 10 seconds at 500ms intervals.
+// to shut down.
 func Stop(opts StopOptions) error {
 	if !IsRunning(opts.LockPath, opts.SocketPath) {
 		return ErrDaemonNotRunning
@@ -135,7 +139,11 @@ func Stop(opts StopOptions) error {
 	// Send POST /api/daemon/stop via Unix socket.
 	client := sockhttp.NewUnixClient(opts.SocketPath, 5*time.Second)
 
-	req, err := http.NewRequest(http.MethodPost, "http://localhost/api/daemon/stop", nil)
+	stopURL := "http://localhost/api/daemon/stop"
+	if opts.Force {
+		stopURL += "?force=1"
+	}
+	req, err := http.NewRequest(http.MethodPost, stopURL, nil)
 	if err != nil {
 		return fmt.Errorf("create stop request: %w", err)
 	}
@@ -147,12 +155,24 @@ func Stop(opts StopOptions) error {
 	}
 	_ = resp.Body.Close()
 
-	// Poll for shutdown.
-	for range 20 {
-		time.Sleep(500 * time.Millisecond)
+	if opts.Force {
+		// Poll for shutdown.
+		for range 20 {
+			time.Sleep(500 * time.Millisecond)
+			if !IsRunning(opts.LockPath, opts.SocketPath) {
+				return nil
+			}
+		}
+		return fmt.Errorf("daemon did not stop within 10 seconds")
+	}
+
+	// Draining: the daemon exits once in-flight drive work finishes, which
+	// can take as long as a disc rip. Wait for it; the operator can
+	// interrupt and rerun with --force.
+	for {
+		time.Sleep(time.Second)
 		if !IsRunning(opts.LockPath, opts.SocketPath) {
 			return nil
 		}
 	}
-	return fmt.Errorf("daemon did not stop within 10 seconds")
 }

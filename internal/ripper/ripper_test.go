@@ -406,32 +406,129 @@ func TestRestoreTitlesSkippedWhenAlreadyPresent(t *testing.T) {
 	}
 }
 
-func TestStagingResetRemovesStaleFiles(t *testing.T) {
-	// Simulate a stale staging directory from a previous run.
-	stagingRoot := filepath.Join(t.TempDir(), "FINGERPRINT")
+func TestStagingResetPreservesResumableState(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	item, err := store.NewDisc("Test", "fingerprint")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	staging := t.TempDir()
+	stagingRoot := filepath.Join(staging, "FINGERPRINT")
 	rippedDir := filepath.Join(stagingRoot, "ripped")
 	encodedDir := filepath.Join(stagingRoot, "encoded")
+	reelWorkDir := filepath.Join(encodedDir, ".reel-title_t00-abcdef012345")
+	subtitledDir := filepath.Join(stagingRoot, "subtitled")
+	for _, dir := range []string{rippedDir, reelWorkDir, subtitledDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	completedRip := filepath.Join(rippedDir, "title_t00.mkv")
+	partialRip := filepath.Join(rippedDir, "title_t01.mkv")
+	encodedOut := filepath.Join(encodedDir, "title_t00.mkv")
+	reelDone := filepath.Join(reelWorkDir, "done.txt")
+	staleSubtitle := filepath.Join(subtitledDir, "old.srt")
+	for _, f := range []string{completedRip, partialRip, encodedOut, reelDone, staleSubtitle} {
+		if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	if err := os.MkdirAll(rippedDir, 0o755); err != nil {
+	env := ripspec.Envelope{
+		Version:  ripspec.CurrentVersion,
+		Metadata: ripspec.Metadata{MediaType: "tv"},
+		Episodes: []ripspec.Episode{{Key: "s01e01", TitleID: 0}, {Key: "s01e02", TitleID: 1}},
+	}
+	env.Assets.Ripped = []ripspec.Asset{
+		{EpisodeKey: "s01e01", TitleID: 0, Path: completedRip, Status: ripspec.AssetStatusCompleted},
+	}
+	if item.RipSpecData, err = env.Encode(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(encodedDir, 0o755); err != nil {
+	if err := store.UpdateWorkState(item); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(rippedDir, "stale.mkv"), []byte("old"), 0o644); err != nil {
+	sess, err := stage.NewSession(context.Background(), store, item, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(encodedDir, "stale.mkv"), []byte("old"), 0o644); err != nil {
+	sess.Logger = testLogger()
+
+	h := &Handler{cfg: &config.Config{}, titleOverride: NoTitleOverride}
+	h.cfg.Paths.StagingDir = staging
+
+	got, err := h.prepareRipStaging(sess)
+	if err != nil {
+		t.Fatalf("prepareRipStaging: %v", err)
+	}
+	if got != rippedDir {
+		t.Fatalf("ripped dir = %q, want %q", got, rippedDir)
+	}
+
+	// Resumable state survives: the envelope-completed title, the finished
+	// encode, and reel's chunk-level resume dir.
+	for _, kept := range []string{completedRip, encodedOut, reelDone} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("resumable state removed: %s (%v)", kept, err)
+		}
+	}
+	// Non-resumable state is wiped: the partial rip and later-stage leftovers.
+	for _, gone := range []string{partialRip, subtitledDir} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Errorf("stale state survived reset: %s (err=%v)", gone, err)
+		}
+	}
+}
+
+func TestRipTitlesSkipsCompletedTitles(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	item, err := store.NewDisc("Test", "fingerprint")
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Apply the same reset the ripper does at entry.
-	if err := os.RemoveAll(stagingRoot); err != nil {
-		t.Fatalf("RemoveAll: %v", err)
+	rippedDir := t.TempDir()
+	rippedFile := filepath.Join(rippedDir, "title_t01.mkv")
+	if err := os.WriteFile(rippedFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(stagingRoot); !os.IsNotExist(err) {
-		t.Errorf("staging root should not exist after reset, got err=%v", err)
+	env := ripspec.Envelope{
+		Version:  ripspec.CurrentVersion,
+		Metadata: ripspec.Metadata{MediaType: "tv"},
+		Episodes: []ripspec.Episode{{Key: "s01e01", TitleID: 1}},
+		Titles:   []ripspec.Title{{ID: 1, Duration: 1800}},
+	}
+	env.Assets.Ripped = []ripspec.Asset{
+		{EpisodeKey: "s01e01", TitleID: 1, Path: rippedFile, Status: ripspec.AssetStatusCompleted},
+	}
+	if item.RipSpecData, err = env.Encode(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateWorkState(item); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := stage.NewSession(context.Background(), store, item, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.Logger = testLogger()
+
+	h := &Handler{cfg: &config.Config{}, titleOverride: NoTitleOverride}
+
+	// Every target is already ripped: ripTitles must return without invoking
+	// MakeMKV at all (an attempted rip would fail against no device).
+	if err := h.ripTitles(context.Background(), sess, rippedDir, env.Titles); err != nil {
+		t.Fatalf("ripTitles: %v", err)
 	}
 }
 

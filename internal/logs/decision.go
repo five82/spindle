@@ -17,6 +17,7 @@ const (
 	DecisionContentIDCandidates      = "contentid_candidates"
 	DecisionContentIDMatches         = "contentid_matches"
 	DecisionCropDetection            = "crop_detection"
+	DecisionDaemonDrain              = "daemon_drain"
 	DecisionDetectGuard              = "detect_guard"
 	DecisionDiscEnqueue              = "disc_enqueue"
 	DecisionDiscEventHandling        = "disc_event_handling"

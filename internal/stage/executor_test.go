@@ -55,6 +55,35 @@ func TestExecuteWorkflowStageMarksFailure(t *testing.T) {
 	}
 }
 
+func TestExecuteWorkflowStageClassifiesKilledSubprocessAsCancellation(t *testing.T) {
+	store := openExecutorTestStore(t)
+	item, _ := store.NewDisc("A", "fp1")
+	if err := store.StartStage(item); err != nil {
+		t.Fatalf("StartStage: %v", err)
+	}
+
+	// Subprocess stages surface a context-cancel kill as an exec error, not
+	// context.Canceled. With the stage context cancelled, that must classify
+	// as cancellation (task reverts to pending), never as a stage failure.
+	ctx, cancel := context.WithCancel(context.Background())
+	res, err := ExecuteWorkflowStage(ctx, item, WorkflowOptions{
+		Store: store,
+		Handler: executorStubHandler{run: func(hctx context.Context, _ *Session) error {
+			cancel()
+			<-hctx.Done()
+			return errors.New("rip title 3: makemkv rip: signal: killed")
+		}},
+		Stage: queue.StageRipping,
+	})
+	if !res.Canceled || res.Failed {
+		t.Fatalf("result canceled=%v failed=%v err=%v, want cancellation", res.Canceled, res.Failed, err)
+	}
+	got, _ := store.GetByID(item.ID)
+	if got.Stage == queue.StageFailed || got.InProgress != 0 {
+		t.Fatalf("item state = stage:%q in_progress:%d, want unchanged stage with in_progress cleared", got.Stage, got.InProgress)
+	}
+}
+
 func TestExecuteWorkflowStageTreatsDegradedAsSuccess(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, err := store.NewDisc("A", "fp1")

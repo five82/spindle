@@ -45,15 +45,32 @@ func newStartCmd() *cobra.Command {
 }
 
 func newStopCmd() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	cmd := &cobra.Command{
 		Use:     "stop",
-		Short:   "Stop the spindle daemon",
+		Short:   "Stop the spindle daemon (drains in-flight work first)",
 		GroupID: groupDaemon,
+		Long: `Stop the spindle daemon.
+
+By default the daemon drains before exiting: nothing new is dispatched,
+encode and GPU stages are cancelled (they resume from persisted per-episode
+and per-chunk state on the next start), and in-flight disc work
+(identification, ripping) runs to completion. The command waits until the
+daemon has exited, which can take as long as the current disc rip.
+
+--force skips the drain and kills in-flight stage work immediately;
+interrupted stages rerun from their last resumable state on the next start,
+and an interrupted rip restarts its current title.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			lp, sp := lockPath(), socketPath()
+			if !force && daemonctl.IsRunning(lp, sp) {
+				fmt.Println("Stopping daemon: draining, waiting for in-flight disc work to finish (use --force to stop immediately)")
+			}
 			err := daemonctl.Stop(daemonctl.StopOptions{
-				LockPath:   lockPath(),
-				SocketPath: socketPath(),
+				LockPath:   lp,
+				SocketPath: sp,
 				Token:      cfg.API.Token,
+				Force:      force,
 			})
 			if errors.Is(err, daemonctl.ErrDaemonNotRunning) {
 				fmt.Println("Daemon is not running")
@@ -66,19 +83,26 @@ func newStopCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "Stop immediately, killing in-flight stage work instead of draining")
+	return cmd
 }
 
 func newRestartCmd() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	cmd := &cobra.Command{
 		Use:     "restart",
-		Short:   "Restart the spindle daemon",
+		Short:   "Restart the spindle daemon (drains in-flight work first)",
 		GroupID: groupDaemon,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			lp, sp := lockPath(), socketPath()
+			if !force && daemonctl.IsRunning(lp, sp) {
+				fmt.Println("Stopping daemon: draining, waiting for in-flight disc work to finish (use --force to stop immediately)")
+			}
 			err := daemonctl.Stop(daemonctl.StopOptions{
 				LockPath:   lp,
 				SocketPath: sp,
 				Token:      cfg.API.Token,
+				Force:      force,
 			})
 			if err != nil && !errors.Is(err, daemonctl.ErrDaemonNotRunning) {
 				return fmt.Errorf("stop: %w", err)
@@ -95,6 +119,8 @@ func newRestartCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false, "Stop immediately, killing in-flight stage work instead of draining")
+	return cmd
 }
 
 func newStatusCmd() *cobra.Command {
@@ -130,6 +156,9 @@ database read and dependency checks run locally.`,
 			}
 
 			daemonState := successStyle("running")
+			if status.Draining {
+				daemonState = successStyle("running") + dimStyle(" (draining)")
+			}
 			if !status.Running {
 				daemonState = dimStyle("stopped")
 			}

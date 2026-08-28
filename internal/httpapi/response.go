@@ -143,6 +143,7 @@ type ContentIDResponse struct {
 // StatusAPIResponse is the top-level /api/status response.
 type StatusAPIResponse struct {
 	Running      bool                 `json:"running"`
+	Draining     bool                 `json:"draining,omitempty"`
 	PID          int                  `json:"pid"`
 	QueueDBPath  string               `json:"queueDbPath"`
 	LockFilePath string               `json:"lockFilePath"`
@@ -186,10 +187,11 @@ type DiscStatus struct {
 	Paused bool `json:"paused"`
 }
 
-// SchedulerSource exposes the workflow manager's resource occupancy to the
-// status endpoint without an import cycle.
+// SchedulerSource exposes the workflow manager's resource occupancy and
+// drain state to the status endpoint without an import cycle.
 type SchedulerSource interface {
 	SchedulerSnapshot() map[string]ResourceStatus
+	Draining() bool
 }
 
 // DependencyResponse reports an external dependency health check.

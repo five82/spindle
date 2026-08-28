@@ -24,12 +24,14 @@ the optical drive, the encoder, and the library.
 
 1. `spindle status --json`
 2. If `{"running": false}`: proceed.
-3. If running and every queue stage bucket other than `completed` / `failed`
-   is 0 (or the item in flight is only awaiting review): `spindle stop`, then proceed.
-4. If items are actively processing: **wait**. Poll `spindle status --json`
-   every few minutes until in-flight work drains, then `spindle stop`.
-5. When the orchestration task is fully done (including verification):
-   `spindle start` to hand control back to the daemon.
+3. If running: `spindle stop`. It drains before exiting: nothing new is
+   dispatched, encode/GPU stages are cancelled (they resume from persisted
+   state on the next start), and any in-flight disc rip finishes first. The
+   command blocks until the daemon has exited, which can take as long as the
+   current rip. Do not use `--force` here: it kills the rip.
+4. When the orchestration task is fully done (including verification):
+   `spindle start` to hand control back to the daemon; interrupted queue
+   work resumes where it left off.
 
 `spindle rip` and `spindle encode` refuse to run while the daemon is up, so a
 forgotten stop fails loudly rather than corrupting anything.

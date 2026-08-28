@@ -85,7 +85,12 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 	}
 
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
+		// A cancelled stage context makes any handler error a cancellation:
+		// subprocess stages surface the kill as e.g. "signal: killed" rather
+		// than context.Canceled, and classifying that as a stage failure
+		// would mark the item failed for work the daemon itself interrupted
+		// (stop, drain, user stop) instead of reverting the task to pending.
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			res.Canceled = true
 			if updateErr := opts.Store.ClearInProgress(item); updateErr != nil {
 				if opts.OneShot {

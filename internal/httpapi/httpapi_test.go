@@ -346,13 +346,17 @@ func TestQueueResponsesProjectTasksAndEnvelope(t *testing.T) {
 }
 
 // fakeScheduler implements httpapi.SchedulerSource for status tests.
-type fakeScheduler struct{}
+type fakeScheduler struct {
+	draining bool
+}
 
 func (fakeScheduler) SchedulerSnapshot() map[string]httpapi.ResourceStatus {
 	return map[string]httpapi.ResourceStatus{
 		"drive": {Capacity: 1, Used: 1, Holders: []httpapi.ResourceHolder{{ItemID: 3, Task: "ripping"}}},
 	}
 }
+
+func (f fakeScheduler) Draining() bool { return f.draining }
 
 // TestStatusIncludesPipelineAndScheduler covers the new /api/status surface.
 func TestStatusIncludesPipelineAndScheduler(t *testing.T) {
@@ -365,7 +369,7 @@ func TestStatusIncludesPipelineAndScheduler(t *testing.T) {
 		Store:     store,
 		Logger:    slog.New(slog.NewTextHandler(os.Stderr, nil)),
 		Pipeline:  pipeline,
-		Scheduler: fakeScheduler{},
+		Scheduler: fakeScheduler{draining: true},
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
@@ -387,6 +391,52 @@ func TestStatusIncludesPipelineAndScheduler(t *testing.T) {
 	drive := body.Scheduler.Resources["drive"]
 	if drive.Used != 1 || len(drive.Holders) != 1 || drive.Holders[0].Task != "ripping" {
 		t.Fatalf("drive occupancy not exposed: %+v", drive)
+	}
+	if !body.Draining {
+		t.Fatal("draining state not exposed")
+	}
+}
+
+func TestDaemonStopDrainsByDefaultAndForceKills(t *testing.T) {
+	store := testStore(t)
+	shutdownCh := make(chan struct{})
+	drainRequested := false
+	srv := httpapi.New(httpapi.Params{
+		Store:      store,
+		Logger:     slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		ShutdownCh: shutdownCh,
+		Drain:      func() { drainRequested = true },
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/daemon/stop", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]bool
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !body["draining"] || !drainRequested {
+		t.Fatalf("default stop must drain: body=%v drainRequested=%v", body, drainRequested)
+	}
+	select {
+	case <-shutdownCh:
+		t.Fatal("drain stop must not close the shutdown channel; the drain completes it")
+	default:
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/daemon/stop?force=1", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	select {
+	case <-shutdownCh:
+	default:
+		t.Fatal("force stop did not close the shutdown channel")
 	}
 }
 

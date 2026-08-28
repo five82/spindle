@@ -220,6 +220,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		Token:         cfg.API.Token,
 		DiscMonitor:   discMon,
 		ShutdownCh:    shutdownCh,
+		Drain:         manager.Drain,
 		Logger:        logger,
 		StatusInfo:    httpapi.NewStatusInfo(cfg),
 		LogBuffer:     logBuffer,
@@ -380,6 +381,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		logger.Info("received signal", "signal", sig)
 	case <-shutdownCh:
 		logger.Info("received HTTP stop request")
+	case <-manager.Drained():
+		logger.Info("drain complete, stopping daemon")
 	case <-ctx.Done():
 	}
 

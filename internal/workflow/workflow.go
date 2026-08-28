@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/five82/spindle/internal/httpapi"
@@ -66,7 +67,16 @@ type Manager struct {
 	// may coexist, but a canceled worker from deleted task rows must drain
 	// before retry dispatches replacements that could touch the same files.
 	runningMu sync.Mutex
-	running   map[int64]map[int64]context.CancelFunc
+	running   map[int64]map[int64]*runningWorker
+
+	// drainFlag/drained implement stop-with-drain: dispatch nothing new,
+	// cancel restart-resumable workers, let drive holders finish. drained
+	// closes once a requested drain has no workers left (or the scheduler
+	// has already exited).
+	drainFlag     atomic.Bool
+	drained       chan struct{}
+	drainedOnce   sync.Once
+	schedulerDone atomic.Bool
 
 	// blocked tracks when each ready task first failed to reserve its
 	// resource claims, so resource waits are logged once on entry and once
@@ -95,7 +105,8 @@ func New(store *queue.Store, notifier *notify.Notifier, statusTracker *httpapi.S
 		statusTracker:       statusTracker,
 		persistenceFailures: make(chan error, 1),
 		wake:                make(chan struct{}, 1),
-		running:             make(map[int64]map[int64]context.CancelFunc),
+		drained:             make(chan struct{}),
+		running:             make(map[int64]map[int64]*runningWorker),
 		blocked:             make(map[int64]time.Time),
 		waits:               make(map[int64]map[queue.Stage]float64),
 		pipeline: &pipelineState{
@@ -247,18 +258,27 @@ func (m *Manager) signalWake() {
 	}
 }
 
+// runningWorker is one live task worker: its stage (drain needs to know
+// which workers hold the drive) and cancel function. drainCancelled marks
+// workers a drain pass has already cancelled so repeated passes stay silent.
+type runningWorker struct {
+	stage          queue.Stage
+	cancel         context.CancelFunc
+	drainCancelled bool
+}
+
 // trackWorker registers a task worker's cancel function under its item.
 // Returns false only when that task already has a live worker.
-func (m *Manager) trackWorker(itemID, taskID int64, cancel context.CancelFunc) bool {
+func (m *Manager) trackWorker(itemID, taskID int64, stg queue.Stage, cancel context.CancelFunc) bool {
 	m.runningMu.Lock()
 	defer m.runningMu.Unlock()
 	if m.running[itemID] == nil {
-		m.running[itemID] = make(map[int64]context.CancelFunc)
+		m.running[itemID] = make(map[int64]*runningWorker)
 	}
 	if _, live := m.running[itemID][taskID]; live {
 		return false
 	}
-	m.running[itemID][taskID] = cancel
+	m.running[itemID][taskID] = &runningWorker{stage: stg, cancel: cancel}
 	return true
 }
 
@@ -330,8 +350,8 @@ func (m *Manager) cancelStoppedWorkers() {
 		}
 		m.runningMu.Lock()
 		cancels := make([]context.CancelFunc, 0, len(m.running[id]))
-		for _, cancel := range m.running[id] {
-			cancels = append(cancels, cancel)
+		for _, w := range m.running[id] {
+			cancels = append(cancels, w.cancel)
 		}
 		m.runningMu.Unlock()
 		for _, cancel := range cancels {
@@ -343,6 +363,94 @@ func (m *Manager) cancelStoppedWorkers() {
 			)
 			cancel()
 		}
+	}
+}
+
+// Drain requests a graceful stop: the scheduler dispatches nothing new and
+// cancels every worker whose stage does not hold the optical drive. Drive
+// stages (identification, ripping) are the only physically unresumable work
+// and run to completion; every other stage resumes cheaply after a restart
+// (per-asset envelope state, reel's chunk-level encode resume). Drained()
+// closes once no workers remain.
+func (m *Manager) Drain() {
+	if m.drainFlag.Swap(true) {
+		return
+	}
+	m.pipeline.logger.Info("daemon drain started",
+		"decision_type", logs.DecisionDaemonDrain,
+		"decision_result", "draining",
+		"decision_reason", "stop requested; waiting for drive work, cancelling resumable stages",
+	)
+	if m.schedulerDone.Load() {
+		m.closeDrained()
+		return
+	}
+	m.signalWake()
+}
+
+// Draining reports whether a drain is in progress, for the status API.
+func (m *Manager) Draining() bool { return m.drainFlag.Load() }
+
+// Drained returns a channel that closes once a requested drain has finished.
+func (m *Manager) Drained() <-chan struct{} { return m.drained }
+
+func (m *Manager) closeDrained() {
+	m.drainedOnce.Do(func() {
+		m.pipeline.logger.Info("daemon drain complete",
+			"decision_type", logs.DecisionDaemonDrain,
+			"decision_result", "drained",
+			"decision_reason", "no stage workers remain",
+		)
+		close(m.drained)
+	})
+}
+
+// stageHoldsDrive reports whether a stage's declared claims include the
+// optical drive.
+func (m *Manager) stageHoldsDrive(stg queue.Stage) bool {
+	idx, ok := m.pipeline.stageMap[stg]
+	if !ok {
+		return false
+	}
+	return m.pipeline.stages[idx].Claims["drive"] > 0
+}
+
+// drainPass cancels resumable (non-drive) workers, once each, and closes
+// drained when no workers remain. It runs on every scheduler pass while
+// draining so workers dispatched by a pass that raced the drain request are
+// still caught.
+func (m *Manager) drainPass() {
+	type target struct {
+		itemID int64
+		stage  queue.Stage
+		cancel context.CancelFunc
+	}
+	m.runningMu.Lock()
+	var targets []target
+	for itemID, tasks := range m.running {
+		for _, w := range tasks {
+			if w.drainCancelled || m.stageHoldsDrive(w.stage) {
+				continue
+			}
+			w.drainCancelled = true
+			targets = append(targets, target{itemID: itemID, stage: w.stage, cancel: w.cancel})
+		}
+	}
+	empty := len(m.running) == 0
+	m.runningMu.Unlock()
+
+	for _, t := range targets {
+		m.pipeline.logger.Info("cancelling resumable worker for drain",
+			"decision_type", logs.DecisionDaemonDrain,
+			"decision_result", "cancelled",
+			"decision_reason", "stage resumes after restart; drain waits only for drive work",
+			"item_id", t.itemID,
+			"stage", t.stage,
+		)
+		t.cancel()
+	}
+	if empty {
+		m.closeDrained()
 	}
 }
 
@@ -362,6 +470,12 @@ func (m *Manager) runScheduler(ctx context.Context) {
 	defer func() {
 		cancel()
 		workers.Wait()
+		// A drain requested after the scheduler exits (or racing its exit)
+		// has nothing left to wait for.
+		m.schedulerDone.Store(true)
+		if m.drainFlag.Load() {
+			m.closeDrained()
+		}
 	}()
 
 	for {
@@ -378,7 +492,11 @@ func (m *Manager) runScheduler(ctx context.Context) {
 		}
 
 		m.cancelStoppedWorkers()
-		m.dispatch(runCtx, &workers)
+		if m.drainFlag.Load() {
+			m.drainPass()
+		} else {
+			m.dispatch(runCtx, &workers)
+		}
 
 		select {
 		case <-runCtx.Done():
@@ -507,7 +625,7 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		}
 
 		taskCtx, cancelTask := context.WithCancel(ctx)
-		if !m.trackWorker(item.ID, task.ID, cancelTask) {
+		if !m.trackWorker(item.ID, task.ID, task.Type, cancelTask) {
 			// Lost a race with another dispatch pass; revert.
 			cancelTask()
 			m.release(claims, holder)

@@ -638,10 +638,9 @@ func (s *Store) StopItems(ids ...int64) (int, error) {
 			}
 
 			// Record where the item was stopped so retry resumes from that
-			// stage instead of restarting the whole pipeline. Re-running
-			// earlier stages is not just wasted work: a re-run rip wipes
-			// staging while later-stage outputs (e.g. reel's resumable
-			// encode state) still live there.
+			// stage instead of restarting the whole pipeline and re-doing
+			// earlier stages' work (a re-run rip preserves completed titles
+			// and encode state, but everything else re-runs from scratch).
 			stoppedAt := item.Stage
 			item.Stage = StageFailed
 			item.InProgress = 0

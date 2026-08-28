@@ -3,6 +3,7 @@ package makemkv
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -96,6 +97,12 @@ func Scan(ctx context.Context, device string, timeout time.Duration, minLength i
 	}
 
 	if err := cmd.Wait(); err != nil {
+		// A cancelled context killed the process; report the cancellation,
+		// not the kill signal, so the stage reverts to pending instead of
+		// logging a scan failure the daemon itself caused.
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil, ctx.Err()
+		}
 		logger.Error("MakeMKV scan failed",
 			"event_type", "makemkv_scan_error",
 			"error_hint", "makemkvcon exited with error",
@@ -310,6 +317,17 @@ func Rip(ctx context.Context, device string, titleID int, outputDir string, time
 	}
 
 	waitErr := cmd.Wait()
+	// A cancelled context killed makemkvcon (timeout is DeadlineExceeded and
+	// still reaches the verdict as a failure). Report the cancellation so the
+	// stage reverts to pending instead of logging a rip failure the daemon
+	// itself caused.
+	if waitErr != nil && errors.Is(ctx.Err(), context.Canceled) {
+		logger.Info("MakeMKV rip cancelled",
+			"event_type", "makemkv_rip_cancelled",
+			"title_id", titleID,
+		)
+		return ctx.Err()
+	}
 	newFiles := newMKVFiles(outputDir, existing)
 	if err := outcome.verdict(waitErr, newFiles, outputDir); err != nil {
 		return err

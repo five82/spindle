@@ -191,6 +191,9 @@ func messagesVary(entries []LogDecision) bool {
 
 func selectNotableDecisions(decisions []LogDecision) []LogDecision {
 	notable := map[string]bool{
+		// A drain cancellation explains duplicate stage runs and resumed
+		// encodes; without it the audit misreads the restart as instability.
+		logs.DecisionDaemonDrain:              true,
 		logs.DecisionTMDBMatch:                true,
 		logs.DecisionTMDBMatchPreference:      true,
 		logs.DecisionTitleResolution:          true,

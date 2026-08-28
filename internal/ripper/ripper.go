@@ -104,16 +104,56 @@ func (h *Handler) prepareRipStaging(sess *stage.Session) (string, error) {
 	}
 	rippedDir := filepath.Join(stagingRoot, "ripped")
 
-	// Staging directories are ephemeral. Wipe any leftover state from a
-	// previous run so file discovery starts clean. The rip cache is the
-	// durable layer; staging has no reuse value between pipeline runs.
-	if err := os.RemoveAll(stagingRoot); err != nil {
+	// Staging is mostly ephemeral, but a rip re-run (daemon restart, retry)
+	// must not destroy restart-resumable state: completed title files in
+	// ripped/ (recorded in the envelope; ripTitles skips them) and all of
+	// encoded/ (finished encodes plus reel's chunk-level resume dirs for the
+	// encoding branch that overlaps this stage). Everything else -- partial
+	// rips, leftovers from a previous pipeline run of the same disc -- is
+	// wiped so file discovery starts clean.
+	completed := make(map[string]bool)
+	for _, asset := range sess.Env.Assets.Ripped {
+		if asset.IsCompleted() {
+			completed[asset.Path] = true
+		}
+	}
+	removed := 0
+	entries, err := os.ReadDir(stagingRoot)
+	if err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("reset staging dir: %w", err)
 	}
-	logger.Info("staging directory reset for clean rip",
+	for _, entry := range entries {
+		path := filepath.Join(stagingRoot, entry.Name())
+		switch entry.Name() {
+		case "encoded":
+		case "ripped":
+			inner, readErr := os.ReadDir(path)
+			if readErr != nil {
+				return "", fmt.Errorf("reset staging dir: %w", readErr)
+			}
+			for _, f := range inner {
+				filePath := filepath.Join(path, f.Name())
+				if completed[filePath] {
+					continue
+				}
+				if err := os.RemoveAll(filePath); err != nil {
+					return "", fmt.Errorf("reset staging dir: %w", err)
+				}
+				removed++
+			}
+		default:
+			if err := os.RemoveAll(path); err != nil {
+				return "", fmt.Errorf("reset staging dir: %w", err)
+			}
+			removed++
+		}
+	}
+	logger.Info("staging directory reset for rip",
 		"decision_type", logs.DecisionStagingCleanup,
 		"decision_result", "reset",
-		"decision_reason", "ephemeral staging",
+		"decision_reason", "wiped non-resumable staging state; kept completed rips and encode resume state",
+		"removed_entries", removed,
+		"kept_ripped_titles", len(completed),
 	)
 	return rippedDir, nil
 }
@@ -262,10 +302,28 @@ func (h *Handler) ripTitles(ctx context.Context, sess *stage.Session, rippedDir 
 
 	// Rip selected titles one by one, persisting per-title progress so external
 	// consumers can show both aggregate stage progress and completed episode
-	// counts while the stage is still running.
+	// counts while the stage is still running. Titles whose ripped asset the
+	// envelope already records as completed (preserved by prepareRipStaging
+	// across a restart) are skipped, so an interrupted multi-title rip
+	// resumes at the next title instead of re-ripping the disc.
 	for i, title := range targets {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if key := titleEpisodeKey[title.ID]; key != "" {
+			if asset, ok := sess.Env.Assets.FindAsset(ripspec.AssetKindRipped, key); ok && asset.IsCompleted() {
+				if _, statErr := os.Stat(asset.Path); statErr == nil {
+					sess.Logger.Info("title already ripped",
+						"decision_type", logs.DecisionTitleRip,
+						"decision_result", "skipped",
+						"decision_reason", "completed rip preserved from interrupted run",
+						"title_id", title.ID,
+						"episode_key", key,
+					)
+					sess.Progress(overallRipPercent(i+1, len(targets), 0), fmt.Sprintf("Phase %d/%d - Ripped title %d", i+1, len(targets), title.ID))
+					continue
+				}
+			}
 		}
 		if err := h.ripTitle(ctx, sess, rippedDir, title, i, len(targets), titleEpisodeKey[title.ID]); err != nil {
 			return err

@@ -25,6 +25,7 @@ type Server struct {
 	mux           *http.ServeMux
 	discMonitor   *discmonitor.Monitor
 	shutdownCh    chan struct{}
+	drain         func()
 	statusInfo    StatusInfo
 	logBuffer     *LogBuffer
 	statusTracker *StatusTracker
@@ -33,12 +34,16 @@ type Server struct {
 }
 
 // Params holds the dependencies and options for New. DiscMonitor, ShutdownCh,
-// LogBuffer, StatusTracker, Pipeline, and Scheduler may be left zero.
+// Drain, LogBuffer, StatusTracker, Pipeline, and Scheduler may be left zero.
 type Params struct {
-	Store         *queue.Store
-	Token         string
-	DiscMonitor   *discmonitor.Monitor
-	ShutdownCh    chan struct{}
+	Store       *queue.Store
+	Token       string
+	DiscMonitor *discmonitor.Monitor
+	ShutdownCh  chan struct{}
+	// Drain requests a graceful daemon stop: no new work is dispatched,
+	// resumable workers are cancelled, and the daemon exits once in-flight
+	// drive work finishes. Nil disables the drain path of /api/daemon/stop.
+	Drain         func()
 	Logger        *slog.Logger
 	StatusInfo    StatusInfo
 	LogBuffer     *LogBuffer
@@ -56,6 +61,7 @@ func New(p Params) *Server {
 		mux:           http.NewServeMux(),
 		discMonitor:   p.DiscMonitor,
 		shutdownCh:    p.ShutdownCh,
+		drain:         p.Drain,
 		statusInfo:    p.StatusInfo,
 		logBuffer:     p.LogBuffer,
 		statusTracker: p.StatusTracker,
@@ -444,6 +450,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 	if s.scheduler != nil {
 		resp.Scheduler = &SchedulerStatus{Resources: s.scheduler.SchedulerSnapshot()}
+		resp.Draining = s.scheduler.Draining()
 	}
 	if s.discMonitor != nil {
 		resp.Disc = &DiscStatus{Paused: s.discMonitor.IsPaused()}
@@ -455,11 +462,22 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) handleDaemonStop(w http.ResponseWriter, _ *http.Request) {
+// handleDaemonStop stops the daemon. The default is a drain: nothing new is
+// dispatched, resumable workers are cancelled, and the daemon exits once
+// in-flight drive work (identification, ripping) finishes. force=1 skips the
+// drain and kills in-flight stage work immediately.
+func (s *Server) handleDaemonStop(w http.ResponseWriter, r *http.Request) {
 	if s.shutdownCh == nil {
 		writeError(w, http.StatusInternalServerError, "shutdown not supported")
 		return
 	}
+	if r.URL.Query().Get("force") != "1" && s.drain != nil {
+		s.logOperatorAction("daemon stop requested", "daemon_stop", "mode", "drain")
+		writeJSON(w, http.StatusOK, map[string]bool{"stopping": true, "draining": true})
+		s.drain()
+		return
+	}
+	s.logOperatorAction("daemon stop requested", "daemon_stop", "mode", "force")
 	writeJSON(w, http.StatusOK, map[string]bool{"stopped": true})
 	// Close channel after writing response to signal daemon shutdown.
 	select {

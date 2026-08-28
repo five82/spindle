@@ -582,7 +582,7 @@ func TestFinalizeItemLagsStageLabelDuringOverlap(t *testing.T) {
 	if err := store.FinishTask(tasks[0], queue.TaskDone, ""); err != nil {
 		t.Fatalf("finish task: %v", err)
 	}
-	if !manager.trackWorker(item.ID, tasks[1].ID, func() {}) {
+	if !manager.trackWorker(item.ID, tasks[1].ID, queue.StageEncoding, func() {}) {
 		t.Fatal("track worker")
 	}
 	defer manager.untrackWorker(item.ID, tasks[1].ID)
@@ -722,4 +722,142 @@ func TestClaimsFuncRoutesItemsToPerItemSlots(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("items did not complete")
+}
+
+func TestDrainCancelsResumableWorkersAndWaitsForDriveWork(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	item, _ := store.NewDisc("A", "fp1")
+
+	ripRunning := make(chan struct{})
+	ripRelease := make(chan struct{})
+	ripHandler := stubHandler{run: func(ctx context.Context, _ *stage.Session) error {
+		close(ripRunning)
+		select {
+		case <-ripRelease:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}}
+	encRunning := make(chan struct{})
+	encCanceled := make(chan struct{})
+	encHandler := stubHandler{run: func(ctx context.Context, _ *stage.Session) error {
+		close(encRunning)
+		<-ctx.Done()
+		close(encCanceled)
+		return ctx.Err()
+	}}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, nil, nil, logger)
+	manager.ConfigureStages([]PipelineStage{
+		{Stage: queue.StageIdentification, Handler: stubHandler{}},
+		{Stage: queue.StageRipping, Handler: ripHandler, Claims: map[string]int{"drive": 1}, DependsOn: []queue.Stage{queue.StageIdentification}},
+		{Stage: queue.StageEncoding, Handler: encHandler, Claims: map[string]int{"encode": 1}, DependsOn: []queue.Stage{queue.StageIdentification}},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		manager.Run(ctx)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	for name, ch := range map[string]chan struct{}{"rip": ripRunning, "encode": encRunning} {
+		select {
+		case <-ch:
+		case <-time.After(testWait):
+			t.Fatalf("%s handler never started", name)
+		}
+	}
+
+	manager.Drain()
+	if !manager.Draining() {
+		t.Fatal("Draining() = false after Drain()")
+	}
+
+	// The resumable (non-drive) worker is cancelled promptly...
+	select {
+	case <-encCanceled:
+	case <-time.After(testWait):
+		t.Fatal("encoding worker was not cancelled by drain")
+	}
+	// ...while the drain keeps waiting for the drive worker.
+	select {
+	case <-manager.Drained():
+		t.Fatal("drain completed while the rip was still running")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(ripRelease)
+	select {
+	case <-manager.Drained():
+	case <-time.After(testWait):
+		t.Fatal("drain did not complete after drive work finished")
+	}
+
+	// Ripping finished as done; the cancelled encoding task reverted to
+	// pending and was not re-dispatched (dispatch is disabled while
+	// draining); the item is not failed.
+	deadline := time.Now().Add(testWait)
+	for time.Now().Before(deadline) {
+		got, err := store.GetByID(item.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		tasks, err := store.TasksForItem(item.ID)
+		if err != nil {
+			t.Fatalf("tasks: %v", err)
+		}
+		states := make(map[queue.Stage]queue.TaskState, len(tasks))
+		for _, task := range tasks {
+			states[task.Type] = task.State
+		}
+		if got.Stage != queue.StageFailed &&
+			states[queue.StageRipping] == queue.TaskDone &&
+			states[queue.StageEncoding] == queue.TaskPending {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("queue did not settle into drained state (rip done, encode pending, item not failed)")
+}
+
+func TestDrainAfterSchedulerExitCompletesImmediately(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := New(store, nil, nil, logger)
+	manager.ConfigureStages([]PipelineStage{{Stage: queue.StageIdentification, Handler: stubHandler{}}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		manager.Run(ctx)
+		close(done)
+	}()
+	cancel()
+	<-done
+
+	// A drain requested once the scheduler is gone (e.g. after a
+	// persistence-failure stop) must not wait forever.
+	manager.Drain()
+	select {
+	case <-manager.Drained():
+	case <-time.After(testWait):
+		t.Fatal("drain did not complete after scheduler exit")
+	}
 }
