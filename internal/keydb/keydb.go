@@ -75,8 +75,9 @@ func (c *Catalog) Size() int {
 }
 
 // LoadFromFile parses a KEYDB.cfg file and returns a Catalog.
-// Lines have the format: discID | title | extra...
-// Comment lines (starting with ;) and malformed lines are skipped.
+// Disc rows have the format: 0xdiscID = title | attributes...
+// Comment, key-material, and malformed lines are skipped. A file containing no
+// valid disc rows is rejected rather than silently disabling KeyDB lookups.
 // Disc IDs are normalized (0X prefix stripped, uppercased, validated as 40 hex chars).
 // Titles are cleaned via the title extraction chain.
 // If stale is true, the file is older than 7 days and should be re-downloaded.
@@ -99,12 +100,16 @@ func LoadFromFile(path string) (cat *Catalog, stale bool, err error) {
 		if line == "" || strings.HasPrefix(line, ";") {
 			continue
 		}
-		parts := strings.SplitN(line, "|", 3)
+		parts := strings.SplitN(line, "|", 2)
 		if len(parts) < 2 {
 			continue
 		}
-		rawID := strings.TrimSpace(parts[0])
-		rawTitle := strings.TrimSpace(parts[1])
+		rawID, rawTitle, ok := strings.Cut(parts[0], "=")
+		if !ok {
+			continue
+		}
+		rawID = strings.TrimSpace(rawID)
+		rawTitle = strings.TrimSpace(rawTitle)
 		if rawID == "" || rawTitle == "" {
 			continue
 		}
@@ -116,6 +121,9 @@ func LoadFromFile(path string) (cat *Catalog, stale bool, err error) {
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, false, fmt.Errorf("keydb: scan %s: %w", path, err)
+	}
+	if len(entries) == 0 {
+		return nil, false, fmt.Errorf("keydb: no valid disc entries in %s", path)
 	}
 
 	return &Catalog{

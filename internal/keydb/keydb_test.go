@@ -36,9 +36,9 @@ const (
 var sampleKeyDB = "; This is a comment\n" +
 	"; Another comment\n" +
 	"\n" +
-	hexID1 + " | The Matrix | extra data | more stuff\n" +
-	hexID2 + " | Inception\n" +
-	hexID3 + " | Blade Runner 2049 | director cut\n" +
+	"0x" + hexID1 + " = The Matrix | D | 2020-01-01 | M | key material\n" +
+	"0x" + hexID2 + " = Inception | D | 2020-01-02\n" +
+	"0x" + hexID3 + " = Blade Runner 2049 | D | director cut\n" +
 	"\n" +
 	"; malformed lines below\n" +
 	"no-pipe-here\n" +
@@ -62,6 +62,24 @@ func TestLoadFromFile(t *testing.T) {
 
 	if got := cat.Size(); got != 3 {
 		t.Errorf("Size = %d, want 3", got)
+	}
+}
+
+func TestLoadFromFileActualKeyDBRow(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "KEYDB.cfg")
+	const discID = "D50BB898452EBBF2C0FDEB7986FFEABE94CF758D"
+	content := "0x" + discID + " = MEETTHEPARENTS_UPK75 (Meet the Parents) | D | 2026-08-26 | M | key material\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cat, _, err := LoadFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cat.Lookup(discID, nil); got != "Meet the Parents" {
+		t.Fatalf("Lookup(%s) = %q, want Meet the Parents", discID, got)
 	}
 }
 
@@ -144,9 +162,9 @@ func TestMalformedLinesSkipped(t *testing.T) {
 	validID := "ABCDEF1234567890ABCDEF1234567890ABCDEF12"
 	content := "no-pipe\n" +
 		"| only-title\n" +
-		" |  |\n" +
-		"SHORT | Bad ID\n" +
-		validID + " | Good Title\n"
+		" =  | metadata\n" +
+		"SHORT = Bad ID | metadata\n" +
+		"0x" + validID + " = Good Title | D | metadata\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +189,7 @@ func TestCommentLinesSkipped(t *testing.T) {
 	validID := "ABCDEF1234567890ABCDEF1234567890ABCDEF12"
 	content := "; comment one\n" +
 		";comment two\n" +
-		validID + " | Real Entry\n" +
+		"0x" + validID + " = Real Entry | D | metadata\n" +
 		"; another comment\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -190,6 +208,19 @@ func TestCommentLinesSkipped(t *testing.T) {
 	}
 }
 
+func TestLoadFromFileRejectsNoDiscEntries(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "KEYDB.cfg")
+	content := "; comments and key material are not disc entries\n| DK | DEVICE_KEY 0x1234\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := LoadFromFile(path); err == nil {
+		t.Fatal("expected error for catalog without disc entries")
+	}
+}
+
 func TestLoadFromFileNotExist(t *testing.T) {
 	_, _, err := LoadFromFile("/nonexistent/path/KEYDB.cfg")
 	if err == nil {
@@ -202,7 +233,7 @@ func TestStaleness(t *testing.T) {
 	path := filepath.Join(dir, "KEYDB.cfg")
 
 	validID := "ABCDEF1234567890ABCDEF1234567890ABCDEF12"
-	content := validID + " | Some Movie\n"
+	content := "0x" + validID + " = Some Movie | D | metadata\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +256,7 @@ func TestStaleness(t *testing.T) {
 func TestLoadOrDownloadReusesFreshCurrentCatalog(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "KEYDB.cfg")
-	if err := os.WriteFile(path, []byte(hexID1+" | Original Title\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("0x"+hexID1+" = Original Title | D | metadata\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	current, _, err := LoadFromFile(path)
@@ -248,7 +279,7 @@ func TestLoadOrDownloadReusesFreshCurrentCatalog(t *testing.T) {
 func TestLoadOrDownloadRefreshesStaleCurrentCatalog(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "KEYDB.cfg")
-	if err := os.WriteFile(path, []byte(hexID1+" | Old Title\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("0x"+hexID1+" = Old Title | D | metadata\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	oldTime := time.Now().Add(-8 * 24 * time.Hour)
@@ -269,7 +300,7 @@ func TestLoadOrDownloadRefreshesStaleCurrentCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := entry.Write([]byte(hexID1 + " | Fresh Title\n")); err != nil {
+	if _, err := entry.Write([]byte("0x" + hexID1 + " = Fresh Title | D | metadata\n")); err != nil {
 		t.Fatal(err)
 	}
 	if err := zw.Close(); err != nil {
@@ -298,7 +329,7 @@ func TestLoadOrDownloadRefreshesStaleCurrentCatalog(t *testing.T) {
 func TestLoadOrDownloadKeepsStaleCurrentCatalogOnFailure(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "KEYDB.cfg")
-	if err := os.WriteFile(path, []byte(hexID1+" | Old Title\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("0x"+hexID1+" = Old Title | D | metadata\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	oldTime := time.Now().Add(-8 * 24 * time.Hour)

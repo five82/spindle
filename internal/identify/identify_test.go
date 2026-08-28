@@ -82,7 +82,7 @@ func TestResolveTitle_UsesKeyDBDiscID(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "KEYDB.cfg")
 	discID := "DCB2FF29F40C9CD4702BC163A3F4511A492E54A4"
-	if err := os.WriteFile(path, []byte(discID+" | Star Trek: The Next Generation | extra\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("0x"+discID+" = Star Trek: The Next Generation | D | extra\n"), 0o644); err != nil {
 		t.Fatalf("write keydb: %v", err)
 	}
 	cat, _, err := keydb.LoadFromFile(path)
@@ -106,7 +106,7 @@ func TestRefreshKeyDBReloadsChangedFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "KEYDB.cfg")
 	discID := "DCB2FF29F40C9CD4702BC163A3F4511A492E54A4"
-	if err := os.WriteFile(path, []byte(discID+" | Old Title\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("0x"+discID+" = Old Title | D | metadata\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	oldTime := time.Now().Add(-time.Hour)
@@ -122,7 +122,7 @@ func TestRefreshKeyDBReloadsChangedFile(t *testing.T) {
 		t.Fatalf("initial title = %q, want Old Title", got)
 	}
 
-	if err := os.WriteFile(path, []byte(discID+" | Corrected Title\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("0x"+discID+" = Corrected Title | D | metadata\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	h.refreshKeyDB(context.Background(), bdInfo, discardLogger())
