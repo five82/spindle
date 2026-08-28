@@ -294,8 +294,22 @@ func (h *Handler) applyCachedIdentity(ctx context.Context, item *queue.Item, res
 	}
 	entry := h.discIDCache.Lookup(discID)
 	if entry == nil {
+		logger.Info("disc ID cache miss",
+			"decision_type", logs.DecisionDiscIDCache,
+			"decision_result", "miss",
+			"decision_reason", "disc_id not in cache",
+			"disc_id", discID,
+		)
 		return false
 	}
+	logger.Info("disc ID cache hit",
+		"decision_type", logs.DecisionDiscIDCache,
+		"decision_result", "hit",
+		"decision_reason", fmt.Sprintf("cached tmdb_id=%d", entry.TMDBID),
+		"disc_id", discID,
+		"tmdb_id", entry.TMDBID,
+		"media_type", entry.MediaType,
+	)
 	if result.MediaHint == "tv" && entry.MediaType == "movie" {
 		logger.Warn("disc ID cache invalidated: TV hint contradicts cached movie type",
 			"decision_type", logs.DecisionDiscIDCache,

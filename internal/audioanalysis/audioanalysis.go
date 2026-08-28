@@ -43,7 +43,7 @@ Commentary tracks include:
 NOT commentary:
 - Alternate language dubs (foreign language replacing original dialogue)
 - Audio descriptions for visually impaired (narrator describing on-screen action)
-- Stereo downmix of main audio (just the movie audio, no additional commentary)
+- Duplicate program audio (just the movie audio, no additional commentary)
 - Isolated music/effects tracks
 
 Given a transcript sample from an audio track, determine if it is commentary.
@@ -140,7 +140,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 // detectCommentary examines non-primary audio tracks for commentary content.
 // Every candidate is classified before transcript similarity may exclude it:
 // commentary often contains enough program dialogue to resemble the primary,
-// so similarity alone cannot prove that a track is a downmix.
+// so similarity alone cannot prove that a track is duplicate program audio.
 //
 // Commentary detection is non-fatal: failures are logged and the track is
 // conservatively preserved as commentary.
@@ -242,8 +242,8 @@ func (h *Handler) detectCommentary(
 	primaryFP := h.primaryFingerprint(ctx, sess, path, primaryAudioIdx, epKey)
 
 	// Transcribe ALL candidates in one WhisperX invocation. Each candidate is
-	// transcribed exactly once; the same transcript feeds both the stereo
-	// similarity filter and LLM classification.
+	// transcribed exactly once; the same transcript feeds both the duplicate
+	// program audio similarity filter and LLM classification.
 	logger.Info("commentary candidate transcription started",
 		"event_type", "commentary_candidates_transcribe",
 		"episode_key", epKey,
@@ -322,18 +322,23 @@ func (h *Handler) detectCommentary(
 		if ref != nil {
 			comms = append(comms, *ref)
 		}
-		if similarityMeasured && shouldExcludeAsDownmix(similarity, h.cfg.Commentary.SimilarityThreshold, ref) {
-			logger.Info("track excluded as stereo downmix",
-				"decision_type", logs.DecisionCommentaryStereoFilter,
-				"decision_result", "excluded",
-				"decision_reason", fmt.Sprintf("classified as non-commentary and similarity %.3f >= threshold %.3f", similarity, h.cfg.Commentary.SimilarityThreshold),
-				"audio_index", c.audioIndex,
-			)
-			excluded = append(excluded, ripspec.ExcludedTrackRef{
-				Index:      c.audioIndex,
-				Reason:     "stereo downmix of primary",
-				Similarity: similarity,
-			})
+		if similarityMeasured {
+			reason := classifySimilarityExclusion(c.stream.Channels, similarity, h.cfg.Commentary.SimilarityThreshold, ref)
+			if reason != "" {
+				logger.Info("track excluded as "+reason,
+					"decision_type", logs.DecisionCommentaryStereoFilter,
+					"decision_result", "excluded",
+					"decision_reason", fmt.Sprintf("classified as non-commentary and similarity %.3f >= threshold %.3f; %s", similarity, h.cfg.Commentary.SimilarityThreshold, reason),
+					"audio_index", c.audioIndex,
+					"candidate_channels", c.stream.Channels,
+					"exclusion_reason", reason,
+				)
+				excluded = append(excluded, ripspec.ExcludedTrackRef{
+					Index:      c.audioIndex,
+					Reason:     reason,
+					Similarity: similarity,
+				})
+			}
 		}
 	}
 
@@ -346,10 +351,16 @@ func (h *Handler) detectCommentary(
 	return comms, excluded
 }
 
-// shouldExcludeAsDownmix enforces that similarity can only corroborate a
-// non-commentary classification; it can never override a commentary result.
-func shouldExcludeAsDownmix(similarity, threshold float64, commentary *ripspec.CommentaryTrackRef) bool {
-	return commentary == nil && similarity >= threshold
+// classifySimilarityExclusion returns the topology-accurate exclusion reason
+// only when similarity corroborates a non-commentary classification.
+func classifySimilarityExclusion(channels int, similarity, threshold float64, commentary *ripspec.CommentaryTrackRef) string {
+	if commentary != nil || similarity < threshold {
+		return ""
+	}
+	if channels == 2 {
+		return "stereo downmix of primary"
+	}
+	return "duplicate/core of primary"
 }
 
 // primaryFingerprint returns the transcript fingerprint of the primary audio

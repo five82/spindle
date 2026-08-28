@@ -59,28 +59,15 @@ func Open(path string, logger *slog.Logger) (*Store, error) {
 }
 
 // Lookup finds an entry by disc ID. Returns nil if not found.
+// Callers with operation context log cache-hit decisions.
 func (s *Store) Lookup(discID string) *Entry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	entry, ok := s.entries[discID]
 	if !ok {
-		s.logger.Info("disc ID cache miss",
-			"decision_type", logs.DecisionDiscIDCache,
-			"decision_result", "miss",
-			"decision_reason", "disc_id not in cache",
-			"disc_id", discID,
-		)
 		return nil
 	}
-	s.logger.Info("disc ID cache hit",
-		"decision_type", logs.DecisionDiscIDCache,
-		"decision_result", "hit",
-		"decision_reason", fmt.Sprintf("cached tmdb_id=%d", entry.TMDBID),
-		"disc_id", discID,
-		"tmdb_id", entry.TMDBID,
-		"media_type", entry.MediaType,
-	)
 	return &entry
 }
 

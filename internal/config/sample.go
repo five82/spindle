@@ -162,7 +162,7 @@ api_key = ""
 # Enable commentary track detection
 # enabled = false
 
-# Cosine similarity threshold for stereo downmix check
+# Cosine similarity threshold for duplicate-program-audio detection
 # similarity_threshold = 0.92
 
 # LLM confidence required for classification

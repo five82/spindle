@@ -1,7 +1,9 @@
 package identify
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,6 +17,7 @@ import (
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/discidcache"
 	"github.com/five82/spindle/internal/keydb"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/makemkv"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
@@ -126,6 +129,57 @@ func TestRefreshKeyDBReloadsChangedFile(t *testing.T) {
 	if got := h.keydbCat.Lookup(discID, discardLogger()); got != "Corrected Title" {
 		t.Fatalf("reloaded title = %q, want Corrected Title", got)
 	}
+}
+
+func TestApplyCachedIdentityLogsItemScopedCacheHit(t *testing.T) {
+	dir := t.TempDir()
+	cache, err := discidcache.Open(filepath.Join(dir, "cache.json"), discardLogger())
+	if err != nil {
+		t.Fatalf("Open cache: %v", err)
+	}
+	if err := cache.Set("disc-id", discidcache.Entry{
+		TMDBID:    12345,
+		MediaType: "movie",
+		Title:     "Test Movie",
+	}); err != nil {
+		t.Fatalf("Set cache entry: %v", err)
+	}
+
+	item := &queue.Item{ID: 42, DiscTitle: "Test Movie"}
+	result := &IdentifyResult{BDInfo: &BDInfoResult{DiscID: "disc-id"}}
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil)).With("item_id", item.ID)
+
+	h := &Handler{discIDCache: cache}
+	if !h.applyCachedIdentity(context.Background(), item, result, logger) {
+		t.Fatal("applyCachedIdentity() = false, want cache hit")
+	}
+
+	decoder := json.NewDecoder(&output)
+	for {
+		var record map[string]any
+		err := decoder.Decode(&record)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("decode log record: %v", err)
+		}
+		if record["decision_type"] != logs.DecisionDiscIDCache || record["decision_result"] != "hit" {
+			continue
+		}
+		if record["item_id"] != float64(item.ID) {
+			t.Errorf("item_id = %v, want %d", record["item_id"], item.ID)
+		}
+		if record["decision_reason"] != "cached tmdb_id=12345" {
+			t.Errorf("decision_reason = %v, want cached tmdb_id=12345", record["decision_reason"])
+		}
+		if record["disc_id"] != "disc-id" || record["tmdb_id"] != float64(12345) || record["media_type"] != "movie" {
+			t.Errorf("cache hit fields = %#v", record)
+		}
+		return
+	}
+	t.Fatal("item-scoped cache-hit decision was not logged")
 }
 
 func TestCleanQueryTitle(t *testing.T) {

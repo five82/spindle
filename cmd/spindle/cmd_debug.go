@@ -266,7 +266,7 @@ func newDebugCommentaryCmd() *cobra.Command {
 			defer func() { _ = os.RemoveAll(workDir) }()
 
 			fmt.Printf("\n%s\n", headerStyle("=== Commentary Analysis ==="))
-			fmt.Printf("%s %.3f\n", labelStyle("Similarity threshold:"), cfg.Commentary.SimilarityThreshold)
+			fmt.Printf("%s %.3f\n", labelStyle("Duplicate-program-audio threshold:"), cfg.Commentary.SimilarityThreshold)
 			fmt.Printf("%s %.3f\n", labelStyle("Confidence threshold:"), cfg.Commentary.ConfidenceThreshold)
 
 			// Use audio-relative indices for ffmpeg -map 0:a:N.
@@ -279,7 +279,7 @@ func newDebugCommentaryCmd() *cobra.Command {
 				}
 				fmt.Printf("%s %d (%s)\n", labelStyle("Channels:"), candidate.Channels, candidate.ChannelLayout)
 
-				// Stereo similarity check.
+				// Duplicate-program-audio similarity check.
 				primaryResult, pErr := transcriber.Transcribe(ctx, transcription.TranscribeRequest{
 					InputPath:  path,
 					AudioIndex: 0,
@@ -313,7 +313,11 @@ func newDebugCommentaryCmd() *cobra.Command {
 
 				fmt.Printf("Similarity: %.3f", sim)
 				if sim >= cfg.Commentary.SimilarityThreshold {
-					fmt.Printf(" (>= %.3f, likely stereo downmix)\n", cfg.Commentary.SimilarityThreshold)
+					classification := "likely duplicate/core of primary"
+					if candidate.Channels == 2 {
+						classification = "likely stereo downmix of primary"
+					}
+					fmt.Printf(" (>= %.3f, %s)\n", cfg.Commentary.SimilarityThreshold, classification)
 					continue
 				}
 				fmt.Println()
@@ -367,7 +371,7 @@ Commentary tracks include:
 NOT commentary:
 - Alternate language dubs
 - Audio descriptions for visually impaired
-- Stereo downmix of main audio
+- Duplicate program audio
 - Isolated music/effects tracks
 
 Respond ONLY with JSON: {"decision": "commentary" or "not_commentary", "confidence": 0.0-1.0, "reason": "brief explanation"}`

@@ -95,18 +95,30 @@ func TestAllowedAudioLanguageKeepsEnglishAndUnknown(t *testing.T) {
 	}
 }
 
-func TestShouldExcludeAsDownmixRequiresNonCommentaryClassification(t *testing.T) {
+func TestClassifySimilarityExclusion(t *testing.T) {
 	const (
-		forrestGumpSimilarity = 0.9322
-		threshold             = 0.920
+		similarity = 0.9322
+		threshold  = 0.920
 	)
 	commentary := &ripspec.CommentaryTrackRef{Index: 5, Confidence: 0.99}
 
-	if shouldExcludeAsDownmix(forrestGumpSimilarity, threshold, commentary) {
-		t.Fatal("high transcript similarity overrode commentary classification")
+	tests := []struct {
+		name       string
+		channels   int
+		commentary *ripspec.CommentaryTrackRef
+		want       string
+	}{
+		{"stereo", 2, nil, "stereo downmix of primary"},
+		{"multichannel", 6, nil, "duplicate/core of primary"},
+		{"commentary is preserved", 2, commentary, ""},
 	}
-	if !shouldExcludeAsDownmix(forrestGumpSimilarity, threshold, nil) {
-		t.Fatal("high-similarity non-commentary track was not identified as a downmix")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifySimilarityExclusion(tt.channels, similarity, threshold, tt.commentary)
+			if got != tt.want {
+				t.Fatalf("classifySimilarityExclusion() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
