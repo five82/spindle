@@ -22,18 +22,16 @@ Queue writes go through the daemon HTTP API. Stopped-daemon exceptions:
 `status` / `queue list` / `queue show` fall back to a direct read-only DB
 read, and `queue clear --all` deletes the transient queue DB files.
 
-Related repos: `../reel` (AV1 encoder used as a library),
-`../flyer` (read-only TUI, the HTTP API's one consumer).
-
 ## Related Repos
 
 | Repo | Path | Role |
 |------|------|------|
-| flyer | `~/projects/flyer/` | Read-only TUI for Spindle |
+| flyer | `~/projects/flyer/` | Read-only terminal UI for Spindle |
+| reel | `~/projects/reel/` | AV1 encoder embedded by Spindle |
+| shuttle | `~/projects/shuttle/` | Read-only native macOS monitor for Spindle |
 | spindle | `~/projects/spindle/` | Daemon + CLI (this repo) |
-| reel | `~/projects/reel/` | Encoder invoked by Spindle |
 
-GitHub: [flyer](https://github.com/five82/flyer) | [spindle](https://github.com/five82/spindle) | [reel](https://github.com/five82/reel)
+GitHub: [flyer](https://github.com/five82/flyer) | [reel](https://github.com/five82/reel) | [shuttle](https://github.com/five82/shuttle) | [spindle](https://github.com/five82/spindle)
 
 ## Complexity budget
 
