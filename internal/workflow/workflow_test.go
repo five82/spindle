@@ -136,9 +136,6 @@ func TestUserStoppedItemIsNotRecordedAsStageSuccess(t *testing.T) {
 	if err := store.MoveToStage(item, queue.StageOrganizing); err != nil {
 		t.Fatalf("move item: %v", err)
 	}
-	if err := store.StartStage(item); err != nil {
-		t.Fatalf("start stage: %v", err)
-	}
 
 	statusTracker := httpapi.NewStatusTracker(nil)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -450,7 +447,7 @@ func TestSchedulerCancelsWorkerOnUserStop(t *testing.T) {
 			t.Fatalf("tasks: %v", err)
 		}
 		if got.Stage == queue.StageFailed && got.UserStopped() &&
-			len(tasks) == 2 && tasks[0].State == queue.TaskPending && got.InProgress == 0 {
+			len(tasks) == 2 && tasks[0].State == queue.TaskPending {
 			if got.FailedAtStage != queue.StageIdentification {
 				t.Fatalf("failed_at_stage = %q, want identification", got.FailedAtStage)
 			}
@@ -569,9 +566,6 @@ func TestFinalizeItemLagsStageLabelDuringOverlap(t *testing.T) {
 	if err := store.EnsureTasks(item, manager.pipeline.specs); err != nil {
 		t.Fatalf("ensure: %v", err)
 	}
-	if err := store.StartStage(item); err != nil {
-		t.Fatalf("start stage: %v", err)
-	}
 
 	// Mark ripping done while an encoding worker is registered as live
 	// (the 4d overlap: encoder running, rips just finished).
@@ -595,9 +589,6 @@ func TestFinalizeItemLagsStageLabelDuringOverlap(t *testing.T) {
 	}
 	if got.Stage != queue.StageRipping {
 		t.Fatalf("stage label = %q, want ripping (label lags while sibling worker is live)", got.Stage)
-	}
-	if got.InProgress != 1 {
-		t.Fatalf("in_progress = %d, want 1 (must stay set while a worker is live)", got.InProgress)
 	}
 
 	tasks, err = store.TasksForItem(item.ID)

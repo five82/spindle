@@ -19,7 +19,6 @@ CREATE TABLE IF NOT EXISTS queue_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     disc_title TEXT,
     stage TEXT NOT NULL,
-    in_progress INTEGER NOT NULL DEFAULT 0,
     failed_at_stage TEXT,
     error_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -126,7 +125,7 @@ func isBusyError(err error) bool {
 }
 
 // allColumns is the column list for SELECT queries.
-const allColumns = `id, disc_title, stage, in_progress, failed_at_stage, error_message,
+const allColumns = `id, disc_title, stage, failed_at_stage, error_message,
     created_at, updated_at, rip_spec_data, disc_fingerprint, metadata_json,
     needs_review, review_reason, encoding_details_json, user_stopped`
 
@@ -140,7 +139,7 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 	var stage string
 
 	err := row.Scan(
-		&it.ID, &discTitle, &stage, &it.InProgress,
+		&it.ID, &discTitle, &stage,
 		&failedAtStage, &errorMessage,
 		&createdAt, &updatedAt,
 		&ripSpecData, &discFingerprint, &metadataJSON,
@@ -244,40 +243,9 @@ func (s *Store) FindByFingerprint(fp string) (*Item, error) {
 	return it, nil
 }
 
-// StartStage marks an item as actively processing. Progress lives on the
-// task rows, so there is nothing to reset here.
-func (s *Store) StartStage(item *Item) error {
-	item.InProgress = 1
-	return retryOnBusy(func() error {
-		_, err := s.db.Exec(`
-			UPDATE queue_items SET in_progress = 1, updated_at = CURRENT_TIMESTAMP
-			WHERE id = ?`,
-			item.ID,
-		)
-		if err != nil {
-			return fmt.Errorf("start item %d: %w", item.ID, err)
-		}
-		return nil
-	})
-}
-
-// ClearInProgress releases an item's active-processing flag without changing
-// stage ownership or work products.
-func (s *Store) ClearInProgress(item *Item) error {
-	item.InProgress = 0
-	return retryOnBusy(func() error {
-		_, err := s.db.Exec(`UPDATE queue_items SET in_progress = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, item.ID)
-		if err != nil {
-			return fmt.Errorf("clear in_progress item %d: %w", item.ID, err)
-		}
-		return nil
-	})
-}
-
 // MoveToStage routes an item to a new stage without touching work products.
 func (s *Store) MoveToStage(item *Item, stage Stage) error {
 	item.Stage = stage
-	item.InProgress = 0
 	// The item's position changed out from under the scheduler: drop its
 	// task rows so they recompile from the new stage.
 	if err := s.DeleteTasks(item.ID); err != nil {
@@ -286,7 +254,7 @@ func (s *Store) MoveToStage(item *Item, stage Stage) error {
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`
 			UPDATE queue_items SET
-				stage = ?, in_progress = 0,
+				stage = ?,
 				failed_at_stage = NULL, error_message = NULL,
 				updated_at = CURRENT_TIMESTAMP
 			WHERE id = ?`,
@@ -323,22 +291,16 @@ func (s *Store) execUnlessStopped(item *Item, label string, mutate func(), query
 	})
 }
 
-// CompleteStage finalizes a successful stage execution. If advance is true,
-// the item moves to nextStage; otherwise only in_progress is cleared. A
+// CompleteStage moves an item to nextStage once its workers have drained. A
 // user-stopped item keeps its failed/stopped state even if a handler finishes
 // after the stop request.
-func (s *Store) CompleteStage(item *Item, nextStage Stage, advance bool) error {
-	if !advance {
-		return s.ClearInProgress(item)
-	}
-
+func (s *Store) CompleteStage(item *Item, nextStage Stage) error {
 	return s.execUnlessStopped(item, fmt.Sprintf("complete stage item %d", item.ID), func() {
 		item.Stage = nextStage
-		item.InProgress = 0
 		item.userStopped = 0
 	}, `
 		UPDATE queue_items SET
-			stage = ?, in_progress = 0,
+			stage = ?,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND user_stopped = 0`,
 		string(nextStage), item.ID,
@@ -350,13 +312,12 @@ func (s *Store) CompleteStage(item *Item, nextStage Stage, advance bool) error {
 func (s *Store) FailStage(item *Item, failedAt Stage, errMsg string) error {
 	return s.execUnlessStopped(item, fmt.Sprintf("fail item %d at %s", item.ID, failedAt), func() {
 		item.Stage = StageFailed
-		item.InProgress = 0
 		item.FailedAtStage = failedAt
 		item.ErrorMessage = errMsg
 		item.userStopped = 0
 	}, `
 		UPDATE queue_items SET
-			stage = ?, in_progress = 0,
+			stage = ?,
 			failed_at_stage = ?, error_message = ?,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND user_stopped = 0`,
@@ -377,7 +338,7 @@ func (s *Store) UpdateDiscTitle(item *Item, title string) error {
 }
 
 // UpdateWorkState updates queue-visible work products without changing
-// lifecycle-owned fields such as stage, in_progress, failed_at_stage, or
+// lifecycle-owned fields such as stage, failed_at_stage, or
 // error_message. Stage handlers use this through stage.Session so saving a
 // RipSpec or review update cannot accidentally advance, retry, or un-fail an
 // item.
@@ -530,17 +491,6 @@ func (s *Store) Stats() (map[Stage]int, error) {
 	return result, rows.Err()
 }
 
-// ResetInProgress clears in_progress on all items (startup recovery).
-func (s *Store) ResetInProgress() error {
-	return retryOnBusy(func() error {
-		_, err := s.db.Exec("UPDATE queue_items SET in_progress = 0, updated_at = CURRENT_TIMESTAMP WHERE in_progress = 1")
-		if err != nil {
-			return fmt.Errorf("reset in progress: %w", err)
-		}
-		return nil
-	})
-}
-
 // RetryFailed routes failed items back to their retry point.
 // Uses failed_at_stage if set, otherwise falls back to identification.
 // Returns the number of items actually retried.
@@ -574,7 +524,7 @@ func (s *Store) RetryFailed(ids ...int64) (int, error) {
 
 			_, err = s.db.Exec(`
 				UPDATE queue_items SET
-					stage = ?, in_progress = 0,
+					stage = ?,
 					failed_at_stage = NULL, error_message = NULL,
 					needs_review = 0, review_reason = NULL, user_stopped = 0,
 					updated_at = CURRENT_TIMESTAMP
@@ -601,7 +551,7 @@ func (s *Store) RetryWithRipSpec(id int64, targetStage Stage, ripSpecData string
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`
 			UPDATE queue_items SET
-				stage = ?, in_progress = 0,
+				stage = ?,
 				failed_at_stage = NULL, error_message = NULL,
 				needs_review = 0, review_reason = NULL, user_stopped = 0,
 				rip_spec_data = ?,
@@ -643,7 +593,6 @@ func (s *Store) StopItems(ids ...int64) (int, error) {
 			// and encode state, but everything else re-runs from scratch).
 			stoppedAt := item.Stage
 			item.Stage = StageFailed
-			item.InProgress = 0
 			item.userStopped = 1
 			item.AppendReviewReason(ReviewReasonUserStopped)
 
@@ -653,7 +602,7 @@ func (s *Store) StopItems(ids ...int64) (int, error) {
 
 			_, err = s.db.Exec(`
 				UPDATE queue_items SET
-					stage = ?, in_progress = 0, failed_at_stage = ?,
+					stage = ?, failed_at_stage = ?,
 					needs_review = ?, review_reason = ?, user_stopped = 1,
 					updated_at = CURRENT_TIMESTAMP
 				WHERE id = ?`,

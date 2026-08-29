@@ -271,14 +271,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("another daemon instance is running (lock: %s)", lockPath)
 	}
 
-	// Startup recovery: reset any stale in-progress items and running tasks.
-	if err := store.ResetInProgress(); err != nil {
-		logger.Error("startup recovery failed",
-			"event_type", "startup_recovery_failed",
-			"error_hint", "failed to reset in_progress flags on startup",
-			"error", err,
-		)
-	}
+	// Startup recovery: reset any stale running tasks.
 	if err := store.ResetRunningTasks(); err != nil {
 		logger.Error("startup recovery failed",
 			"event_type", "startup_recovery_failed",
@@ -399,14 +392,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Wait for workflow to finish.
 	wg.Wait()
 
-	// Shutdown recovery: clear in-progress flags and running tasks.
-	if err := store.ResetInProgress(); err != nil {
-		logger.Error("shutdown recovery failed",
-			"event_type", "shutdown_recovery_failed",
-			"error_hint", "failed to reset in_progress flags on shutdown",
-			"error", err,
-		)
-	}
+	// Shutdown recovery: clear running tasks.
 	if err := store.ResetRunningTasks(); err != nil {
 		logger.Error("shutdown recovery failed",
 			"event_type", "shutdown_recovery_failed",

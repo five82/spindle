@@ -598,23 +598,8 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 		}
 		m.noteTaskGranted(task, claims)
 
-		// Mark in_progress for the first worker of an overlap window;
-		// sibling branches already hold the flag.
-		if item.InProgress == 0 {
-			if err := m.store.StartStage(item); err != nil {
-				m.release(claims, holder)
-				p.logger.Error("persist in_progress failed",
-					"event_type", "progress_persist_failed",
-					"error_hint", "failed to persist in_progress flag",
-					"item_id", item.ID,
-					"error", err,
-				)
-				continue
-			}
-		}
 		if err := m.store.StartTask(task); err != nil {
 			m.release(claims, holder)
-			_ = m.store.ClearInProgress(item)
 			p.logger.Error("persist task start failed",
 				"event_type", "task_persist_failed",
 				"error_hint", "failed to mark task running",
@@ -630,7 +615,6 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 			cancelTask()
 			m.release(claims, holder)
 			_ = m.store.FinishTask(task, queue.TaskPending, "")
-			_ = m.store.ClearInProgress(item)
 			continue
 		}
 
@@ -877,7 +861,7 @@ func (m *Manager) finalizeItem(itemID int64) {
 	if derived == item.Stage {
 		return
 	}
-	if err := m.store.CompleteStage(item, derived, true); err != nil {
+	if err := m.store.CompleteStage(item, derived); err != nil {
 		m.reportPersistenceFailure(p.logger.With("item_id", itemID), err,
 			"completion_persist_failed", "failed to persist derived stage", itemID)
 		return

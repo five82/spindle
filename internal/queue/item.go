@@ -33,7 +33,6 @@ type Item struct {
 	ID                  int64
 	DiscTitle           string
 	Stage               Stage
-	InProgress          int
 	FailedAtStage       Stage
 	ErrorMessage        string
 	CreatedAt           string

@@ -34,9 +34,6 @@ func TestNewDiscDefaults(t *testing.T) {
 	if item.DiscFingerprint != "abc123" {
 		t.Errorf("fingerprint = %q, want %q", item.DiscFingerprint, "abc123")
 	}
-	if item.InProgress != 0 {
-		t.Errorf("in_progress = %d, want 0", item.InProgress)
-	}
 	if item.NeedsReview != 0 {
 		t.Errorf("needs_review = %d, want 0", item.NeedsReview)
 	}
@@ -127,9 +124,6 @@ func TestLifecycleAndTitleUpdates(t *testing.T) {
 	if err := store.MoveToStage(item, StageEncoding); err != nil {
 		t.Fatalf("move stage: %v", err)
 	}
-	if err := store.StartStage(item); err != nil {
-		t.Fatalf("start stage: %v", err)
-	}
 	if err := store.UpdateDiscTitle(item, "Updated Title"); err != nil {
 		t.Fatalf("update title: %v", err)
 	}
@@ -140,9 +134,6 @@ func TestLifecycleAndTitleUpdates(t *testing.T) {
 	}
 	if got.Stage != StageEncoding {
 		t.Errorf("stage = %q, want %q", got.Stage, StageEncoding)
-	}
-	if got.InProgress != 1 {
-		t.Errorf("in_progress = %d, want 1", got.InProgress)
 	}
 	if got.DiscTitle != "Updated Title" {
 		t.Errorf("title = %q, want %q", got.DiscTitle, "Updated Title")
@@ -302,22 +293,6 @@ func TestStatsCountsRunningTaskDuringOverlap(t *testing.T) {
 	}
 }
 
-func TestResetInProgress(t *testing.T) {
-	store := openTestStore(t)
-
-	item, _ := store.NewDisc("A", "fp1")
-	_ = store.StartStage(item)
-
-	if err := store.ResetInProgress(); err != nil {
-		t.Fatalf("reset: %v", err)
-	}
-
-	got, _ := store.GetByID(item.ID)
-	if got.InProgress != 0 {
-		t.Errorf("in_progress = %d, want 0", got.InProgress)
-	}
-}
-
 func TestRetryFailedAll(t *testing.T) {
 	store := openTestStore(t)
 
@@ -386,7 +361,6 @@ func TestStopItemsAndOverride(t *testing.T) {
 
 	item, _ := store.NewDisc("A", "fp1")
 	_ = store.MoveToStage(item, StageEncoding)
-	_ = store.StartStage(item)
 
 	if _, err := store.StopItems(item.ID); err != nil {
 		t.Fatalf("stop: %v", err)
@@ -422,14 +396,11 @@ func TestStopItemsAndOverride(t *testing.T) {
 func TestLifecycleMethodsDoNotOverrideUserStoppedItem(t *testing.T) {
 	store := openTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
-	if err := store.StartStage(item); err != nil {
-		t.Fatalf("start stage: %v", err)
-	}
 	if _, err := store.StopItems(item.ID); err != nil {
 		t.Fatalf("stop item: %v", err)
 	}
 
-	if err := store.CompleteStage(item, StageCompleted, true); err != nil {
+	if err := store.CompleteStage(item, StageCompleted); err != nil {
 		t.Fatalf("complete stopped item: %v", err)
 	}
 	got, _ := store.GetByID(item.ID)

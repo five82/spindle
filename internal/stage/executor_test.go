@@ -36,9 +36,6 @@ func openExecutorTestStore(t *testing.T) *queue.Store {
 func TestExecuteWorkflowStageMarksFailure(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
-	if err := store.StartStage(item); err != nil {
-		t.Fatalf("StartStage: %v", err)
-	}
 	stageErr := errors.New("boom")
 
 	res, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
@@ -50,17 +47,14 @@ func TestExecuteWorkflowStageMarksFailure(t *testing.T) {
 		t.Fatalf("result err=%v failed=%v, want stage error and failed", err, res.Failed)
 	}
 	got, _ := store.GetByID(item.ID)
-	if got.Stage != queue.StageFailed || got.InProgress != 0 || got.FailedAtStage != queue.StageIdentification || got.ErrorMessage != "boom" {
-		t.Fatalf("failed state = stage:%q in_progress:%d failed_at:%q err:%q", got.Stage, got.InProgress, got.FailedAtStage, got.ErrorMessage)
+	if got.Stage != queue.StageFailed || got.FailedAtStage != queue.StageIdentification || got.ErrorMessage != "boom" {
+		t.Fatalf("failed state = stage:%q failed_at:%q err:%q", got.Stage, got.FailedAtStage, got.ErrorMessage)
 	}
 }
 
 func TestExecuteWorkflowStageClassifiesKilledSubprocessAsCancellation(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
-	if err := store.StartStage(item); err != nil {
-		t.Fatalf("StartStage: %v", err)
-	}
 
 	// Subprocess stages surface a context-cancel kill as an exec error, not
 	// context.Canceled. With the stage context cancelled, that must classify
@@ -79,8 +73,8 @@ func TestExecuteWorkflowStageClassifiesKilledSubprocessAsCancellation(t *testing
 		t.Fatalf("result canceled=%v failed=%v err=%v, want cancellation", res.Canceled, res.Failed, err)
 	}
 	got, _ := store.GetByID(item.ID)
-	if got.Stage == queue.StageFailed || got.InProgress != 0 {
-		t.Fatalf("item state = stage:%q in_progress:%d, want unchanged stage with in_progress cleared", got.Stage, got.InProgress)
+	if got.Stage == queue.StageFailed {
+		t.Fatalf("item state = stage:%q, want unchanged stage", got.Stage)
 	}
 }
 
@@ -94,9 +88,6 @@ func TestExecuteWorkflowStageTreatsDegradedAsSuccess(t *testing.T) {
 	if err := store.UpdateWorkState(item); err != nil {
 		t.Fatalf("update work state: %v", err)
 	}
-	if err := store.StartStage(item); err != nil {
-		t.Fatalf("StartStage: %v", err)
-	}
 
 	res, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
 		Store:   store,
@@ -106,17 +97,14 @@ func TestExecuteWorkflowStageTreatsDegradedAsSuccess(t *testing.T) {
 	if err != nil || !res.Degraded || res.DegradedMsg != "soft" {
 		t.Fatalf("result err=%v degraded=%v msg=%q", err, res.Degraded, res.DegradedMsg)
 	}
-	if item.Stage != queue.StageIdentification || item.InProgress != 1 {
-		t.Fatalf("scheduler-owned state = stage:%q in_progress:%d", item.Stage, item.InProgress)
+	if item.Stage != queue.StageIdentification {
+		t.Fatalf("scheduler-owned state = stage:%q", item.Stage)
 	}
 }
 
-func TestExecuteWorkflowStageCancellationClearsInProgress(t *testing.T) {
+func TestExecuteWorkflowStageCancellationLeavesStage(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
-	if err := store.StartStage(item); err != nil {
-		t.Fatalf("StartStage: %v", err)
-	}
 
 	res, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
 		Store:   store,
@@ -127,12 +115,12 @@ func TestExecuteWorkflowStageCancellationClearsInProgress(t *testing.T) {
 		t.Fatalf("result err=%v canceled=%v, want context cancellation", err, res.Canceled)
 	}
 	got, _ := store.GetByID(item.ID)
-	if got.Stage != queue.StageIdentification || got.InProgress != 0 {
-		t.Fatalf("canceled state = stage:%q in_progress:%d", got.Stage, got.InProgress)
+	if got.Stage != queue.StageIdentification {
+		t.Fatalf("canceled state = stage:%q", got.Stage)
 	}
 }
 
-func TestExecuteWorkflowStageOneShotClearsWithoutAdvancing(t *testing.T) {
+func TestExecuteWorkflowStageOneShotDoesNotAdvance(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
 
@@ -147,8 +135,8 @@ func TestExecuteWorkflowStageOneShotClearsWithoutAdvancing(t *testing.T) {
 		t.Fatalf("result err=%v failed=%v degraded=%v canceled=%v", err, res.Failed, res.Degraded, res.Canceled)
 	}
 	got, _ := store.GetByID(item.ID)
-	if got.Stage != queue.StageIdentification || got.InProgress != 0 {
-		t.Fatalf("one-shot state = stage:%q in_progress:%d", got.Stage, got.InProgress)
+	if got.Stage != queue.StageIdentification {
+		t.Fatalf("one-shot state = stage:%q", got.Stage)
 	}
 }
 
@@ -168,8 +156,8 @@ func TestExecuteWorkflowStageOneShotFailureDoesNotFailItem(t *testing.T) {
 		t.Fatalf("result err=%v failed=%v, want wrapped stage error and failed", err, res.Failed)
 	}
 	got, _ := store.GetByID(item.ID)
-	if got.Stage != queue.StageIdentification || got.InProgress != 0 || got.FailedAtStage != "" || got.ErrorMessage != "" {
-		t.Fatalf("one-shot failure state = stage:%q in_progress:%d failed_at:%q err:%q", got.Stage, got.InProgress, got.FailedAtStage, got.ErrorMessage)
+	if got.Stage != queue.StageIdentification || got.FailedAtStage != "" || got.ErrorMessage != "" {
+		t.Fatalf("one-shot failure state = stage:%q failed_at:%q err:%q", got.Stage, got.FailedAtStage, got.ErrorMessage)
 	}
 }
 
@@ -189,8 +177,8 @@ func TestExecuteWorkflowStageOneShotTreatsDegradedAsError(t *testing.T) {
 		t.Fatalf("result err=%v failed=%v degraded=%v, want degraded error treated as failure", err, res.Failed, res.Degraded)
 	}
 	got, _ := store.GetByID(item.ID)
-	if got.Stage != queue.StageIdentification || got.InProgress != 0 {
-		t.Fatalf("one-shot degraded state = stage:%q in_progress:%d", got.Stage, got.InProgress)
+	if got.Stage != queue.StageIdentification {
+		t.Fatalf("one-shot degraded state = stage:%q", got.Stage)
 	}
 }
 
@@ -215,9 +203,6 @@ func TestExecuteWorkflowStageOneShotIgnoresCompletionPersistenceError(t *testing
 func TestExecuteWorkflowStageReturnsPersistenceError(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
-	if err := store.StartStage(item); err != nil {
-		t.Fatalf("StartStage: %v", err)
-	}
 	_ = store.Close()
 
 	res, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{

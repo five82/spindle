@@ -20,7 +20,6 @@ type ItemResponse struct {
 	DisplayTitle            string             `json:"displayTitle"`
 	DiscNumber              int                `json:"discNumber,omitempty"`
 	Stage                   string             `json:"stage"`
-	InProgress              bool               `json:"inProgress"`
 	FailedAtStage           string             `json:"failedAtStage,omitempty"`
 	ErrorMessage            string             `json:"errorMessage,omitempty"`
 	CreatedAt               string             `json:"createdAt"`
@@ -271,7 +270,6 @@ func ToItemResponse(item *queue.Item, tasks []*queue.Task, includeRipSpec bool) 
 		DiscTitle:       item.DiscTitle,
 		DisplayTitle:    item.DisplayTitle(),
 		Stage:           string(item.Stage),
-		InProgress:      item.InProgress != 0,
 		FailedAtStage:   string(item.FailedAtStage),
 		ErrorMessage:    item.ErrorMessage,
 		CreatedAt:       item.CreatedAt,

@@ -164,8 +164,7 @@ func (s *Store) EnsureTasks(item *Item, specs []TaskSpec) error {
 // ReadyTasks returns pending tasks whose dependencies are all done, for
 // items that are eligible to run (not failed/completed, not user-stopped),
 // ordered oldest item first. Readiness is purely dependency- and
-// eligibility-derived: the item's in_progress flag stays a display/detection
-// signal, and same-item dispatch policy belongs to the scheduler.
+// eligibility-derived; same-item dispatch policy belongs to the scheduler.
 func (s *Store) ReadyTasks() ([]*Task, error) {
 	rows, err := s.db.Query(`
 		SELECT `+taskColumnsPrefixed+`
@@ -295,7 +294,7 @@ func (s *Store) FinishTask(t *Task, state TaskState, errMsg string) error {
 }
 
 // ResetRunningTasks reverts running tasks to pending. Called on daemon
-// startup and shutdown, mirroring ResetInProgress for items.
+// startup and shutdown.
 func (s *Store) ResetRunningTasks() error {
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`UPDATE tasks SET state = ? WHERE state = ?`, string(TaskPending), string(TaskRunning))
