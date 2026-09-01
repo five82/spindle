@@ -938,7 +938,12 @@ func computeGrainTreatments(stats []ripspec.EncodeStats) []GrainTreatmentEntry {
 		if s.GrainTreatment == nil {
 			continue
 		}
-		out = append(out, GrainTreatmentEntry{EpisodeKey: s.EpisodeKey, GrainTreatment: *s.GrainTreatment})
+		entry := GrainTreatmentEntry{EpisodeKey: s.EpisodeKey, GrainTreatment: *s.GrainTreatment}
+		pixels := float64(s.Width) * float64(s.Height) * float64(s.Frames)
+		if pixels > 0 && s.EncodedSizeBytes > 0 {
+			entry.DeliveredBPP = float64(s.EncodedSizeBytes) * 8 / pixels
+		}
+		out = append(out, entry)
 	}
 	return out
 }
@@ -1237,6 +1242,34 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 			Category: "encoding",
 			Message: fmt.Sprintf("%d treated encode(s) measured a denoise ceiling below the band top: %s",
 				len(lowCeilings), strings.Join(lowCeilings, "; ")),
+		})
+	}
+
+	// The gate predicts what a title costs at the quality target; the
+	// finished encode is the ground truth. An untreated title delivered at or
+	// above the treat cutoff recorded at encode time is a gate false negative
+	// (the American Hustle class: cheap at the gate CRF, expensive at the
+	// target). The 1.1 factor absorbs audio bytes (DeliveredBPP is whole-file)
+	// plus margin; a zero cutoff means the gate did not run (off/override),
+	// where the verdict was a choice, not a prediction.
+	var missedTreatments []string
+	for _, g := range a.GrainTreatments {
+		if g.Treated || g.LightBPPCutoff <= 0 || g.DeliveredBPP < 1.1*g.LightBPPCutoff {
+			continue
+		}
+		name := g.EpisodeKey
+		if name == "" {
+			name = "encode"
+		}
+		missedTreatments = append(missedTreatments,
+			fmt.Sprintf("%s: delivered %.4f bpp vs treat cutoff %.4f", name, g.DeliveredBPP, g.LightBPPCutoff))
+	}
+	if len(missedTreatments) > 0 {
+		anomalies = append(anomalies, Anomaly{
+			Severity: "warning",
+			Category: "encoding",
+			Message: fmt.Sprintf("%d untreated encode(s) delivered above the grain-treatment cutoff (gate false negative): %s",
+				len(missedTreatments), strings.Join(missedTreatments, "; ")),
 		})
 	}
 

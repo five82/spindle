@@ -535,6 +535,34 @@ func TestDetectAnomalies_RecordedBandTopWins(t *testing.T) {
 	}
 }
 
+// The finished encode is ground truth: an untreated title delivered above the
+// treat cutoff recorded at encode time is a gate false negative. A clean
+// untreated title below the line and an off/override verdict (no cutoff
+// recorded) stay silent.
+func TestDetectAnomalies_UntreatedDeliveredAboveCutoff(t *testing.T) {
+	a := &Analysis{GrainTreatments: []GrainTreatmentEntry{
+		{EpisodeKey: "main", DeliveredBPP: 0.0905, GrainTreatment: ripspec.GrainTreatment{
+			LightBPPCutoff: 0.0703,
+		}},
+		{EpisodeKey: "clean", DeliveredBPP: 0.02, GrainTreatment: ripspec.GrainTreatment{
+			LightBPPCutoff: 0.0703,
+		}},
+		{EpisodeKey: "gate-off", DeliveredBPP: 0.5, GrainTreatment: ripspec.GrainTreatment{}},
+	}}
+
+	anomalies := detectAnomalies(&Report{}, a)
+	if len(anomalies) != 1 || anomalies[0].Severity != "warning" || anomalies[0].Category != "encoding" {
+		t.Fatalf("anomalies = %+v, want one encoding warning", anomalies)
+	}
+	if !strings.Contains(anomalies[0].Message, "gate false negative") ||
+		!strings.Contains(anomalies[0].Message, "main: delivered 0.0905 bpp vs treat cutoff 0.0703") {
+		t.Fatalf("unexpected anomaly message: %s", anomalies[0].Message)
+	}
+	if strings.Contains(anomalies[0].Message, "clean") || strings.Contains(anomalies[0].Message, "gate-off") {
+		t.Fatalf("anomaly should name only the missed title: %s", anomalies[0].Message)
+	}
+}
+
 // A ceiling at or above the band top is the expected outcome, and an
 // untreated or unmeasured encode has no ceiling to judge.
 func TestDetectAnomalies_DenoiseCeilingAtBandTopIsClean(t *testing.T) {

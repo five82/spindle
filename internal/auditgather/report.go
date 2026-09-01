@@ -398,6 +398,10 @@ type CropAnalysis struct {
 // the JSON stays flat and matches Reel's own field names.
 type GrainTreatmentEntry struct {
 	EpisodeKey string `json:"episode_key,omitempty"`
+	// DeliveredBPP is the finished encode's whole-file bits per pixel per
+	// frame, so the gate's prediction can be checked against what was
+	// actually delivered. Slightly inflated by audio bytes.
+	DeliveredBPP float64 `json:"delivered_bpp,omitempty"`
 	ripspec.GrainTreatment
 }
 
