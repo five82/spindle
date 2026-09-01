@@ -452,6 +452,10 @@ func writeDigestGrainTreatment(b *strings.Builder, r *Report) {
 		if g.Reused {
 			line += " | verdict reused from resume"
 		}
+		if g.EncodedSizeBytes > 0 {
+			line += fmt.Sprintf(" | %s -> %s (-%.1f%%)",
+				fmtBytes(g.OriginalSizeBytes), fmtBytes(g.EncodedSizeBytes), g.SizeReductionPercent)
+		}
 		fmt.Fprintln(b, line)
 		if g.GateStage == "tq_probe" {
 			fmt.Fprintf(b, "  stage 2: ambiguous at fixed CRF (band %.4f to %.4f); delivered %.4f bpp at the quality target (%d probes, %s)\n",

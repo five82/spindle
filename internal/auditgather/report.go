@@ -402,6 +402,12 @@ type GrainTreatmentEntry struct {
 	// frame, so the gate's prediction can be checked against what was
 	// actually delivered. Slightly inflated by audio bytes.
 	DeliveredBPP float64 `json:"delivered_bpp,omitempty"`
+	// Per-episode size outcome, lifted alongside the verdict so multi-episode
+	// discs show each episode's result (the encoding snapshot section only
+	// shows the last episode).
+	OriginalSizeBytes    int64   `json:"original_size_bytes,omitempty"`
+	EncodedSizeBytes     int64   `json:"encoded_size_bytes,omitempty"`
+	SizeReductionPercent float64 `json:"size_reduction_percent,omitempty"`
 	ripspec.GrainTreatment
 }
 

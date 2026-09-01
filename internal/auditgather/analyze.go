@@ -938,7 +938,13 @@ func computeGrainTreatments(stats []ripspec.EncodeStats) []GrainTreatmentEntry {
 		if s.GrainTreatment == nil {
 			continue
 		}
-		entry := GrainTreatmentEntry{EpisodeKey: s.EpisodeKey, GrainTreatment: *s.GrainTreatment}
+		entry := GrainTreatmentEntry{
+			EpisodeKey:           s.EpisodeKey,
+			GrainTreatment:       *s.GrainTreatment,
+			OriginalSizeBytes:    s.OriginalSizeBytes,
+			EncodedSizeBytes:     s.EncodedSizeBytes,
+			SizeReductionPercent: s.SizeReductionPercent,
+		}
 		pixels := float64(s.Width) * float64(s.Height) * float64(s.Frames)
 		if pixels > 0 && s.EncodedSizeBytes > 0 {
 			entry.DeliveredBPP = float64(s.EncodedSizeBytes) * 8 / pixels

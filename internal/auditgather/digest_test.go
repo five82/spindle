@@ -79,14 +79,16 @@ func digestReport() *Report {
 			},
 			EpisodeStats: &EpisodeStats{Count: 2, Matched: 1, Unresolved: 1},
 			GrainTreatments: []GrainTreatmentEntry{
-				{EpisodeKey: "s01_001", GrainTreatment: ripspec.GrainTreatment{
-					Mode: "auto", Treated: true, Tier: "med", ResolutionClass: "2160p",
-					Denoise: "fftdnoiz", GrainTable: "grain-med.tbl",
-					GateCRF: 22, SampleChunks: []int{4, 9, 14, 19, 24},
-					MedianBPP: 0.1310, LightBPPCutoff: 0.0703, MedBPPCutoff: 0.1205,
-					GateSeconds: 200, CeilingSeconds: 62,
-					DenoiseCeilingJODMean: jodPtr(9.88), DenoiseCeilingJODMin: jodPtr(9.81),
-				}},
+				{EpisodeKey: "s01_001",
+					OriginalSizeBytes: 64424509440, EncodedSizeBytes: 9663676416, SizeReductionPercent: 85.0,
+					GrainTreatment: ripspec.GrainTreatment{
+						Mode: "auto", Treated: true, Tier: "med", ResolutionClass: "2160p",
+						Denoise: "fftdnoiz", GrainTable: "grain-med.tbl",
+						GateCRF: 22, SampleChunks: []int{4, 9, 14, 19, 24},
+						MedianBPP: 0.1310, LightBPPCutoff: 0.0703, MedBPPCutoff: 0.1205,
+						GateSeconds: 200, CeilingSeconds: 62,
+						DenoiseCeilingJODMean: jodPtr(9.88), DenoiseCeilingJODMin: jodPtr(9.81),
+					}},
 				{EpisodeKey: "s01_002", GrainTreatment: ripspec.GrainTreatment{
 					Mode: "auto", ResolutionClass: "2160p",
 					GateCRF: 22, SampleChunks: []int{4, 9, 14, 19, 24},
@@ -135,7 +137,8 @@ func TestRenderDigestCoreSections(t *testing.T) {
 		// Grain gate verdict with its honest denoise ceiling.
 		"## Grain treatment (Reel grain gate;",
 		"- s01_001: TREATED med | 2160p | denoise fftdnoiz | table grain-med.tbl | " +
-			"median bpp 0.1310 vs cutoffs light 0.0703 / med 0.1205 | gate crf 22, 5 chunks, 3m20s",
+			"median bpp 0.1310 vs cutoffs light 0.0703 / med 0.1205 | gate crf 22, 5 chunks, 3m20s | " +
+			"60.00 GB -> 9.00 GB (-85.0%)",
 		"  denoise ceiling: JOD mean 9.88 min 9.81 (measured in 1m2s)",
 		"- s01_002: untreated | 2160p | median bpp 0.0412 vs cutoffs light 0.0703 / med 0.1205 | gate crf 22, 5 chunks, 2m58s",
 		"## Digest limits",
