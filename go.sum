@@ -7,8 +7,8 @@ github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkp
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/fatih/color v1.19.0 h1:Zp3PiM21/9Ld6FzSKyL5c/BULoe/ONr9KlbYVOfG8+w=
 github.com/fatih/color v1.19.0/go.mod h1:zNk67I0ZUT1bEGsSGyCZYZNrHuTkJJB+r6Q9VuMi0LE=
-github.com/five82/reel v0.0.0-20260901005528-eca42fb4a0d0 h1:xRNP5ST3nodpC5yfOuEtLXWOsJelJhfZ9df6lx8Qopk=
-github.com/five82/reel v0.0.0-20260901005528-eca42fb4a0d0/go.mod h1:lisnZeTCqjeW3Ga8gbFMbpTzzEsebHHRCaODkQBxcfI=
+github.com/five82/reel v0.0.0-20260901012347-8f3228ea0a3d h1:cVmyFir/WsS8rR5AibAIKt5QBrWssRCNwqVvfcd/oaI=
+github.com/five82/reel v0.0.0-20260901012347-8f3228ea0a3d/go.mod h1:lisnZeTCqjeW3Ga8gbFMbpTzzEsebHHRCaODkQBxcfI=
 github.com/gofrs/flock v0.13.0 h1:95JolYOvGMqeH31+FC7D2+uULf6mG61mEZ/A8dRYMzw=
 github.com/gofrs/flock v0.13.0/go.mod h1:jxeyy9R1auM5S6JYDBhDt+E2TCo7DkratH4Pgi8P+Z0=
 github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3 h1:LMLX+LgTNWpfvCBdFebv6EsYotImrt/Ppc5cXIriCSo=

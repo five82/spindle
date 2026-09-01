@@ -453,6 +453,12 @@ func writeDigestGrainTreatment(b *strings.Builder, r *Report) {
 			line += " | verdict reused from resume"
 		}
 		fmt.Fprintln(b, line)
+		if g.GateStage == "tq_probe" {
+			fmt.Fprintf(b, "  stage 2: ambiguous at fixed CRF (band %.4f to %.4f); delivered %.4f bpp at the quality target (%d probes, %s)\n",
+				g.AmbiguousBPPCutoff, g.LightBPPCutoff, g.Stage2MedianBPP, g.Stage2Probes, fmtSeconds(g.Stage2Seconds))
+		} else if g.Stage2Error != "" {
+			fmt.Fprintf(b, "  stage 2: not measured (%s); stage-1 verdict stands\n", g.Stage2Error)
+		}
 		if !g.Treated {
 			continue
 		}

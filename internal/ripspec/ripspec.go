@@ -327,6 +327,17 @@ type GrainTreatment struct {
 	// Reused marks a verdict replayed from Reel's work directory on resume:
 	// the recorded timings describe the run that measured them.
 	Reused bool `json:"reused,omitempty"`
+
+	// Stage 2 (hybrid gate): titles whose fixed-CRF median lands in the
+	// ambiguous band are re-measured at the quality target; these fields
+	// record that measurement. GateStage is "bpp" or "tq_probe".
+	GateStage          string    `json:"gate_stage,omitempty"`
+	AmbiguousBPPCutoff float64   `json:"ambiguous_bpp_cutoff,omitempty"`
+	Stage2DeliveredBPP []float64 `json:"stage2_delivered_bpp,omitempty"`
+	Stage2MedianBPP    float64   `json:"stage2_median_bpp,omitempty"`
+	Stage2Probes       int       `json:"stage2_probes,omitempty"`
+	Stage2Seconds      float64   `json:"stage2_seconds,omitempty"`
+	Stage2Error        string    `json:"stage2_error,omitempty"`
 }
 
 // EnvelopeAttributes holds cross-cutting flags and analysis results.

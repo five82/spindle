@@ -419,6 +419,13 @@ func encodeStatsFromResult(key string, result *reel.Result) *ripspec.EncodeStats
 			CeilingError:          g.CeilingError,
 			BandTopJOD:            g.BandTopJOD,
 			Reused:                g.Reused,
+			GateStage:             g.GateStage,
+			AmbiguousBPPCutoff:    g.AmbiguousBPPCutoff,
+			Stage2DeliveredBPP:    g.Stage2DeliveredBPP,
+			Stage2MedianBPP:       g.Stage2MedianBPP,
+			Stage2Probes:          g.Stage2Probes,
+			Stage2Seconds:         g.Stage2Seconds,
+			Stage2Error:           g.Stage2Error,
 		}
 	}
 	return rec

@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/fatih/color v1.19.0
-	github.com/five82/reel v0.0.0-20260901005528-eca42fb4a0d0
+	github.com/five82/reel v0.0.0-20260901012347-8f3228ea0a3d
 	github.com/gofrs/flock v0.13.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pilebones/go-udev v0.10.0
