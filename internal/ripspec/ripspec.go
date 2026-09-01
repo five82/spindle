@@ -280,6 +280,53 @@ type EncodeStats struct {
 	WorkerMax             int                `json:"worker_max,omitempty"`
 	EncodeSlotWaitSeconds float64            `json:"encode_slot_wait_seconds,omitempty"`
 	TargetQuality         json.RawMessage    `json:"target_quality,omitempty"`
+	GrainTreatment        *GrainTreatment    `json:"grain_treatment,omitempty"`
+}
+
+// GrainTreatment mirrors Reel's grain-gate verdict for one encode: what the
+// title's bits-at-CRF measured, which treatment (if any) the encode ran with,
+// and the honest denoise ceiling the reported target-quality scores sit under.
+// Unlike TargetQuality it is typed rather than raw JSON because the item audit
+// renders and range-checks these fields; re-parsing a blob at every read site
+// would cost more than the mirror.
+type GrainTreatment struct {
+	// Mode is how the treatment was decided: "auto" (the gate ran), "off"
+	// (disabled), or "override" (explicit experimental flags).
+	Mode            string `json:"mode,omitempty"`
+	Treated         bool   `json:"treated"`
+	Tier            string `json:"tier,omitempty"`
+	ResolutionClass string `json:"resolution_class,omitempty"`
+	Denoise         string `json:"denoise,omitempty"`
+	GrainTable      string `json:"grain_table,omitempty"`
+	// Reason explains a verdict the numbers alone do not (SD source, no
+	// eligible sample chunks, treatment disabled or overridden).
+	Reason string `json:"reason,omitempty"`
+
+	GateCRF        float64   `json:"gate_crf,omitempty"`
+	SampleChunks   []int     `json:"sample_chunks,omitempty"`
+	SampleBPP      []float64 `json:"sample_bpp,omitempty"`
+	MedianBPP      float64   `json:"median_bpp,omitempty"`
+	LightBPPCutoff float64   `json:"light_bpp_cutoff,omitempty"`
+	MedBPPCutoff   float64   `json:"med_bpp_cutoff,omitempty"`
+	GateSeconds    float64   `json:"gate_seconds,omitempty"`
+	CeilingSeconds float64   `json:"ceiling_seconds,omitempty"`
+
+	// DenoiseCeilingJODMean/Min score the denoised source against the real
+	// source, so they cap what the encode could deliver no matter how well the
+	// CRF search scored against the denoised reference. Measured only for
+	// treated titles, and best effort: nil when the measurement did not run.
+	DenoiseCeilingJODMean *float64 `json:"denoise_ceiling_jod_mean,omitempty"`
+	DenoiseCeilingJODMin  *float64 `json:"denoise_ceiling_jod_min,omitempty"`
+	// CeilingMeasured distinguishes a measured ceiling from a skipped or
+	// failed best-effort measurement; CeilingError says why it is absent.
+	CeilingMeasured bool   `json:"ceiling_measured,omitempty"`
+	CeilingError    string `json:"ceiling_error,omitempty"`
+	// BandTopJOD is the top of Reel's configured target-quality band at
+	// encode time, so ceiling judgments do not hardcode the constant.
+	BandTopJOD float64 `json:"band_top_jod,omitempty"`
+	// Reused marks a verdict replayed from Reel's work directory on resume:
+	// the recorded timings describe the run that measured them.
+	Reused bool `json:"reused,omitempty"`
 }
 
 // EnvelopeAttributes holds cross-cutting flags and analysis results.

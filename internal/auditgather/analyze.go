@@ -18,6 +18,13 @@ import (
 	"github.com/five82/spindle/internal/ripspec"
 )
 
+// grainCeilingFloorJOD is the top of Reel's default target-quality band,
+// used only as a fallback for encodes that did not record band_top_jod. A
+// treated title's denoise ceiling is supposed to sit above the band top so
+// the band remains reachable; a lower ceiling means the denoise itself ate
+// visible quality.
+const grainCeilingFloorJOD = 9.75
+
 func normalizeAuditPath(path string) string {
 	if path == "" {
 		return ""
@@ -129,6 +136,7 @@ func computeAnalysis(r *Report) *Analysis {
 
 	if r.Envelope != nil {
 		a.AssetHealth = computeAssetHealth(&r.Envelope.Assets)
+		a.GrainTreatments = computeGrainTreatments(r.Envelope.Attributes.EncodeStats)
 	}
 
 	a.Anomalies = detectAnomalies(r, a)
@@ -921,6 +929,20 @@ func computeMediaStats(probes []MediaFileProbe) *MediaStats {
 	return ms
 }
 
+// computeGrainTreatments lifts every encode's grain-gate verdict into one
+// list so a TV disc's episodes can be compared side by side. Encodes recorded
+// before Reel reported a verdict carry none and are skipped.
+func computeGrainTreatments(stats []ripspec.EncodeStats) []GrainTreatmentEntry {
+	var out []GrainTreatmentEntry
+	for _, s := range stats {
+		if s.GrainTreatment == nil {
+			continue
+		}
+		out = append(out, GrainTreatmentEntry{EpisodeKey: s.EpisodeKey, GrainTreatment: *s.GrainTreatment})
+	}
+	return out
+}
+
 // computeAssetHealth counts ok/failed/muxed assets per pipeline stage.
 func computeAssetHealth(assets *ripspec.Assets) *AssetHealth {
 	if assets == nil {
@@ -1187,6 +1209,35 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 				Message:  fmt.Sprintf("encoding warning: %s", snap.Warning),
 			})
 		}
+	}
+
+	// The denoise ceiling caps a treated title: target-quality scores are
+	// measured against the denoised reference, so quality the denoiser itself
+	// removed is invisible to the CRF search and never shows up as a missed
+	// band. A ceiling under the band top means the treatment cost more than
+	// the encode was ever allowed to spend.
+	var lowCeilings []string
+	for _, g := range a.GrainTreatments {
+		bandTop := grainCeilingFloorJOD
+		if g.BandTopJOD > 0 {
+			bandTop = g.BandTopJOD
+		}
+		if !g.Treated || g.DenoiseCeilingJODMin == nil || *g.DenoiseCeilingJODMin >= bandTop {
+			continue
+		}
+		name := g.EpisodeKey
+		if name == "" {
+			name = "encode"
+		}
+		lowCeilings = append(lowCeilings, fmt.Sprintf("%s: min %.2f vs band top %.2f (%s tier)", name, *g.DenoiseCeilingJODMin, bandTop, g.Tier))
+	}
+	if len(lowCeilings) > 0 {
+		anomalies = append(anomalies, Anomaly{
+			Severity: "warning",
+			Category: "encoding",
+			Message: fmt.Sprintf("%d treated encode(s) measured a denoise ceiling below the band top: %s",
+				len(lowCeilings), strings.Join(lowCeilings, "; ")),
+		})
 	}
 
 	// Failed assets at any stage.

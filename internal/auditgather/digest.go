@@ -35,6 +35,7 @@ func RenderDigest(r *Report, jsonPath string) string {
 	writeDigestTitleSelection(&b, r)
 	writeDigestEpisodeID(&b, r)
 	writeDigestEncoding(&b, r)
+	writeDigestGrainTreatment(&b, r)
 	writeDigestFinalValidation(&b, r)
 	writeDigestOutputMedia(&b, r)
 	writeDigestAudio(&b, r)
@@ -408,6 +409,63 @@ func writeDigestEncoding(b *strings.Builder, r *Report) {
 				fmt.Fprintf(b, "  - %s: %s %s\n", st.Name, status, st.Details)
 			}
 		}
+	}
+}
+
+// writeDigestGrainTreatment renders Reel's per-encode grain-gate verdict: what
+// the fixed-CRF probe measured, the treatment it chose, and the denoise
+// ceiling that caps what the reported target-quality scores can mean.
+func writeDigestGrainTreatment(b *strings.Builder, r *Report) {
+	if r.Analysis == nil || len(r.Analysis.GrainTreatments) == 0 {
+		return
+	}
+	fmt.Fprintln(b, "\n## Grain treatment (Reel grain gate; ceiling JOD is the honest cap on reported target-quality scores)")
+	for _, g := range r.Analysis.GrainTreatments {
+		name := g.EpisodeKey
+		if name == "" {
+			name = "encode"
+		}
+		status := "untreated"
+		if g.Treated {
+			status = "TREATED " + g.Tier
+		}
+		line := fmt.Sprintf("- %s: %s | %s", name, status, g.ResolutionClass)
+		if g.Mode != "" && g.Mode != "auto" {
+			line += " | mode=" + g.Mode
+		}
+		if g.Denoise != "" {
+			line += " | denoise " + g.Denoise
+		}
+		if g.GrainTable != "" {
+			line += " | table " + g.GrainTable
+		}
+		if g.MedianBPP > 0 {
+			line += fmt.Sprintf(" | median bpp %.4f vs cutoffs light %.4f / med %.4f",
+				g.MedianBPP, g.LightBPPCutoff, g.MedBPPCutoff)
+		}
+		if g.GateCRF > 0 {
+			line += fmt.Sprintf(" | gate crf %.0f, %d chunks, %s", g.GateCRF, len(g.SampleChunks), fmtSeconds(g.GateSeconds))
+		}
+		if g.Reason != "" {
+			line += " | " + g.Reason
+		}
+		if g.Reused {
+			line += " | verdict reused from resume"
+		}
+		fmt.Fprintln(b, line)
+		if !g.Treated {
+			continue
+		}
+		if g.DenoiseCeilingJODMean == nil || g.DenoiseCeilingJODMin == nil {
+			reason := ""
+			if g.CeilingError != "" {
+				reason = ": " + g.CeilingError
+			}
+			fmt.Fprintf(b, "  denoise ceiling: NOT MEASURED (reported scores have no honest cap%s)\n", reason)
+			continue
+		}
+		fmt.Fprintf(b, "  denoise ceiling: JOD mean %.2f min %.2f (measured in %s)\n",
+			*g.DenoiseCeilingJODMean, *g.DenoiseCeilingJODMin, fmtSeconds(g.CeilingSeconds))
 	}
 }
 

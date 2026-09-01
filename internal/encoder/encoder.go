@@ -396,6 +396,31 @@ func encodeStatsFromResult(key string, result *reel.Result) *ripspec.EncodeStats
 			rec.TargetQuality = raw
 		}
 	}
+	if g := s.GrainTreatment; g != nil {
+		rec.GrainTreatment = &ripspec.GrainTreatment{
+			Mode:                  g.Mode,
+			Treated:               g.Treated,
+			Tier:                  g.Tier,
+			ResolutionClass:       g.ResolutionClass,
+			Denoise:               g.Denoise,
+			GrainTable:            g.GrainTable,
+			Reason:                g.Reason,
+			GateCRF:               g.GateCRF,
+			SampleChunks:          g.SampleChunks,
+			SampleBPP:             g.SampleBPP,
+			MedianBPP:             g.MedianBPP,
+			LightBPPCutoff:        g.LightBPPCutoff,
+			MedBPPCutoff:          g.MedBPPCutoff,
+			GateSeconds:           g.GateSeconds,
+			CeilingSeconds:        g.CeilingSeconds,
+			DenoiseCeilingJODMean: g.DenoiseCeilingJODMean,
+			DenoiseCeilingJODMin:  g.DenoiseCeilingJODMin,
+			CeilingMeasured:       g.CeilingMeasured,
+			CeilingError:          g.CeilingError,
+			BandTopJOD:            g.BandTopJOD,
+			Reused:                g.Reused,
+		}
+	}
 	return rec
 }
 

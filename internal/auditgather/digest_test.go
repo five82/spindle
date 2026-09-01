@@ -78,10 +78,28 @@ func digestReport() *Report {
 				},
 			},
 			EpisodeStats: &EpisodeStats{Count: 2, Matched: 1, Unresolved: 1},
+			GrainTreatments: []GrainTreatmentEntry{
+				{EpisodeKey: "s01_001", GrainTreatment: ripspec.GrainTreatment{
+					Mode: "auto", Treated: true, Tier: "med", ResolutionClass: "2160p",
+					Denoise: "fftdnoiz", GrainTable: "grain-med.tbl",
+					GateCRF: 22, SampleChunks: []int{4, 9, 14, 19, 24},
+					MedianBPP: 0.1310, LightBPPCutoff: 0.0703, MedBPPCutoff: 0.1205,
+					GateSeconds: 200, CeilingSeconds: 62,
+					DenoiseCeilingJODMean: jodPtr(9.88), DenoiseCeilingJODMin: jodPtr(9.81),
+				}},
+				{EpisodeKey: "s01_002", GrainTreatment: ripspec.GrainTreatment{
+					Mode: "auto", ResolutionClass: "2160p",
+					GateCRF: 22, SampleChunks: []int{4, 9, 14, 19, 24},
+					MedianBPP: 0.0412, LightBPPCutoff: 0.0703, MedBPPCutoff: 0.1205,
+					GateSeconds: 178,
+				}},
+			},
 		},
 		Errors: []string{"missing log file"},
 	}
 }
+
+func jodPtr(v float64) *float64 { return &v }
 
 func TestRenderDigestCoreSections(t *testing.T) {
 	out := RenderDigest(digestReport(), "/tmp/audit.json")
@@ -114,11 +132,42 @@ func TestRenderDigestCoreSections(t *testing.T) {
 		"A/V sync: FAILED | source offset +501ms -> output +0ms | audio 501ms earlier",
 		// Probe errors must surface even without valid summaries.
 		"PROBE ERROR /x/broken.mkv (s01_002): ffprobe failed",
+		// Grain gate verdict with its honest denoise ceiling.
+		"## Grain treatment (Reel grain gate;",
+		"- s01_001: TREATED med | 2160p | denoise fftdnoiz | table grain-med.tbl | " +
+			"median bpp 0.1310 vs cutoffs light 0.0703 / med 0.1205 | gate crf 22, 5 chunks, 3m20s",
+		"  denoise ceiling: JOD mean 9.88 min 9.81 (measured in 1m2s)",
+		"- s01_002: untreated | 2160p | median bpp 0.0412 vs cutoffs light 0.0703 / med 0.1205 | gate crf 22, 5 chunks, 2m58s",
 		"## Digest limits",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("digest missing %q", want)
 		}
+	}
+}
+
+// A treated encode whose ceiling measurement did not run must say so rather
+// than silently rendering the reported scores as if they had an honest cap.
+func TestRenderDigestGrainCeilingNotMeasured(t *testing.T) {
+	r := digestReport()
+	r.Analysis.GrainTreatments[0].DenoiseCeilingJODMean = nil
+	r.Analysis.GrainTreatments[0].DenoiseCeilingJODMin = nil
+	out := RenderDigest(r, "/tmp/audit.json")
+	if !strings.Contains(out, "denoise ceiling: NOT MEASURED") {
+		t.Error("expected an explicit unmeasured-ceiling line for a treated encode")
+	}
+}
+
+// Untreated verdicts the numbers do not explain (SD, no eligible chunk,
+// disabled, overridden) carry a reason string that must reach the digest.
+func TestRenderDigestGrainReasonAndMode(t *testing.T) {
+	r := digestReport()
+	r.Analysis.GrainTreatments = []GrainTreatmentEntry{{GrainTreatment: ripspec.GrainTreatment{
+		Mode: "off", ResolutionClass: "1080p", Reason: "grain treatment disabled",
+	}}}
+	out := RenderDigest(r, "/tmp/audit.json")
+	if !strings.Contains(out, "- encode: untreated | 1080p | mode=off | grain treatment disabled") {
+		t.Errorf("expected mode and reason on the untreated line, got:\n%s", out)
 	}
 }
 

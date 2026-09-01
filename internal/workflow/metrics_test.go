@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -18,6 +19,8 @@ func TestWriteMetricsRecord(t *testing.T) {
 
 	m := New(nil, nil, nil, slog.Default())
 	m.SetMetricsPath(path)
+
+	ceilingMean, ceilingMin := 9.91, 9.84
 
 	env := ripspec.Envelope{
 		Version: ripspec.CurrentVersion,
@@ -42,6 +45,12 @@ func TestWriteMetricsRecord(t *testing.T) {
 				ResolutionClass: "1080p",
 				EncodeSeconds:   900,
 				Speed:           4.5,
+				GrainTreatment: &ripspec.GrainTreatment{
+					Mode: "auto", Treated: true, Tier: "med", ResolutionClass: "1080p",
+					Denoise: "fftdnoiz", GrainTable: "grain-med.tbl",
+					GateCRF: 22, MedianBPP: 0.52, LightBPPCutoff: 0.2812, MedBPPCutoff: 0.482,
+					DenoiseCeilingJODMean: &ceilingMean, DenoiseCeilingJODMin: &ceilingMin,
+				},
 			}},
 		},
 	}
@@ -87,6 +96,19 @@ func TestWriteMetricsRecord(t *testing.T) {
 	}
 	if len(rec.Encodes) != 1 || rec.Encodes[0].ResolutionClass != "1080p" {
 		t.Errorf("encode stats not carried: %+v", rec.Encodes)
+	}
+	// The grain gate's verdict and its honest denoise ceiling are part of the
+	// durable performance record, so they must survive the envelope round trip
+	// into the metrics line rather than living only in the daemon log.
+	grain := rec.Encodes[0].GrainTreatment
+	if grain == nil || !grain.Treated || grain.Tier != "med" || grain.MedianBPP != 0.52 {
+		t.Fatalf("grain treatment not carried: %+v", grain)
+	}
+	if grain.DenoiseCeilingJODMin == nil || *grain.DenoiseCeilingJODMin != 9.84 {
+		t.Errorf("denoise ceiling not carried: %+v", grain.DenoiseCeilingJODMin)
+	}
+	if !bytes.Contains(data, []byte(`"denoise_ceiling_jod_min":9.84`)) {
+		t.Errorf("metrics line does not expose the ceiling under a queryable name: %s", data)
 	}
 	if len(rec.Stages) != 1 || rec.Stages[0].Stage != "ripping" {
 		t.Fatalf("stages wrong: %+v", rec.Stages)

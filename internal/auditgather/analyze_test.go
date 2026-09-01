@@ -483,6 +483,74 @@ func TestDetectAnomalies_CleanItem(t *testing.T) {
 	}
 }
 
+func TestComputeGrainTreatmentsSkipsEncodesWithoutAVerdict(t *testing.T) {
+	got := computeGrainTreatments([]ripspec.EncodeStats{
+		{EpisodeKey: "s01_001"},
+		{EpisodeKey: "s01_002", GrainTreatment: &ripspec.GrainTreatment{
+			Mode: "auto", Treated: true, Tier: "light", MedianBPP: 0.09,
+		}},
+	})
+	if len(got) != 1 {
+		t.Fatalf("expected only the encode carrying a verdict, got %+v", got)
+	}
+	if got[0].EpisodeKey != "s01_002" || got[0].Tier != "light" {
+		t.Errorf("unexpected lifted verdict: %+v", got[0])
+	}
+}
+
+func TestDetectAnomalies_LowDenoiseCeiling(t *testing.T) {
+	a := &Analysis{GrainTreatments: []GrainTreatmentEntry{
+		{EpisodeKey: "s01_001", GrainTreatment: ripspec.GrainTreatment{
+			Treated: true, Tier: "med",
+			DenoiseCeilingJODMean: jodPtr(9.70), DenoiseCeilingJODMin: jodPtr(9.42),
+		}},
+	}}
+
+	anomalies := detectAnomalies(&Report{}, a)
+	if len(anomalies) != 1 || anomalies[0].Severity != "warning" || anomalies[0].Category != "encoding" {
+		t.Fatalf("anomalies = %+v, want one encoding warning", anomalies)
+	}
+	if !strings.Contains(anomalies[0].Message, "s01_001: min 9.42 vs band top 9.75 (med tier)") {
+		t.Fatalf("unexpected anomaly message: %s", anomalies[0].Message)
+	}
+}
+
+// An encode that recorded its own band top is judged against it, not the
+// fallback constant: a ceiling above 9.75 still warns when the configured
+// band top at encode time was higher.
+func TestDetectAnomalies_RecordedBandTopWins(t *testing.T) {
+	a := &Analysis{GrainTreatments: []GrainTreatmentEntry{
+		{EpisodeKey: "s01_001", GrainTreatment: ripspec.GrainTreatment{
+			Treated: true, Tier: "light", BandTopJOD: 9.90,
+			DenoiseCeilingJODMin: jodPtr(9.80),
+		}},
+	}}
+
+	anomalies := detectAnomalies(&Report{}, a)
+	if len(anomalies) != 1 {
+		t.Fatalf("anomalies = %+v, want one encoding warning", anomalies)
+	}
+	if !strings.Contains(anomalies[0].Message, "s01_001: min 9.80 vs band top 9.90 (light tier)") {
+		t.Fatalf("unexpected anomaly message: %s", anomalies[0].Message)
+	}
+}
+
+// A ceiling at or above the band top is the expected outcome, and an
+// untreated or unmeasured encode has no ceiling to judge.
+func TestDetectAnomalies_DenoiseCeilingAtBandTopIsClean(t *testing.T) {
+	a := &Analysis{GrainTreatments: []GrainTreatmentEntry{
+		{EpisodeKey: "ok", GrainTreatment: ripspec.GrainTreatment{
+			Treated: true, Tier: "med", DenoiseCeilingJODMin: jodPtr(grainCeilingFloorJOD),
+		}},
+		{EpisodeKey: "unmeasured", GrainTreatment: ripspec.GrainTreatment{Treated: true, Tier: "light"}},
+		{EpisodeKey: "untreated", GrainTreatment: ripspec.GrainTreatment{DenoiseCeilingJODMin: jodPtr(1.0)}},
+	}}
+
+	if anomalies := detectAnomalies(&Report{}, a); len(anomalies) != 0 {
+		t.Fatalf("expected no anomalies, got %+v", anomalies)
+	}
+}
+
 func TestDetectAnomalies_SourceTimelineNormalizationIsInformational(t *testing.T) {
 	r := &Report{Logs: &LogAnalysis{Decisions: []LogDecision{
 		{

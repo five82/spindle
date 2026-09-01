@@ -2,6 +2,7 @@ package encoder
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -168,6 +169,49 @@ func TestProgressThrottle_FirstCallAlwaysProceeds(t *testing.T) {
 	now := reporter.now()
 	if now.Sub(reporter.lastPush) < throttleInterval {
 		t.Error("first call should always proceed regardless of throttle interval")
+	}
+}
+
+// The grain gate's verdict is only observable downstream if the mapping into
+// the envelope copies it; a field dropped here is invisible in metrics.jsonl
+// and in the item audit.
+func TestEncodeStatsFromResult_CarriesGrainTreatment(t *testing.T) {
+	mean, min := 9.90, 9.83
+	stats := &reel.EncodeStats{}
+	stats.Width = 3840
+	stats.GrainTreatment = &reel.GrainTreatmentStats{
+		Mode: "auto", Treated: true, Tier: "med", ResolutionClass: "2160p",
+		Denoise: "fftdnoiz", GrainTable: "grain-med.tbl",
+		GateCRF: 22, SampleChunks: []int{4, 9}, SampleBPP: []float64{0.13, 0.14},
+		MedianBPP: 0.131, LightBPPCutoff: 0.0703, MedBPPCutoff: 0.1205,
+		GateSeconds: 200, CeilingSeconds: 62,
+		DenoiseCeilingJODMean: &mean, DenoiseCeilingJODMin: &min,
+	}
+
+	rec := encodeStatsFromResult("main", &reel.Result{Stats: stats})
+	if rec == nil || rec.GrainTreatment == nil {
+		t.Fatalf("expected a grain treatment on the record, got %+v", rec)
+	}
+	got := *rec.GrainTreatment
+	want := ripspec.GrainTreatment{
+		Mode: "auto", Treated: true, Tier: "med", ResolutionClass: "2160p",
+		Denoise: "fftdnoiz", GrainTable: "grain-med.tbl",
+		GateCRF: 22, SampleChunks: []int{4, 9}, SampleBPP: []float64{0.13, 0.14},
+		MedianBPP: 0.131, LightBPPCutoff: 0.0703, MedBPPCutoff: 0.1205,
+		GateSeconds: 200, CeilingSeconds: 62,
+		DenoiseCeilingJODMean: &mean, DenoiseCeilingJODMin: &min,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("grain treatment mapping lost or changed a field:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// An encode from a Reel build that ran no gate must record no verdict rather
+// than an empty one that reads as "measured and untreated".
+func TestEncodeStatsFromResult_NoGrainTreatment(t *testing.T) {
+	rec := encodeStatsFromResult("main", &reel.Result{Stats: &reel.EncodeStats{}})
+	if rec == nil || rec.GrainTreatment != nil {
+		t.Errorf("expected no grain treatment, got %+v", rec)
 	}
 }
 

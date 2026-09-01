@@ -72,6 +72,7 @@ The `analysis` object (always present; sub-fields omitted when empty) contains p
 | `routing_summary` | Final assets exist | Display-only classification of each final output's destination and its expected-vs-actual route. The organizer enforces routing itself and fails the stage on a mismatch, so this table is context, not the check. |
 | `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_streams with codec/language/is_forced), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. |
 | `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`. |
+| `grain_treatments` | Reel reported a grain-gate verdict | Per-encode `episode_key`, `mode` (auto/off/override), `treated`, `tier` (light/med), `resolution_class`, `denoise`, `grain_table`, `reason`, `gate_crf`, `sample_chunks`/`sample_bpp`, `median_bpp` against `light_bpp_cutoff`/`med_bpp_cutoff`, `gate_seconds`/`ceiling_seconds`, and `denoise_ceiling_jod_mean`/`denoise_ceiling_jod_min`. Lifted from `envelope.attributes.encode_stats[].grain_treatment`. |
 | `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `placeholder_only`, `confidence_min/max/mean`, `below_070/080/090` (cumulative), `sequence_contiguous`, `episode_range`. |
 | `media_stats` | Valid probes exist | `file_count`, `duration_min_sec/max_sec`, `size_min_bytes/max_bytes`. |
 | `asset_health` | Assets exist | Per-stage (ripped/encoded/subtitled/final/transcript) `total/ok/failed/muxed` counts. `transcript` counts the shared per-episode WhisperX transcript artifacts reused across episode-ID, commentary, and subtitle generation. |
@@ -268,6 +269,10 @@ Analyze the `media` array from the audit output. Each entry contains full ffprob
      - `converged`: final score in band.
      - `rate_capped`: the AV1 level 5.1 bitstream cap (40 Mbps, 1-second peak gate) bounded the search from below on that chunk. Reel rejects probes whose worst second exceeds the cap (`over_rate=true peak_mbps=` on the `TQ probe` line), and on heavy-grain 4K chunks lowering CRF cannot raise the score because SVT's regulator holds the rate. The chunk ships at its best rate-legal CRF, below the band. This is the intended playback-compatibility trade-off, NOT a search defect: report the count and worst score as informational context, never as a retest/re-encode recommendation. A re-encode on the same source reproduces it exactly. Grainy UHD titles routinely show a few percent of chunks here.
      - `max_probes`, `bounds_crossed`, `monotonicity_guard`, `no_candidates`: the search stopped without the cap involved. A handful per title is normal (probe noise is about 0.075 JOD). A material tail (several percent of chunks, or misses well below the band with no cap involvement) is the retest condition in Reel's `docs/PERFORMANCE_TESTING.md`; report it as a WARNING with the chunk list from `TQ max-probe chunks`.
+   - Grain treatment: `analysis.grain_treatments[]` carries Reel's automatic grain-gate verdict per encode. The gate probes sample chunks at a fixed CRF 22 and compares their median bits per pixel against the resolution's cutoffs: at or above `med_bpp_cutoff` the title gets the medium film grain table, between the cutoffs the light table, below both no treatment. A treated title is encoded from an `fftdnoiz`-denoised source with an AV1 grain table attached, which is the intended behavior on grainy (usually UHD) titles, NOT a defect. Read it as:
+     - Target-quality scores for a treated title are measured against the denoised reference, so `denoise_ceiling_jod_mean`/`denoise_ceiling_jod_min` (CVVDP of the denoised source against the real source on the same chunks) is the honest cap on what those scores can mean. A treated title with `denoise_ceiling_jod_min` below 9.75 — the top of the target band — is pre-flagged as a warning anomaly: the denoiser removed quality the CRF search can never see as a missed band. Report it with the tier and `median_bpp`.
+     - A treated title with no ceiling fields measured the treatment but not its cost (the measurement is best effort). Say so; do not read a missing ceiling as a clean one.
+     - An untreated title with a `reason` (`SD sources are never treated`, `no chunk long enough to measure`, `grain treatment disabled`, explicit override) explains itself. An untreated title with no reason was simply measured clean — check `median_bpp` against the cutoffs and move on.
    - Check `decision_type=file_probe` for pre-encoding resolution and codec detection
    - Check `decision_type=crop_detection` for crop decision visibility
    - Check `decision_type=encoding_validation` for per-episode validation results
@@ -483,6 +488,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - An adopted subtitle ending before long credits, or a `reference_tail_gap_s` at or below 600 seconds — Matroska duration is a cue span and sparse WhisperX end-credit hallucinations can make the raw reference appear longer
 - Missing HDR10+ dynamic metadata in encoded output — Reel intentionally emits static HDR because the target playback environment does not consume it
 - Target-quality chunks with `stop_reason=rate_capped` (or a `TQ rate-capped chunks` line) scoring below the band — the level 5.1 bitrate cap holding on heavy-grain chunks is the designed playback-compat trade-off; informational only, not a retest or re-encode finding
+- A `grain_treatments[]` entry with `treated: true` (denoise plus a film grain table) on a grainy title, or an untreated entry whose `median_bpp` sits below `light_bpp_cutoff` — the gate working as designed. Only a treated title whose `denoise_ceiling_jod_min` falls below 9.75, or a treated title with no ceiling measured, is worth reporting
 - A movie's encoding task holding the `encode` claim with no encoded output while its rip runs — the deferred plan is expected; see Stage Gating above
 - An identification-failed item having no rip, encode, or staging artifacts — that is the fatal no-TMDB-match rule working, not missing work
 
@@ -550,6 +556,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Audio: <stream summary>
 - Encoding config: <encoding.snapshot.quality> | SVT-AV1 preset <encoding.snapshot.preset> | tune <encoding.snapshot.tune> | <encoding.snapshot.audio_codec>
 - Crop: <analysis.crop_analysis.filter> (<analysis.crop_analysis.standard_ratio>)
+- Grain treatment: <from analysis.grain_treatments: treated tier or untreated with reason, median_bpp vs cutoffs, and the denoise ceiling JOD mean/min for treated titles>
 - Validation: <passed/failed, expand individual steps only if failed>
 
 **TV:**
@@ -557,6 +564,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Encoding config: <encoding.snapshot.quality> | SVT-AV1 preset <encoding.snapshot.preset> | tune <encoding.snapshot.tune> | <encoding.snapshot.audio_codec>
 - Duration: <analysis.media_stats.duration_min_sec>-<max>s | Size: <analysis.media_stats.size_min_bytes>-<max>
 - Cross-episode consistency: <analysis.episode_consistency — pass if no deviations, else list deviations>
+- Grain treatment: <from analysis.grain_treatments: which episodes were treated, at which tier, and the lowest denoise ceiling JOD across them>
 - Failed episodes: <count, with details if > 0>
 
 #### Subtitle Pipeline (if phase_subtitles)
@@ -607,6 +615,7 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] Read `analysis.final_validation`: confirmed a verdict exists for every output, investigated failed checks and unavailable entries, and did not rely solely on Reel's persisted validation verdict
 - [ ] Analyzed streams from `media[]` entries (video, audio, subtitle)
 - [ ] Validated crop detection from `encoding.snapshot.crop_filter`
+- [ ] Read `analysis.grain_treatments`: noted which encodes were treated and at which tier, and checked every treated encode's `denoise_ceiling_jod_min` against the 9.75 band top
 - [ ] Reviewed the apply stage's commentary, audio layout, and subtitle layout verdicts
 - [ ] Correlated any `source_timeline_normalization` decision with Reel's normalization step and the final audio endpoint verdict
 - [ ] If TV: checked cross-episode consistency

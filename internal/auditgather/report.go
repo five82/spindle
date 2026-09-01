@@ -184,6 +184,7 @@ type Analysis struct {
 	RoutingSummary     *RoutingSummary          `json:"routing_summary,omitempty"`
 	EpisodeConsistency *EpisodeConsistency      `json:"episode_consistency,omitempty"`
 	CropAnalysis       *CropAnalysis            `json:"crop_analysis,omitempty"`
+	GrainTreatments    []GrainTreatmentEntry    `json:"grain_treatments,omitempty"`
 	EpisodeStats       *EpisodeStats            `json:"episode_stats,omitempty"`
 	MediaStats         *MediaStats              `json:"media_stats,omitempty"`
 	AssetHealth        *AssetHealth             `json:"asset_health,omitempty"`
@@ -389,6 +390,15 @@ type CropAnalysis struct {
 	AspectRatio   float64 `json:"aspect_ratio,omitempty"`
 	StandardRatio string  `json:"standard_ratio,omitempty"`
 	Required      bool    `json:"required"`
+}
+
+// GrainTreatmentEntry is one encode's grain-gate verdict, lifted from
+// envelope.attributes.encode_stats so cross-episode review reads one list
+// instead of walking per-episode encode records. The verdict is embedded so
+// the JSON stays flat and matches Reel's own field names.
+type GrainTreatmentEntry struct {
+	EpisodeKey string `json:"episode_key,omitempty"`
+	ripspec.GrainTreatment
 }
 
 // EpisodeStats holds episode identification summary.
