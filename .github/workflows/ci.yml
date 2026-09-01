@@ -25,7 +25,7 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libopusenc-dev libswresample-dev libswscale-dev libsvtav1enc-dev
+          sudo apt-get install -y libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev libopusenc-dev libswresample-dev libswscale-dev libsvtav1enc-dev
 
       - name: Verify go.mod is tidy
         run: |
@@ -58,7 +58,7 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libopusenc-dev libswresample-dev libswscale-dev libsvtav1enc-dev
+          sudo apt-get install -y libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev libopusenc-dev libswresample-dev libswscale-dev libsvtav1enc-dev
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
@@ -83,7 +83,7 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libopusenc-dev libswresample-dev libswscale-dev libsvtav1enc-dev
+          sudo apt-get install -y libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev libopusenc-dev libswresample-dev libswscale-dev libsvtav1enc-dev
 
       - name: Check for vulnerabilities
         run: |
