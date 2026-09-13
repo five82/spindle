@@ -487,13 +487,13 @@ func TestComputeGrainTreatmentsSkipsEncodesWithoutAVerdict(t *testing.T) {
 	got := computeGrainTreatments([]ripspec.EncodeStats{
 		{EpisodeKey: "s01_001"},
 		{EpisodeKey: "s01_002", GrainTreatment: &ripspec.GrainTreatment{
-			Mode: "auto", Treated: true, Tier: "light", MedianBPP: 0.09,
+			Mode: "auto", Treated: true, MedianBPP: 0.09,
 		}},
 	})
 	if len(got) != 1 {
 		t.Fatalf("expected only the encode carrying a verdict, got %+v", got)
 	}
-	if got[0].EpisodeKey != "s01_002" || got[0].Tier != "light" {
+	if got[0].EpisodeKey != "s01_002" || !got[0].Treated {
 		t.Errorf("unexpected lifted verdict: %+v", got[0])
 	}
 }
@@ -501,7 +501,7 @@ func TestComputeGrainTreatmentsSkipsEncodesWithoutAVerdict(t *testing.T) {
 func TestDetectAnomalies_LowDenoiseCeiling(t *testing.T) {
 	a := &Analysis{GrainTreatments: []GrainTreatmentEntry{
 		{EpisodeKey: "s01_001", GrainTreatment: ripspec.GrainTreatment{
-			Treated: true, Tier: "med",
+			Treated:               true,
 			DenoiseCeilingJODMean: jodPtr(9.70), DenoiseCeilingJODMin: jodPtr(9.42),
 		}},
 	}}
@@ -510,7 +510,7 @@ func TestDetectAnomalies_LowDenoiseCeiling(t *testing.T) {
 	if len(anomalies) != 1 || anomalies[0].Severity != "warning" || anomalies[0].Category != "encoding" {
 		t.Fatalf("anomalies = %+v, want one encoding warning", anomalies)
 	}
-	if !strings.Contains(anomalies[0].Message, "s01_001: min 9.42 vs band top 9.75 (med tier)") {
+	if !strings.Contains(anomalies[0].Message, "s01_001: min 9.42 vs band top 9.75") {
 		t.Fatalf("unexpected anomaly message: %s", anomalies[0].Message)
 	}
 }
@@ -521,7 +521,7 @@ func TestDetectAnomalies_LowDenoiseCeiling(t *testing.T) {
 func TestDetectAnomalies_RecordedBandTopWins(t *testing.T) {
 	a := &Analysis{GrainTreatments: []GrainTreatmentEntry{
 		{EpisodeKey: "s01_001", GrainTreatment: ripspec.GrainTreatment{
-			Treated: true, Tier: "light", BandTopJOD: 9.90,
+			Treated: true, BandTopJOD: 9.90,
 			DenoiseCeilingJODMin: jodPtr(9.80),
 		}},
 	}}
@@ -530,7 +530,7 @@ func TestDetectAnomalies_RecordedBandTopWins(t *testing.T) {
 	if len(anomalies) != 1 {
 		t.Fatalf("anomalies = %+v, want one encoding warning", anomalies)
 	}
-	if !strings.Contains(anomalies[0].Message, "s01_001: min 9.80 vs band top 9.90 (light tier)") {
+	if !strings.Contains(anomalies[0].Message, "s01_001: min 9.80 vs band top 9.90") {
 		t.Fatalf("unexpected anomaly message: %s", anomalies[0].Message)
 	}
 }
@@ -542,10 +542,10 @@ func TestDetectAnomalies_RecordedBandTopWins(t *testing.T) {
 func TestDetectAnomalies_UntreatedDeliveredAboveCutoff(t *testing.T) {
 	a := &Analysis{GrainTreatments: []GrainTreatmentEntry{
 		{EpisodeKey: "main", DeliveredBPP: 0.0905, GrainTreatment: ripspec.GrainTreatment{
-			LightBPPCutoff: 0.0703,
+			TreatmentBPPCutoff: 0.0703,
 		}},
 		{EpisodeKey: "clean", DeliveredBPP: 0.02, GrainTreatment: ripspec.GrainTreatment{
-			LightBPPCutoff: 0.0703,
+			TreatmentBPPCutoff: 0.0703,
 		}},
 		{EpisodeKey: "gate-off", DeliveredBPP: 0.5, GrainTreatment: ripspec.GrainTreatment{}},
 	}}
@@ -568,9 +568,9 @@ func TestDetectAnomalies_UntreatedDeliveredAboveCutoff(t *testing.T) {
 func TestDetectAnomalies_DenoiseCeilingAtBandTopIsClean(t *testing.T) {
 	a := &Analysis{GrainTreatments: []GrainTreatmentEntry{
 		{EpisodeKey: "ok", GrainTreatment: ripspec.GrainTreatment{
-			Treated: true, Tier: "med", DenoiseCeilingJODMin: jodPtr(grainCeilingFloorJOD),
+			Treated: true, DenoiseCeilingJODMin: jodPtr(grainCeilingFloorJOD),
 		}},
-		{EpisodeKey: "unmeasured", GrainTreatment: ripspec.GrainTreatment{Treated: true, Tier: "light"}},
+		{EpisodeKey: "unmeasured", GrainTreatment: ripspec.GrainTreatment{Treated: true}},
 		{EpisodeKey: "untreated", GrainTreatment: ripspec.GrainTreatment{DenoiseCeilingJODMin: jodPtr(1.0)}},
 	}}
 

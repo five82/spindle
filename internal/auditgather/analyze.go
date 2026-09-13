@@ -1240,7 +1240,7 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 		if name == "" {
 			name = "encode"
 		}
-		lowCeilings = append(lowCeilings, fmt.Sprintf("%s: min %.2f vs band top %.2f (%s tier)", name, *g.DenoiseCeilingJODMin, bandTop, g.Tier))
+		lowCeilings = append(lowCeilings, fmt.Sprintf("%s: min %.2f vs band top %.2f", name, *g.DenoiseCeilingJODMin, bandTop))
 	}
 	if len(lowCeilings) > 0 {
 		anomalies = append(anomalies, Anomaly{
@@ -1260,7 +1260,7 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 	// where the verdict was a choice, not a prediction.
 	var missedTreatments []string
 	for _, g := range a.GrainTreatments {
-		if g.Treated || g.LightBPPCutoff <= 0 || g.DeliveredBPP < 1.1*g.LightBPPCutoff {
+		if g.Treated || g.TreatmentBPPCutoff <= 0 || g.DeliveredBPP < 1.1*g.TreatmentBPPCutoff {
 			continue
 		}
 		name := g.EpisodeKey
@@ -1268,7 +1268,7 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 			name = "encode"
 		}
 		missedTreatments = append(missedTreatments,
-			fmt.Sprintf("%s: delivered %.4f bpp vs treat cutoff %.4f", name, g.DeliveredBPP, g.LightBPPCutoff))
+			fmt.Sprintf("%s: delivered %.4f bpp vs treat cutoff %.4f", name, g.DeliveredBPP, g.TreatmentBPPCutoff))
 	}
 	if len(missedTreatments) > 0 {
 		anomalies = append(anomalies, Anomaly{

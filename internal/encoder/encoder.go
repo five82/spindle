@@ -400,23 +400,19 @@ func encodeStatsFromResult(key string, result *reel.Result) *ripspec.EncodeStats
 		rec.GrainTreatment = &ripspec.GrainTreatment{
 			Mode:                  g.Mode,
 			Treated:               g.Treated,
-			Tier:                  g.Tier,
 			ResolutionClass:       g.ResolutionClass,
 			Denoise:               g.Denoise,
-			GrainTable:            g.GrainTable,
 			Reason:                g.Reason,
 			GateCRF:               g.GateCRF,
 			SampleChunks:          g.SampleChunks,
 			SampleBPP:             g.SampleBPP,
 			MedianBPP:             g.MedianBPP,
-			LightBPPCutoff:        g.LightBPPCutoff,
-			MedBPPCutoff:          g.MedBPPCutoff,
+			TreatmentBPPCutoff:    g.LightBPPCutoff,
 			GateSeconds:           g.GateSeconds,
 			CeilingSeconds:        g.CeilingSeconds,
 			DenoiseCeilingJODMean: g.DenoiseCeilingJODMean,
 			DenoiseCeilingJODMin:  g.DenoiseCeilingJODMin,
 			CeilingMeasured:       g.CeilingMeasured,
-			CeilingError:          g.CeilingError,
 			BandTopJOD:            g.BandTopJOD,
 			Reused:                g.Reused,
 			GateStage:             g.GateStage,
@@ -426,6 +422,12 @@ func encodeStatsFromResult(key string, result *reel.Result) *ripspec.EncodeStats
 			Stage2Probes:          g.Stage2Probes,
 			Stage2Seconds:         g.Stage2Seconds,
 			Stage2Error:           g.Stage2Error,
+		}
+		if e := g.Estimation; e != nil {
+			rec.GrainTreatment.Estimation = &ripspec.GrainEstimation{
+				Version: e.Version, SHA256: e.SHA256, Frames: e.Frames,
+				AcceptedFrames: e.AcceptedFrames, Patches: e.Patches, Seconds: e.Seconds,
+			}
 		}
 	}
 	return rec

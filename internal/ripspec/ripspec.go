@@ -283,8 +283,8 @@ type EncodeStats struct {
 	GrainTreatment        *GrainTreatment    `json:"grain_treatment,omitempty"`
 }
 
-// GrainTreatment mirrors Reel's grain-gate verdict for one encode: what the
-// title's bits-at-CRF measured, which treatment (if any) the encode ran with,
+// GrainTreatment records Reel's grain-gate verdict for one encode: what the
+// title's bits-at-CRF measured, whether treatment ran, and the generated model,
 // and the honest denoise ceiling the reported target-quality scores sit under.
 // Unlike TargetQuality it is typed rather than raw JSON because the item audit
 // renders and range-checks these fields; re-parsing a blob at every read site
@@ -292,35 +292,31 @@ type EncodeStats struct {
 type GrainTreatment struct {
 	// Mode is how the treatment was decided: "auto" (the gate ran), "off"
 	// (disabled), or "override" (explicit experimental flags).
-	Mode            string `json:"mode,omitempty"`
-	Treated         bool   `json:"treated"`
-	Tier            string `json:"tier,omitempty"`
-	ResolutionClass string `json:"resolution_class,omitempty"`
-	Denoise         string `json:"denoise,omitempty"`
-	GrainTable      string `json:"grain_table,omitempty"`
+	Mode            string           `json:"mode,omitempty"`
+	Treated         bool             `json:"treated"`
+	ResolutionClass string           `json:"resolution_class,omitempty"`
+	Denoise         string           `json:"denoise,omitempty"`
+	Estimation      *GrainEstimation `json:"estimation,omitempty"`
 	// Reason explains a verdict the numbers alone do not (SD source, no
 	// eligible sample chunks, treatment disabled or overridden).
 	Reason string `json:"reason,omitempty"`
 
-	GateCRF        float64   `json:"gate_crf,omitempty"`
-	SampleChunks   []int     `json:"sample_chunks,omitempty"`
-	SampleBPP      []float64 `json:"sample_bpp,omitempty"`
-	MedianBPP      float64   `json:"median_bpp,omitempty"`
-	LightBPPCutoff float64   `json:"light_bpp_cutoff,omitempty"`
-	MedBPPCutoff   float64   `json:"med_bpp_cutoff,omitempty"`
-	GateSeconds    float64   `json:"gate_seconds,omitempty"`
-	CeilingSeconds float64   `json:"ceiling_seconds,omitempty"`
+	GateCRF            float64   `json:"gate_crf,omitempty"`
+	SampleChunks       []int     `json:"sample_chunks,omitempty"`
+	SampleBPP          []float64 `json:"sample_bpp,omitempty"`
+	MedianBPP          float64   `json:"median_bpp,omitempty"`
+	TreatmentBPPCutoff float64   `json:"treatment_bpp_cutoff,omitempty"`
+	GateSeconds        float64   `json:"gate_seconds,omitempty"`
+	CeilingSeconds     float64   `json:"ceiling_seconds,omitempty"`
 
 	// DenoiseCeilingJODMean/Min score the denoised source against the real
 	// source, so they cap what the encode could deliver no matter how well the
-	// CRF search scored against the denoised reference. Measured only for
-	// treated titles, and best effort: nil when the measurement did not run.
+	// CRF search scored against the denoised reference. Automatic treatment
+	// requires this paired-frame pass; explicit overrides may omit it.
 	DenoiseCeilingJODMean *float64 `json:"denoise_ceiling_jod_mean,omitempty"`
 	DenoiseCeilingJODMin  *float64 `json:"denoise_ceiling_jod_min,omitempty"`
-	// CeilingMeasured distinguishes a measured ceiling from a skipped or
-	// failed best-effort measurement; CeilingError says why it is absent.
-	CeilingMeasured bool   `json:"ceiling_measured,omitempty"`
-	CeilingError    string `json:"ceiling_error,omitempty"`
+	// CeilingMeasured records a completed paired-frame pass.
+	CeilingMeasured bool `json:"ceiling_measured,omitempty"`
 	// BandTopJOD is the top of Reel's configured target-quality band at
 	// encode time, so ceiling judgments do not hardcode the constant.
 	BandTopJOD float64 `json:"band_top_jod,omitempty"`
@@ -338,6 +334,17 @@ type GrainTreatment struct {
 	Stage2Probes       int       `json:"stage2_probes,omitempty"`
 	Stage2Seconds      float64   `json:"stage2_seconds,omitempty"`
 	Stage2Error        string    `json:"stage2_error,omitempty"`
+}
+
+// GrainEstimation describes Reel's source-matched film grain model. SHA256
+// identifies the exact generated parameters without persisting the table.
+type GrainEstimation struct {
+	Version        string  `json:"version"`
+	SHA256         string  `json:"sha256"`
+	Frames         []int   `json:"frames"`
+	AcceptedFrames int     `json:"accepted_frames"`
+	Patches        int     `json:"patches"`
+	Seconds        float64 `json:"seconds"`
 }
 
 // EnvelopeAttributes holds cross-cutting flags and analysis results.

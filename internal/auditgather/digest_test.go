@@ -82,17 +82,21 @@ func digestReport() *Report {
 				{EpisodeKey: "s01_001",
 					OriginalSizeBytes: 64424509440, EncodedSizeBytes: 9663676416, SizeReductionPercent: 85.0,
 					GrainTreatment: ripspec.GrainTreatment{
-						Mode: "auto", Treated: true, Tier: "med", ResolutionClass: "2160p",
-						Denoise: "fftdnoiz", GrainTable: "grain-med.tbl",
+						Mode: "auto", Treated: true, ResolutionClass: "2160p",
+						Denoise: "fftdnoiz",
+						Estimation: &ripspec.GrainEstimation{
+							Version: "aom-patches-v1", SHA256: "abc123", Frames: []int{100, 200, 300},
+							AcceptedFrames: 2, Patches: 64, Seconds: 1.25,
+						},
 						GateCRF: 22, SampleChunks: []int{4, 9, 14, 19, 24},
-						MedianBPP: 0.1310, LightBPPCutoff: 0.0703, MedBPPCutoff: 0.1205,
+						MedianBPP: 0.1310, TreatmentBPPCutoff: 0.0703,
 						GateSeconds: 200, CeilingSeconds: 62,
 						DenoiseCeilingJODMean: jodPtr(9.88), DenoiseCeilingJODMin: jodPtr(9.81),
 					}},
 				{EpisodeKey: "s01_002", GrainTreatment: ripspec.GrainTreatment{
 					Mode: "auto", ResolutionClass: "2160p",
 					GateCRF: 22, SampleChunks: []int{4, 9, 14, 19, 24},
-					MedianBPP: 0.0412, LightBPPCutoff: 0.0703, MedBPPCutoff: 0.1205,
+					MedianBPP: 0.0412, TreatmentBPPCutoff: 0.0703,
 					GateSeconds: 178,
 				}},
 			},
@@ -136,11 +140,12 @@ func TestRenderDigestCoreSections(t *testing.T) {
 		"PROBE ERROR /x/broken.mkv (s01_002): ffprobe failed",
 		// Grain gate verdict with its honest denoise ceiling.
 		"## Grain treatment (Reel grain gate;",
-		"- s01_001: TREATED med | 2160p | denoise fftdnoiz | table grain-med.tbl | " +
-			"median bpp 0.1310 vs cutoffs light 0.0703 / med 0.1205 | gate crf 22, 5 chunks, 3m20s | " +
+		"- s01_001: TREATED | 2160p | denoise fftdnoiz | " +
+			"median bpp 0.1310 vs treat cutoff 0.0703 | gate crf 22, 5 chunks, 3m20s | " +
 			"60.00 GB -> 9.00 GB (-85.0%)",
+		"  grain estimate: 64 patches from 2/3 accepted frames in 1s | model aom-patches-v1 | sha256 abc123",
 		"  denoise ceiling: JOD mean 9.88 min 9.81 (measured in 1m2s)",
-		"- s01_002: untreated | 2160p | median bpp 0.0412 vs cutoffs light 0.0703 / med 0.1205 | gate crf 22, 5 chunks, 2m58s",
+		"- s01_002: untreated | 2160p | median bpp 0.0412 vs treat cutoff 0.0703 | gate crf 22, 5 chunks, 2m58s",
 		"## Digest limits",
 	} {
 		if !strings.Contains(out, want) {

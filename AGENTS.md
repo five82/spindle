@@ -87,9 +87,10 @@ drive, and per-episode encode stats (`encodes[]`: `resolution_class`
 2160p/1080p/sd, `speed` as video-seconds per wall-second, `phase_seconds`,
 Reel's `target_quality` CRF-search aggregate including the
 `ssimu2_calibration_offset` grain/complexity proxy, and `grain_treatment` —
-the grain gate's verdict (`treated`, `tier`, `median_bpp` against its cutoffs)
-with the `denoise_ceiling_jod_mean`/`_min` that caps a treated title's
-reported scores). Records are append-only; fields may be added over time, so
+the grain gate's verdict (`treated`, `median_bpp` against its treatment cutoff)
+with source-matched grain estimation details and the
+`denoise_ceiling_jod_mean`/`_min` that caps a treated title's reported scores).
+Records are append-only; fields may be added over time, so
 query by field name, not position. Example:
 
 ```sh

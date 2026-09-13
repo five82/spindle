@@ -395,7 +395,7 @@ type CropAnalysis struct {
 // GrainTreatmentEntry is one encode's grain-gate verdict, lifted from
 // envelope.attributes.encode_stats so cross-episode review reads one list
 // instead of walking per-episode encode records. The verdict is embedded so
-// the JSON stays flat and matches Reel's own field names.
+// the JSON stays flat.
 type GrainTreatmentEntry struct {
 	EpisodeKey string `json:"episode_key,omitempty"`
 	// DeliveredBPP is the finished encode's whole-file bits per pixel per

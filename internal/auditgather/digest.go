@@ -427,7 +427,7 @@ func writeDigestGrainTreatment(b *strings.Builder, r *Report) {
 		}
 		status := "untreated"
 		if g.Treated {
-			status = "TREATED " + g.Tier
+			status = "TREATED"
 		}
 		line := fmt.Sprintf("- %s: %s | %s", name, status, g.ResolutionClass)
 		if g.Mode != "" && g.Mode != "auto" {
@@ -436,12 +436,9 @@ func writeDigestGrainTreatment(b *strings.Builder, r *Report) {
 		if g.Denoise != "" {
 			line += " | denoise " + g.Denoise
 		}
-		if g.GrainTable != "" {
-			line += " | table " + g.GrainTable
-		}
 		if g.MedianBPP > 0 {
-			line += fmt.Sprintf(" | median bpp %.4f vs cutoffs light %.4f / med %.4f",
-				g.MedianBPP, g.LightBPPCutoff, g.MedBPPCutoff)
+			line += fmt.Sprintf(" | median bpp %.4f vs treat cutoff %.4f",
+				g.MedianBPP, g.TreatmentBPPCutoff)
 		}
 		if g.GateCRF > 0 {
 			line += fmt.Sprintf(" | gate crf %.0f, %d chunks, %s", g.GateCRF, len(g.SampleChunks), fmtSeconds(g.GateSeconds))
@@ -457,9 +454,13 @@ func writeDigestGrainTreatment(b *strings.Builder, r *Report) {
 				fmtBytes(g.OriginalSizeBytes), fmtBytes(g.EncodedSizeBytes), g.SizeReductionPercent)
 		}
 		fmt.Fprintln(b, line)
+		if e := g.Estimation; e != nil {
+			fmt.Fprintf(b, "  grain estimate: %d patches from %d/%d accepted frames in %s | model %s | sha256 %s\n",
+				e.Patches, e.AcceptedFrames, len(e.Frames), fmtSeconds(e.Seconds), e.Version, e.SHA256)
+		}
 		if g.GateStage == "tq_probe" {
 			fmt.Fprintf(b, "  stage 2: ambiguous at fixed CRF (band %.4f to %.4f); delivered %.4f bpp at the quality target (%d probes, %s)\n",
-				g.AmbiguousBPPCutoff, g.LightBPPCutoff, g.Stage2MedianBPP, g.Stage2Probes, fmtSeconds(g.Stage2Seconds))
+				g.AmbiguousBPPCutoff, g.TreatmentBPPCutoff, g.Stage2MedianBPP, g.Stage2Probes, fmtSeconds(g.Stage2Seconds))
 		} else if g.Stage2Error != "" {
 			fmt.Fprintf(b, "  stage 2: not measured (%s); stage-1 verdict stands\n", g.Stage2Error)
 		}
@@ -467,11 +468,7 @@ func writeDigestGrainTreatment(b *strings.Builder, r *Report) {
 			continue
 		}
 		if g.DenoiseCeilingJODMean == nil || g.DenoiseCeilingJODMin == nil {
-			reason := ""
-			if g.CeilingError != "" {
-				reason = ": " + g.CeilingError
-			}
-			fmt.Fprintf(b, "  denoise ceiling: NOT MEASURED (reported scores have no honest cap%s)\n", reason)
+			fmt.Fprintln(b, "  denoise ceiling: NOT MEASURED (reported scores have no honest cap)")
 			continue
 		}
 		fmt.Fprintf(b, "  denoise ceiling: JOD mean %.2f min %.2f (measured in %s)\n",

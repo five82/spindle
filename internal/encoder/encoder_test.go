@@ -180,10 +180,14 @@ func TestEncodeStatsFromResult_CarriesGrainTreatment(t *testing.T) {
 	stats := &reel.EncodeStats{}
 	stats.Width = 3840
 	stats.GrainTreatment = &reel.GrainTreatmentStats{
-		Mode: "auto", Treated: true, Tier: "med", ResolutionClass: "2160p",
-		Denoise: "fftdnoiz", GrainTable: "grain-med.tbl",
+		Mode: "auto", Treated: true, ResolutionClass: "2160p",
+		Denoise: "fftdnoiz",
+		Estimation: &reel.GrainEstimationStats{
+			Version: "aom-patches-v1", SHA256: "abc123", Frames: []int{100, 200},
+			AcceptedFrames: 2, Patches: 64, Seconds: 1.25,
+		},
 		GateCRF: 22, SampleChunks: []int{4, 9}, SampleBPP: []float64{0.13, 0.14},
-		MedianBPP: 0.131, LightBPPCutoff: 0.0703, MedBPPCutoff: 0.1205,
+		MedianBPP: 0.131, LightBPPCutoff: 0.0703,
 		GateSeconds: 200, CeilingSeconds: 62,
 		DenoiseCeilingJODMean: &mean, DenoiseCeilingJODMin: &min,
 	}
@@ -194,10 +198,14 @@ func TestEncodeStatsFromResult_CarriesGrainTreatment(t *testing.T) {
 	}
 	got := *rec.GrainTreatment
 	want := ripspec.GrainTreatment{
-		Mode: "auto", Treated: true, Tier: "med", ResolutionClass: "2160p",
-		Denoise: "fftdnoiz", GrainTable: "grain-med.tbl",
+		Mode: "auto", Treated: true, ResolutionClass: "2160p",
+		Denoise: "fftdnoiz",
+		Estimation: &ripspec.GrainEstimation{
+			Version: "aom-patches-v1", SHA256: "abc123", Frames: []int{100, 200},
+			AcceptedFrames: 2, Patches: 64, Seconds: 1.25,
+		},
 		GateCRF: 22, SampleChunks: []int{4, 9}, SampleBPP: []float64{0.13, 0.14},
-		MedianBPP: 0.131, LightBPPCutoff: 0.0703, MedBPPCutoff: 0.1205,
+		MedianBPP: 0.131, TreatmentBPPCutoff: 0.0703,
 		GateSeconds: 200, CeilingSeconds: 62,
 		DenoiseCeilingJODMean: &mean, DenoiseCeilingJODMin: &min,
 	}
