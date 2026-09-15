@@ -458,7 +458,7 @@ func TestSchedulerCancelsWorkerOnUserStop(t *testing.T) {
 	t.Fatal("stopped item did not settle into failed state with pending task")
 }
 
-func TestSchedulerRunsParallelBranchesOfOneItemConcurrently(t *testing.T) {
+func TestDispatchRunsParallelBranchesOfOneItemConcurrently(t *testing.T) {
 	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
 	if err != nil {
 		t.Fatalf("open queue: %v", err)
@@ -503,41 +503,38 @@ func TestSchedulerRunsParallelBranchesOfOneItemConcurrently(t *testing.T) {
 		t.Fatalf("move: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		manager.Run(ctx)
-		close(done)
-	}()
-	defer func() {
-		cancel()
-		<-done
-	}()
+	// Drive the three readiness waves directly. Other tests cover the Run
+	// loop; this one only needs to prove that one dispatch pass launches every
+	// ready branch before waiting for either branch to finish. Waiting on the
+	// workers also guarantees finalization has completed without a polling
+	// deadline that can expire when a shared CI runner is descheduled.
+	var workers sync.WaitGroup
+	manager.dispatch(context.Background(), &workers) // ripping
+	workers.Wait()
+	manager.dispatch(context.Background(), &workers) // encoding + subtitling
+	workers.Wait()
+	manager.dispatch(context.Background(), &workers) // organizing
+	workers.Wait()
 
-	deadline := time.Now().Add(testWait)
-	for time.Now().Before(deadline) {
-		got, err := store.GetByID(item.ID)
-		if err != nil {
-			t.Fatalf("get item: %v", err)
-		}
-		if got.Stage == queue.StageFailed {
-			t.Fatal("branches deadlocked instead of overlapping")
-		}
-		if got.Stage == queue.StageCompleted {
-			tasks, err := store.TasksForItem(item.ID)
-			if err != nil {
-				t.Fatalf("tasks: %v", err)
-			}
-			for _, task := range tasks {
-				if task.State != queue.TaskDone {
-					t.Fatalf("task %s state = %q, want done", task.Type, task.State)
-				}
-			}
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	got, err := store.GetByID(item.ID)
+	if err != nil {
+		t.Fatalf("get item: %v", err)
 	}
-	t.Fatal("item did not complete")
+	if got.Stage == queue.StageFailed {
+		t.Fatal("branches deadlocked instead of overlapping")
+	}
+	if got.Stage != queue.StageCompleted {
+		t.Fatalf("stage = %q, want completed", got.Stage)
+	}
+	tasks, err := store.TasksForItem(item.ID)
+	if err != nil {
+		t.Fatalf("tasks: %v", err)
+	}
+	for _, task := range tasks {
+		if task.State != queue.TaskDone {
+			t.Fatalf("task %s state = %q, want done", task.Type, task.State)
+		}
+	}
 }
 
 // TestFinalizeItemLagsStageLabelDuringOverlap verifies the replacement
