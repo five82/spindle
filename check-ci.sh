@@ -72,9 +72,11 @@ else
     exit 1
 fi
 
-print_step "Running go test ./..."
-if GOWORK=off go test ./...; then
+print_step "Running go test with coverage"
+if GOWORK=off go test -covermode=atomic -coverprofile=coverage.out ./...; then
     print_success "Tests passed"
+    go tool cover -func=coverage.out | tail -n 1
+    print_success "Coverage profile: coverage.out (view with go tool cover -html=coverage.out)"
 else
     print_error "Tests failed"
     exit 1
