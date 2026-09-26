@@ -174,7 +174,7 @@ func buildLogger() *slog.Logger {
 
 // resolveTarget resolves a cache entry number or direct file path to a file path.
 // If target is a number, looks up the Nth entry in the rip cache and returns the
-// first non-metadata file in that cache entry directory.
+// first MKV file in that cache entry directory.
 func resolveTarget(target string) (string, error) {
 	if num, err := strconv.Atoi(target); err == nil && num >= 1 {
 		entry, err := cacheEntryByNumber(num)
@@ -187,7 +187,7 @@ func resolveTarget(target string) (string, error) {
 			return "", fmt.Errorf("read cache entry: %w", err)
 		}
 		for _, de := range dirEntries {
-			if !de.IsDir() && de.Name() != "metadata.json" {
+			if !de.IsDir() && strings.EqualFold(filepath.Ext(de.Name()), ".mkv") {
 				return filepath.Join(entryDir, de.Name()), nil
 			}
 		}

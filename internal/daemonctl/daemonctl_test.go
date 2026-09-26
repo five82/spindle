@@ -13,6 +13,13 @@ import (
 	"github.com/gofrs/flock"
 )
 
+func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "daemon" {
+		os.Exit(2)
+	}
+	os.Exit(m.Run())
+}
+
 func TestIsRunning(t *testing.T) {
 	dir := t.TempDir()
 	lockPath := filepath.Join(dir, "daemon.lock")
@@ -72,6 +79,34 @@ func TestStartFailures(t *testing.T) {
 	err = Start(StartOptions{LockPath: lockPath, SocketPath: socketPath, LogPath: filepath.Join(blocker, "log")})
 	if err == nil || !strings.Contains(err.Error(), "create log directory") {
 		t.Fatalf("Start with invalid log directory = %v", err)
+	}
+
+	// The directory exists but cannot be opened as a regular log file.
+	err = Start(StartOptions{LockPath: lockPath, SocketPath: socketPath, LogPath: dir})
+	if err == nil || !strings.Contains(err.Error(), "open daemon console log") {
+		t.Fatalf("Start with directory as log = %v", err)
+	}
+}
+
+func TestStartDetectsEarlyChildExitAndTruncatesConsoleLog(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "console.log")
+	if err := os.WriteFile(logPath, []byte("old daemon output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Start re-executes the test binary with `daemon`. The test binary has
+	// no such mode, so it exits before the readiness poll instead of leaving
+	// a background daemon behind.
+	err := Start(StartOptions{
+		LockPath: filepath.Join(dir, "lock"), SocketPath: filepath.Join(dir, "socket"),
+		LogPath: logPath, ConfigFlag: filepath.Join(dir, "config.toml"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "exited during startup") {
+		t.Fatalf("early exit: %v", err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil || strings.Contains(string(data), "old daemon output") {
+		t.Fatalf("console log was not truncated: %q %v", data, err)
 	}
 }
 

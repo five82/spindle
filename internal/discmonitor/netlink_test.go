@@ -4,8 +4,10 @@ package discmonitor
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/pilebones/go-udev/netlink"
 )
@@ -34,6 +36,33 @@ func TestNetlinkDeviceFiltering(t *testing.T) {
 	n.handleEvent(context.Background(), netlink.UEvent{Env: map[string]string{"DEVPATH": "/devices/pci/block/sr0"}})
 	if len(handled) != 1 || handled[0] != "/dev/sr0" {
 		t.Fatalf("matching event dispatch = %v", handled)
+	}
+}
+
+func TestNetlinkMonitorLifecycle(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	n := NewNetlinkMonitor("/dev/sr0", func(context.Context, string) {
+		t.Error("unexpected disc event")
+	}, func() bool { return false }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := n.Start(ctx); err != nil {
+		// A sandbox may prohibit opening a netlink socket. Start must still
+		// return the error rather than launching a broken monitor.
+		if n.conn != nil {
+			t.Fatal("failed start retained connection")
+		}
+		return
+	}
+	cancel()
+	select {
+	case <-n.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("monitor did not exit on cancellation")
+	}
+	n.Stop()
+	n.Stop() // idempotent
+	if n.conn != nil {
+		t.Fatal("stopped monitor retained connection")
 	}
 }
 
