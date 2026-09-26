@@ -31,5 +31,5 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# flyer binary
-flyer
+# flyer binary (repository root only; don't ignore cmd/flyer tests)
+/flyer
