@@ -122,8 +122,11 @@ func PhysicalCores() int {
 // physicalCoresLinux reads physical core count from sysfs topology.
 // Returns 0 if detection fails.
 func physicalCoresLinux() int {
+	return physicalCoresLinuxAt("/sys/devices/system/cpu")
+}
+
+func physicalCoresLinuxAt(cpuDir string) int {
 	// Count unique physical core IDs across all CPUs
-	cpuDir := "/sys/devices/system/cpu"
 	entries, err := os.ReadDir(cpuDir)
 	if err != nil {
 		return 0

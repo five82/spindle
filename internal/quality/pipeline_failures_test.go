@@ -113,6 +113,71 @@ func TestSSIMU2PipelineWithFakeScorer(t *testing.T) {
 	}
 }
 
+func TestSSIMU2PipelineReadsDecodedSourceWhenNoReferenceCache(t *testing.T) {
+	path := writePipelineY4M(t, 3)
+	info, err := video.Probe(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc := &fakeSSIMU2{scores: []float64{10, 20, 30}}
+	opts := SSIMU2Options{
+		SourcePath: path, ProbePath: path, Info: info,
+		Chunk: chunk.Chunk{Start: 0, End: 3}, Width: 16, Height: 16,
+	}
+	result, err := computeChunkSSIMU2(context.Background(), opts, proc, goMetricBuffer)
+	if err != nil || result.Frames != 3 || result.Mean != 20 || proc.calls != 3 {
+		t.Fatalf("decoded source: result=%+v calls=%d err=%v", result, proc.calls, err)
+	}
+}
+
+func TestSSIMU2PipelineReleasesBuffersOnSetupFailure(t *testing.T) {
+	path := writePipelineY4M(t, 1)
+	info, err := video.Probe(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := SSIMU2Options{
+		ProbePath: path, Info: info, Chunk: chunk.Chunk{End: 1},
+		Width: 16, Height: 16, Reference: pipelineReader(func(int, []byte) error { return nil }),
+	}
+	for _, tc := range []struct {
+		name                  string
+		badCall, wantReleased int
+		allocation            bool
+		want                  string
+	}{
+		{"source allocation error", 1, 0, true, "allocation failed"},
+		{"distorted allocation error", 2, 1, true, "allocation failed"},
+		{"source buffer too short", 1, 2, false, "buffer"},
+		{"distorted buffer too short", 2, 2, false, "buffer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls, released := 0, 0
+			allocate := func(size int) ([]byte, func(), error) {
+				calls++
+				if calls == tc.badCall && tc.allocation {
+					return nil, nil, errors.New("allocation failed")
+				}
+				if calls == tc.badCall {
+					size = 1
+				}
+				return make([]byte, size), func() { released++ }, nil
+			}
+			_, err := computeChunkSSIMU2(context.Background(), opts, &fakeSSIMU2{}, allocate)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("setup error = %v, want %q", err, tc.want)
+			}
+			if released != tc.wantReleased {
+				t.Fatalf("released %d buffers after %d calls, want %d", released, calls, tc.wantReleased)
+			}
+		})
+	}
+	opts.ProbePath = "/no-such-probe"
+	if _, err := computeChunkSSIMU2(context.Background(), opts, &fakeSSIMU2{}, goMetricBuffer); err == nil || !strings.Contains(err.Error(), "failed to probe encoded chunk") {
+		t.Fatalf("missing probe: %v", err)
+	}
+}
+
 func TestCVVDPPipelineWithFakeScorer(t *testing.T) {
 	read := func(i int, b []byte) error {
 		for j := range b {
