@@ -7,6 +7,16 @@ import (
 	"testing"
 )
 
+func TestPrefsPathResolutionFailure(t *testing.T) {
+	t.Setenv("HOME", "")
+	if got := Load("~/prefs.toml").Theme; got != defaultTheme {
+		t.Fatalf("Load without HOME theme = %q", got)
+	}
+	if err := Save("~/prefs.toml", Prefs{}); err == nil || !strings.Contains(err.Error(), "resolve path") {
+		t.Fatalf("Save without HOME error = %v", err)
+	}
+}
+
 func TestDefaultPathAndSaveFailures(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

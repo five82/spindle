@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,6 +44,20 @@ func TestStartPollerRefreshesImmediately(t *testing.T) {
 			t.Fatalf("poller did not populate store: %+v", snap)
 		case <-time.After(5 * time.Millisecond):
 		}
+	}
+}
+
+func TestCombineFetchErrors(t *testing.T) {
+	statusErr := errors.New("status unavailable")
+	queueErr := errors.New("queue unavailable")
+	if err := combineFetchErrors(statusErr, nil); !errors.Is(err, statusErr) {
+		t.Fatalf("status-only error = %v", err)
+	}
+	if err := combineFetchErrors(nil, queueErr); !errors.Is(err, queueErr) {
+		t.Fatalf("queue-only error = %v", err)
+	}
+	if err := combineFetchErrors(statusErr, queueErr); !errors.Is(err, statusErr) || !strings.Contains(err.Error(), queueErr.Error()) {
+		t.Fatalf("combined error = %v", err)
 	}
 }
 

@@ -23,6 +23,10 @@ type Options struct {
 
 // Run boots the Flyer TUI until the context is cancelled.
 func Run(ctx context.Context, opts Options) error {
+	return run(ctx, opts, ui.Run)
+}
+
+func run(ctx context.Context, opts Options, startUI func(ui.Options) error) error {
 	cfg, err := config.Load(opts.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("load spindle config: %w", err)
@@ -73,5 +77,5 @@ func Run(ctx context.Context, opts Options) error {
 		PrefsPath: opts.PrefsPath,
 		Refresh:   func() error { return refresh(ctx, store, client) },
 	}
-	return ui.Run(uiOpts)
+	return startUI(uiOpts)
 }
