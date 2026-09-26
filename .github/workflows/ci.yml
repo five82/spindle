@@ -36,7 +36,7 @@ jobs:
         run: go test -tags no_vship ./...
 
       - name: Run race detection
-        run: go test -race -p 1 -tags no_vship ./...
+        run: go test -race -p 4 -tags no_vship ./...
 
       - name: CGO build
         run: CGO_ENABLED=1 go build -tags no_vship ./...
@@ -63,7 +63,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.14.0
           args: --timeout=5m --build-tags=no_vship
 
   security:
@@ -87,5 +87,5 @@ jobs:
 
       - name: Check for vulnerabilities
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck -tags no_vship ./...
