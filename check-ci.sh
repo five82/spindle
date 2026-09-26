@@ -74,9 +74,11 @@ cleanup_mod_diff
 trap - EXIT
 print_success "go.mod is tidy"
 
-print_step "Running go test ./..."
-if go test "${GO_TAGS_ARG[@]}" ./...; then
+print_step "Running go test with coverage"
+if go test "${GO_TAGS_ARG[@]}" -covermode=atomic -coverprofile=coverage.out ./...; then
     print_success "Tests passed"
+    go tool cover -func=coverage.out | tail -n 1
+    print_success "Coverage profile: coverage.out (view with go tool cover -html=coverage.out)"
 else
     print_error "Tests failed"
     exit 1
