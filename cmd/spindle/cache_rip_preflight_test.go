@@ -78,4 +78,13 @@ func TestCacheRipPreflightAndExistingFingerprint(t *testing.T) {
 	if !strings.Contains(got, "Disc already cached") {
 		t.Fatalf("cached disc: %s", got)
 	}
+	if err := ripcache.New(cfg.RipCacheDir(), 1).Remove(fp); err != nil {
+		t.Fatal(err)
+	}
+	// An uncached disc reaches one-shot identification. The empty MakeMKV
+	// boundary fails safely and must not leave a temporary queue item.
+	cfg.MakeMKV.OpticalDrive = "/dev/sr0"
+	if err := cmd.RunE(cmd, []string{"/dev/sr0"}); err == nil || !strings.Contains(err.Error(), "identification:") {
+		t.Fatalf("identification failure: %v", err)
+	}
 }

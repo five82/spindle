@@ -67,6 +67,20 @@ func TestSelectCacheEntryRejectsUnknownFingerprint(t *testing.T) {
 	}
 }
 
+func TestSelectCacheEntryRejectsInvalidSelectors(t *testing.T) {
+	entries := []ripcache.EntryMetadata{{Fingerprint: "abcd1234"}}
+	for _, tc := range []struct{ selector, want string }{
+		{"  ", "required"}, {"0", "invalid entry number"}, {"-2", "invalid entry number"}, {"9", "not found"}, {"no-match", "not found"},
+	} {
+		if _, err := selectCacheEntry(entries, tc.selector); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("select %q: %v", tc.selector, err)
+		}
+	}
+	if _, err := selectCacheEntries(entries, []string{"1", "bad"}); err == nil {
+		t.Fatal("invalid selector in batch accepted")
+	}
+}
+
 func TestCacheRemoveHelpDocumentsSelectors(t *testing.T) {
 	cmd := newCacheRemoveCmd()
 	var output bytes.Buffer
