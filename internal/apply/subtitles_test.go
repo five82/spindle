@@ -101,4 +101,10 @@ func TestApplyNoEncodedAssetsAndReviewReason(t *testing.T) {
 	if len(sess.Item.ReviewReasons()) != 1 || !strings.Contains(sess.Item.ReviewReasons()[0], "movie") {
 		t.Fatalf("review: %v", sess.Item.ReviewReasons())
 	}
+	sess.Env.Assets.Encoded = []ripspec.Asset{{EpisodeKey: "movie", Path: "/missing.mkv", Status: ripspec.AssetStatusCompleted}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := New(&config.Config{}).Run(ctx, sess); err != context.Canceled {
+		t.Fatalf("canceled apply: %v", err)
+	}
 }
