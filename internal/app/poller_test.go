@@ -13,6 +13,39 @@ import (
 	"github.com/five82/flyer/internal/state"
 )
 
+func TestStartPollerRefreshesImmediately(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/status":
+			_ = json.NewEncoder(w).Encode(spindle.StatusResponse{PID: 77})
+		case "/api/queue":
+			_ = json.NewEncoder(w).Encode(spindle.QueueListResponse{Items: []spindle.QueueItem{{ID: 88}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var store state.Store
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// A long interval proves the first refresh is immediate, not ticker-driven.
+	StartPoller(ctx, &store, newTestClient(t, server.URL), time.Hour)
+	deadline := time.After(2 * time.Second)
+	for {
+		snap := store.Snapshot()
+		if snap.HasStatus && snap.Status.PID == 77 && len(snap.Queue) == 1 && snap.Queue[0].ID == 88 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("poller did not populate store: %+v", snap)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 func TestCalculateBackoff(t *testing.T) {
 	baseInterval := 2 * time.Second
 
