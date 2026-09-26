@@ -26,6 +26,8 @@ import (
 
 // ProcessChunked runs the chunked encoding pipeline for a single file.
 // Returns the crop result so the caller can use it for validation.
+type targetQualityEncoder func(context.Context, []chunk.Chunk, string, *video.Info, *encode.EncodeConfig, string, *video.CropRect, encode.ProgressCallback, encode.TargetQualityConfig) (int, *perf.TargetQualityStats, error)
+
 func ProcessChunked(
 	ctx context.Context,
 	cfg *config.Config,
@@ -36,6 +38,21 @@ func ProcessChunked(
 	qualitySetting float32,
 	rep reporter.Reporter,
 	perfc *perf.Collector,
+) (CropResult, error) {
+	return processChunkedWithEncoder(ctx, cfg, inputPath, outputPath, videoProps, vidInf, audioStreams, qualitySetting, rep, perfc, encode.EncodeTargetQuality)
+}
+
+func processChunkedWithEncoder(
+	ctx context.Context,
+	cfg *config.Config,
+	inputPath, outputPath string,
+	videoProps *media.VideoProperties,
+	vidInf *video.Info,
+	audioStreams []media.AudioStreamInfo,
+	qualitySetting float32,
+	rep reporter.Reporter,
+	perfc *perf.Collector,
+	encodeTarget targetQualityEncoder,
 ) (CropResult, error) {
 	if cfg.QualityMode == config.QualityModeTarget && !quality.VshipBuildEnabled() {
 		return CropResult{}, fmt.Errorf("target-quality mode is not available in this build; rebuild without -tags no_vship and with libvship installed, or use --quality-mode crf")
@@ -437,7 +454,7 @@ func ProcessChunked(
 			rep.Verbose(fmt.Sprintf("Target-quality SSIMULACRA2 (SDR <=1080p): target %.1f +/- %.1f after per-title CVVDP warmup calibration, CRF range %s, initial CRF %s with adaptive priors, whole-chunk probes (every probe scores the full chunk), metric workers %d", tqTarget, tqTolerance, cfg.CRFSearchRange, quality.FormatCRF(qualitySetting), cfg.MetricWorkers))
 		}
 		var tqStats *perf.TargetQualityStats
-		_, tqStats, encodeErr = encode.EncodeTargetQuality(
+		_, tqStats, encodeErr = encodeTarget(
 			encodeCtx,
 			chunks,
 			inputPath,

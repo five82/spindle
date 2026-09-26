@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/five82/reel/internal/chunk"
@@ -36,7 +37,12 @@ func TestEncodeAllTinyRawClipAndResume(t *testing.T) {
 	work := filepath.Join(dir, "work")
 	for run := 0; run < 2; run++ {
 		var progress []worker.Progress
-		workers, err := EncodeAll(context.Background(), chunks, path, info, cfg, work, nil, func(p worker.Progress) { progress = append(progress, p) })
+		var progressMu sync.Mutex
+		workers, err := EncodeAll(context.Background(), chunks, path, info, cfg, work, nil, func(p worker.Progress) {
+			progressMu.Lock()
+			progress = append(progress, p)
+			progressMu.Unlock()
+		})
 		if err != nil || workers < 1 {
 			t.Fatalf("run %d: workers=%d error=%v", run, workers, err)
 		}

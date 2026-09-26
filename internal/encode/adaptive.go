@@ -290,31 +290,39 @@ func (l *adaptiveLimiter) monitor(ctx context.Context, cancel context.CancelFunc
 		if !ok || stats.MemTotal == 0 {
 			continue
 		}
-
-		availableFraction := float64(stats.MemAvailable) / float64(stats.MemTotal)
-		currentSwapUsed := stats.SwapUsed()
-		swapGrowthTotal := positiveDelta(currentSwapUsed, baselineSwapUsed)
-		swapGrowthInterval := positiveDelta(currentSwapUsed, lastSwapUsed)
-		lastSwapUsed = currentSwapUsed
-
-		if critical, reason := l.criticalPressure(availableFraction, swapGrowthTotal, stats); critical {
-			detail := fmt.Sprintf("%s, available %.0f%%, swap +%s", reason, availableFraction*100, util.FormatBytesReadable(swapGrowthTotal))
-			setError(fmt.Errorf("%w: %s", ErrMemoryPressure, detail))
-			l.warnf("Memory pressure is critical (%s); canceling encode before swap exhaustion", detail)
-			cancel()
-			l.wake()
+		lastSwapUsed = l.monitorSample(stats, baselineSwapUsed, lastSwapUsed, cancel, setError)
+		if ctx.Err() != nil {
 			return
 		}
-
-		if l.hasPressure(availableFraction) {
-			l.reduceTarget(availableFraction, swapGrowthInterval)
-			continue
-		}
-
-		swapGrowthStable := swapGrowthStableForRamp(stats, swapGrowthTotal, swapGrowthInterval)
-		memoryStable := availableFraction > memoryStableAvailableFraction && swapGrowthStable
-		l.maybeRampUp(memoryStable)
 	}
+}
+
+// monitorSample keeps pressure decisions independent of the clock and /proc so
+// they can be tested without changing the real monitor's sampling interval.
+func (l *adaptiveLimiter) monitorSample(stats util.MemoryStats, baselineSwapUsed, lastSwapUsed uint64, cancel context.CancelFunc, setError func(error)) uint64 {
+	availableFraction := float64(stats.MemAvailable) / float64(stats.MemTotal)
+	currentSwapUsed := stats.SwapUsed()
+	swapGrowthTotal := positiveDelta(currentSwapUsed, baselineSwapUsed)
+	swapGrowthInterval := positiveDelta(currentSwapUsed, lastSwapUsed)
+
+	if critical, reason := l.criticalPressure(availableFraction, swapGrowthTotal, stats); critical {
+		detail := fmt.Sprintf("%s, available %.0f%%, swap +%s", reason, availableFraction*100, util.FormatBytesReadable(swapGrowthTotal))
+		setError(fmt.Errorf("%w: %s", ErrMemoryPressure, detail))
+		l.warnf("Memory pressure is critical (%s); canceling encode before swap exhaustion", detail)
+		cancel()
+		l.wake()
+		return currentSwapUsed
+	}
+
+	if l.hasPressure(availableFraction) {
+		l.reduceTarget(availableFraction, swapGrowthInterval)
+		return currentSwapUsed
+	}
+
+	swapGrowthStable := swapGrowthStableForRamp(stats, swapGrowthTotal, swapGrowthInterval)
+	memoryStable := availableFraction > memoryStableAvailableFraction && swapGrowthStable
+	l.maybeRampUp(memoryStable)
+	return currentSwapUsed
 }
 
 func positiveDelta(current, previous uint64) uint64 {

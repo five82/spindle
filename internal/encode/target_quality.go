@@ -59,6 +59,8 @@ type TargetQualityConfig struct {
 	// (and the honest denoise ceiling) they were measured under.
 	GrainTreatment *perf.GrainTreatmentStats
 	Verbose        func(string)
+	// scorerFactory lets tests exercise the scheduler and encoder without GPU handlers.
+	scorerFactory func(quality.MetricKind, uint32, uint32, *video.Info, string) (quality.ChunkScorer, error)
 }
 
 type targetQualityResult struct {
@@ -337,14 +339,14 @@ func newTargetQualityRun(
 // that the rest of the run does not need, and freeing it is what makes
 // cross-title pairing headroom real.
 func (r *targetQualityRun) openScorerPools() error {
-	pool, err := newScorerPool(r.tq.Metric, r.tq.MetricWorkers, r.width, r.height, r.inf, r.tq.DisplayPath)
+	pool, err := r.newScorerPool(r.tq.Metric)
 	if err != nil {
 		return err
 	}
 	r.metricPool = pool
 	if r.calibration != nil {
 		if _, locked := r.calibration.Offset(); !locked {
-			r.warmupPool, err = newScorerPool(quality.MetricCVVDP, r.tq.MetricWorkers, r.width, r.height, r.inf, r.tq.DisplayPath)
+			r.warmupPool, err = r.newScorerPool(quality.MetricCVVDP)
 			if err != nil {
 				closeScorerPool(r.metricPool)
 				r.metricPool = nil
@@ -385,10 +387,22 @@ func (r *targetQualityRun) closeWarmupPool() {
 // coexisting handlers, silently corrupts scores, trips the floor guard, and
 // can cascade into huge output-size swings. Verify the linked library with
 // scripts/handlertest; see docs/VSHIP_CONCURRENCY_BUG.md.
+func (r *targetQualityRun) newScorerPool(kind quality.MetricKind) (chan quality.ChunkScorer, error) {
+	factory := r.tq.scorerFactory
+	if factory == nil {
+		factory = quality.NewChunkScorer
+	}
+	return newScorerPoolWithFactory(kind, r.tq.MetricWorkers, r.width, r.height, r.inf, r.tq.DisplayPath, factory)
+}
+
 func newScorerPool(kind quality.MetricKind, workers int, width, height uint32, inf *video.Info, displayPath string) (chan quality.ChunkScorer, error) {
+	return newScorerPoolWithFactory(kind, workers, width, height, inf, displayPath, quality.NewChunkScorer)
+}
+
+func newScorerPoolWithFactory(kind quality.MetricKind, workers int, width, height uint32, inf *video.Info, displayPath string, factory func(quality.MetricKind, uint32, uint32, *video.Info, string) (quality.ChunkScorer, error)) (chan quality.ChunkScorer, error) {
 	pool := make(chan quality.ChunkScorer, workers)
 	for i := 0; i < workers; i++ {
-		scorer, err := quality.NewChunkScorer(kind, width, height, inf, displayPath)
+		scorer, err := factory(kind, width, height, inf, displayPath)
 		if err != nil {
 			for j := 0; j < i; j++ {
 				_ = (<-pool).Close()

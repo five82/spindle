@@ -226,6 +226,10 @@ Output Options:
 }
 
 func executeEncode(ea encodeArgs) error {
+	return executeEncodeWithProcess(ea, processing.ProcessVideos)
+}
+
+func executeEncodeWithProcess(ea encodeArgs, process func(context.Context, *config.Config, []string, string, reporter.Reporter) ([]processing.EncodeResult, error)) error {
 	// Resolve input path
 	inputPath, err := filepath.Abs(ea.inputPath)
 	if err != nil {
@@ -394,13 +398,17 @@ func executeEncode(ea encodeArgs) error {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 	go func() {
-		<-sigCh
-		cancel()
+		select {
+		case <-sigCh:
+			cancel()
+		case <-ctx.Done():
+		}
 	}()
 
 	// Run encoding
-	_, err = processing.ProcessVideos(ctx, cfg, filesToProcess, targetFilename, rep)
+	_, err = process(ctx, cfg, filesToProcess, targetFilename, rep)
 	return err
 }
 

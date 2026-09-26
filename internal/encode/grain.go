@@ -286,6 +286,13 @@ func resolveGrainTreatment(ctx context.Context, mode string, cfg *EncodeConfig, 
 // runGrainGate probes sample chunks at a fixed CRF and converts the bits they
 // cost into a treatment verdict.
 func runGrainGate(ctx context.Context, cfg *EncodeConfig, in GrainGateInput) (*perf.GrainTreatmentStats, error) {
+	return runGrainGateWithMeasure(ctx, cfg, in, measureChunkBPP)
+}
+
+// grainBPPMeasure is the sample encode boundary; tests substitute measured bit costs.
+type grainBPPMeasure func(context.Context, *EncodeConfig, GrainGateInput, chunk.Chunk, string, uint32, uint32) (float64, error)
+
+func runGrainGateWithMeasure(ctx context.Context, cfg *EncodeConfig, in GrainGateInput, measure grainBPPMeasure) (*perf.GrainTreatmentStats, error) {
 	width, height := video.OutputDimensions(in.Info, in.CropRect)
 	// Classify by SOURCE width, not the coded (post-crop) width: a
 	// pillarboxed 1080p film (Mary Poppins crops 1920 -> 1792) is not an SD
@@ -326,7 +333,7 @@ func runGrainGate(ctx context.Context, cfg *EncodeConfig, in GrainGateInput) (*p
 
 	start := time.Now()
 	for _, ch := range samples {
-		bpp, err := measureChunkBPP(ctx, &gateCfg, in, ch, filepath.Join(gateDir, fmt.Sprintf("%04d.ivf", ch.Idx)), width, height)
+		bpp, err := measure(ctx, &gateCfg, in, ch, filepath.Join(gateDir, fmt.Sprintf("%04d.ivf", ch.Idx)), width, height)
 		if err != nil {
 			return nil, err
 		}
@@ -366,15 +373,20 @@ func runGrainGate(ctx context.Context, cfg *EncodeConfig, in GrainGateInput) (*p
 // measureChunkBPP encodes one sample chunk and returns its bits per pixel per
 // frame over the coded (post-crop) geometry.
 func measureChunkBPP(ctx context.Context, gateCfg *EncodeConfig, in GrainGateInput, ch chunk.Chunk, outputPath string, width, height uint32) (float64, error) {
+	return measureChunkBPPWithEncode(in, ch, outputPath, width, height, func(reader video.FrameReader) error {
+		return encodeChunkStreaming(ctx, reader, ch, in.Info, gateCfg, outputPath, gateCfg.CRF, width, height, nil).Error
+	})
+}
+
+func measureChunkBPPWithEncode(in GrainGateInput, ch chunk.Chunk, outputPath string, width, height uint32, encode func(video.FrameReader) error) (float64, error) {
 	src, err := video.Open(in.InputPath, 1)
 	if err != nil {
 		return 0, fmt.Errorf("failed to open source for grain gate: %w", err)
 	}
 	defer src.Close()
 
-	result := encodeChunkStreaming(ctx, src.FrameReader(in.Info, in.CropRect), ch, in.Info, gateCfg, outputPath, gateCfg.CRF, width, height, nil)
-	if result.Error != nil {
-		return 0, fmt.Errorf("grain gate sample chunk %04d failed: %w", ch.Idx, result.Error)
+	if err := encode(src.FrameReader(in.Info, in.CropRect)); err != nil {
+		return 0, fmt.Errorf("grain gate sample chunk %04d failed: %w", ch.Idx, err)
 	}
 	f, err := os.Open(outputPath)
 	if err != nil {
@@ -476,13 +488,17 @@ func newGrainStage2Measure(gateCfg *EncodeConfig, in GrainGateInput, dir string,
 // chunks, level cap included, so the bits they report are bits that would
 // actually be delivered.
 func measureTargetDeliveredBPP(ctx context.Context, gateCfg *EncodeConfig, in GrainGateInput, ch chunk.Chunk, dir string, width, height uint32, target, tolerance float32, scorer quality.ChunkScorer) (float64, int, error) {
+	return measureTargetDeliveredBPPWithMeasure(ctx, gateCfg, in, ch, dir, width, height, target, tolerance, scorer, measureChunkBPP)
+}
+
+func measureTargetDeliveredBPPWithMeasure(ctx context.Context, gateCfg *EncodeConfig, in GrainGateInput, ch chunk.Chunk, dir string, width, height uint32, target, tolerance float32, scorer quality.ChunkScorer, measure grainBPPMeasure) (float64, int, error) {
 	probeCfg := *gateCfg
 	crf := grainStage2StartCRF
 	var probes []stage2Probe
 	for len(probes) < grainStage2MaxProbes {
 		probeCfg.CRF = crf
 		path := filepath.Join(dir, fmt.Sprintf("tq-%04d-%s.ivf", ch.Idx, quality.FormatCRF(crf)))
-		bpp, err := measureChunkBPP(ctx, &probeCfg, in, ch, path, width, height)
+		bpp, err := measure(ctx, &probeCfg, in, ch, path, width, height)
 		if err != nil {
 			return 0, len(probes), err
 		}

@@ -77,7 +77,10 @@ func ComputeChunkCVVDP(ctx context.Context, opts CVVDPOptions) (CVVDPResult, err
 	if opts.Width == 0 || opts.Height == 0 {
 		return CVVDPResult{}, fmt.Errorf("invalid CVVDP dimensions %dx%d", opts.Width, opts.Height)
 	}
+	return computeChunkCVVDP(ctx, opts, opts.Processor)
+}
 
+func computeChunkCVVDP(ctx context.Context, opts CVVDPOptions, processor cvvdpScorer) (CVVDPResult, error) {
 	ref := opts.Reference
 	if ref == nil {
 		// The reference is read through the same denoise graph the encoder
@@ -114,7 +117,7 @@ func ComputeChunkCVVDP(ctx context.Context, opts CVVDPOptions) (CVVDPResult, err
 		}
 		return nil
 	}
-	return computeCVVDPFrames(ctx, opts.Processor, opts.Width, opts.Height, opts.Chunk.Frames(), readRef, readDist, nil)
+	return computeCVVDPFrames(ctx, processor, opts.Width, opts.Height, opts.Chunk.Frames(), readRef, readDist, nil)
 }
 
 // ComputeChunkDenoiseCeiling scores the denoised source against the unfiltered
@@ -132,7 +135,10 @@ func ComputeChunkDenoiseCeiling(ctx context.Context, opts DenoiseCeilingOptions)
 	if opts.Denoise == "" {
 		return CVVDPResult{}, fmt.Errorf("denoise ceiling requires a denoise filter")
 	}
+	return computeChunkDenoiseCeiling(ctx, opts, opts.Processor)
+}
 
+func computeChunkDenoiseCeiling(ctx context.Context, opts DenoiseCeilingOptions, processor cvvdpScorer) (CVVDPResult, error) {
 	original, err := video.Open(opts.SourcePath, metricSourceDecoderThreads)
 	if err != nil {
 		return CVVDPResult{}, fmt.Errorf("failed to open source for denoise ceiling: %w", err)
@@ -155,7 +161,7 @@ func ComputeChunkDenoiseCeiling(ctx context.Context, opts DenoiseCeilingOptions)
 			return nil
 		}
 	}
-	return computeCVVDPFrames(ctx, opts.Processor, opts.Width, opts.Height, opts.Chunk.Frames(),
+	return computeCVVDPFrames(ctx, processor, opts.Width, opts.Height, opts.Chunk.Frames(),
 		read(refReader, "source"), read(distReader, "denoised"), opts.Observe)
 }
 

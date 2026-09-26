@@ -29,16 +29,36 @@ func estimateGrainAndCeiling(ctx context.Context, in GrainGateInput, stats *perf
 		return grain.Estimate{}, fmt.Errorf("paired-frame analysis requires a display model and sample chunks")
 	}
 	width, height := video.OutputDimensions(in.Info, in.CropRect)
-	estimator, err := grain.New(int(width), int(height))
-	if err != nil {
-		return grain.Estimate{}, err
-	}
-	defer estimator.Close()
 	proc, err := quality.NewVshipProcessor(width, height, in.Info, in.DisplayPath)
 	if err != nil {
 		return grain.Estimate{}, fmt.Errorf("create paired-frame scorer: %w", err)
 	}
 	defer func() { _ = proc.Close() }()
+	return estimateGrainFromPairs(ctx, in, stats, func(ctx context.Context, ch chunk.Chunk, observe func(int, []byte, []byte) error) (float32, error) {
+		res, err := quality.ComputeChunkDenoiseCeiling(ctx, quality.DenoiseCeilingOptions{
+			SourcePath: in.InputPath,
+			Info:       in.Info,
+			Chunk:      ch,
+			CropRect:   in.CropRect,
+			Width:      width,
+			Height:     height,
+			Denoise:    stats.Denoise,
+			Processor:  proc,
+			Observe:    observe,
+		})
+		return res.Score, err
+	})
+}
+
+// estimateGrainFromPairs owns the title-wide estimator; only pair production
+// and metric scoring need native decoders and a GPU handler.
+func estimateGrainFromPairs(ctx context.Context, in GrainGateInput, stats *perf.GrainTreatmentStats, measure func(context.Context, chunk.Chunk, func(int, []byte, []byte) error) (float32, error)) (grain.Estimate, error) {
+	width, height := video.OutputDimensions(in.Info, in.CropRect)
+	estimator, err := grain.New(int(width), int(height))
+	if err != nil {
+		return grain.Estimate{}, err
+	}
+	defer estimator.Close()
 
 	byIdx := make(map[int]chunk.Chunk, len(in.Chunks))
 	for _, ch := range in.Chunks {
@@ -51,28 +71,18 @@ func estimateGrainAndCeiling(ctx context.Context, in GrainGateInput, stats *perf
 		if !ok {
 			return grain.Estimate{}, fmt.Errorf("grain sample chunk %d is missing from the plan", idx)
 		}
-		res, err := quality.ComputeChunkDenoiseCeiling(ctx, quality.DenoiseCeilingOptions{
-			SourcePath: in.InputPath,
-			Info:       in.Info,
-			Chunk:      ch,
-			CropRect:   in.CropRect,
-			Width:      width,
-			Height:     height,
-			Denoise:    stats.Denoise,
-			Processor:  proc,
-			Observe: func(i int, original, denoised []byte) error {
-				if !grain.SampleFrame(i, ch.Frames()) {
-					return nil
-				}
-				return estimator.Observe(ch.Start+i, original, denoised)
-			},
+		score, err := measure(ctx, ch, func(i int, original, denoised []byte) error {
+			if !grain.SampleFrame(i, ch.Frames()) {
+				return nil
+			}
+			return estimator.Observe(ch.Start+i, original, denoised)
 		})
 		if err != nil {
 			return grain.Estimate{}, fmt.Errorf("paired-frame analysis of chunk %04d: %w", idx, err)
 		}
-		scores = append(scores, float64(res.Score))
+		scores = append(scores, float64(score))
 		if in.Verbose != nil {
-			in.Verbose(fmt.Sprintf("Grain gate ceiling chunk=%04d denoise_ceiling_jod=%.4f", ch.Idx, res.Score))
+			in.Verbose(fmt.Sprintf("Grain gate ceiling chunk=%04d denoise_ceiling_jod=%.4f", ch.Idx, score))
 		}
 	}
 	if err := ctx.Err(); err != nil {
