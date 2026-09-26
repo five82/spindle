@@ -21,6 +21,8 @@ if [ "$PROBE_MODE" = empty ]; then
   printf '%s\n' '{"streams":[],"format":{"duration":"120"}}'
 elif [ "$PROBE_MODE" = audio ]; then
   printf '%s\n' '{"streams":[{"index":0,"codec_type":"audio","codec_name":"aac","channels":2,"channel_layout":"stereo","tags":{"language":"eng","title":"Main"}}],"format":{"duration":"120"}}'
+elif [ "$PROBE_MODE" = dual ]; then
+  printf '%s\n' '{"streams":[{"index":0,"codec_type":"audio","codec_name":"aac","channels":6,"channel_layout":"5.1","tags":{"language":"eng","title":"Main"}},{"index":1,"codec_type":"audio","codec_name":"aac","channels":2,"channel_layout":"stereo","tags":{"language":"eng","title":"Commentary"}}],"format":{"duration":"120"}}'
 else
   printf '%s\n' '{"streams":[{"index":0,"codec_type":"video","width":1920,"height":1080,"color_transfer":"smpte2084"}],"format":{"duration":"120"}}'
 fi
@@ -29,7 +31,7 @@ fi
 if [ "$FFMPEG_MODE" = fail ]; then echo 'decode failed' >&2; exit 1; fi
 echo 'crop=1920:800:0:140 crop=1920:800:0:140 crop=1920:1080:0:0' >&2
 `
-	for name, script := range map[string]string{"ffprobe": probe, "ffmpeg": ffmpeg} {
+	for name, script := range map[string]string{"ffprobe": probe, "ffmpeg": ffmpeg, "uvx": "#!/bin/sh\nexit 1\n"} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -66,6 +68,24 @@ echo 'crop=1920:800:0:140 crop=1920:800:0:140 crop=1920:1080:0:0' >&2
 	})
 	if !strings.Contains(got, "Only one audio stream") || !strings.Contains(got, "lang=eng") {
 		t.Fatalf("commentary: %s", got)
+	}
+	t.Setenv("PROBE_MODE", "dual")
+	got = captureStdout(t, func() {
+		if err := commentary.RunE(commentary, []string{file}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(got, "Audio Streams (2)") || !strings.Contains(got, "title=\"Commentary\"") || !strings.Contains(got, "LLM not configured") {
+		t.Fatalf("dual audio: %s", got)
+	}
+	cfg.LLM.APIKey = "test"
+	got = captureStdout(t, func() {
+		if err := commentary.RunE(commentary, []string{file}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(got, "Similarity: error (primary transcription failed)") || !strings.Contains(got, "Commentary Analysis") {
+		t.Fatalf("failed transcription: %s", got)
 	}
 	t.Setenv("PROBE_MODE", "empty")
 	got = captureStdout(t, func() {
