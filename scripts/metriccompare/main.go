@@ -74,37 +74,46 @@ type metricSet struct {
 }
 
 func main() {
-	jobsPath := flag.String("jobs", "", "jobs.json describing (source, distorted) pairs to score")
-	outPath := flag.String("out", "", "path to write results.json (jobs mode)")
-	metricsFlag := flag.String("metrics", "cvvdp,ssimu2", "comma-separated metrics to compute: cvvdp,ssimu2")
-	perFrame := flag.Bool("per-frame", false, "include per-frame SSIMU2 scores in results.json")
-	displayPath := flag.String("display", "", "CVVDP display model JSON (default: generate Reel's default model)")
+	if err := runCLI(os.Args[1:], runJobs, runGPUBench); err != nil {
+		fail(err, "command")
+	}
+}
 
-	gpuBench := flag.Bool("gpubench", false, "run GPU metric micro-benchmark mode instead of jobs mode")
-	srcFlag := flag.String("src", "", "gpubench: source video path")
-	distFlag := flag.String("dist", "", "gpubench: distorted video path (read from frame 0)")
-	startFlag := flag.Int("start", 0, "gpubench: first source frame to sample")
-	framesFlag := flag.Int("frames", 48, "gpubench: number of frames to decode and cache in RAM")
-	repsFlag := flag.Int("reps", 20, "gpubench: number of timed passes over the cached frames")
-	cropFlag := flag.String("crop", "", "gpubench: optional crop rect W:H:X:Y (ffmpeg crop filter order)")
+func runCLI(args []string,
+	jobs func(string, string, string, bool, metricSet) error,
+	bench func(string, string, int, int, int, string, string, metricSet) error,
+) error {
+	fs := flag.NewFlagSet("metriccompare", flag.ContinueOnError)
+	jobsPath := fs.String("jobs", "", "jobs.json describing (source, distorted) pairs to score")
+	outPath := fs.String("out", "", "path to write results.json (jobs mode)")
+	metricsFlag := fs.String("metrics", "cvvdp,ssimu2", "comma-separated metrics to compute: cvvdp,ssimu2")
+	perFrame := fs.Bool("per-frame", false, "include per-frame SSIMU2 scores in results.json")
+	displayPath := fs.String("display", "", "CVVDP display model JSON (default: generate Reel's default model)")
 
-	flag.Parse()
+	gpuBench := fs.Bool("gpubench", false, "run GPU metric micro-benchmark mode instead of jobs mode")
+	srcFlag := fs.String("src", "", "gpubench: source video path")
+	distFlag := fs.String("dist", "", "gpubench: distorted video path (read from frame 0)")
+	startFlag := fs.Int("start", 0, "gpubench: first source frame to sample")
+	framesFlag := fs.Int("frames", 48, "gpubench: number of frames to decode and cache in RAM")
+	repsFlag := fs.Int("reps", 20, "gpubench: number of timed passes over the cached frames")
+	cropFlag := fs.String("crop", "", "gpubench: optional crop rect W:H:X:Y (ffmpeg crop filter order)")
 
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	metrics, err := parseMetrics(*metricsFlag)
-	fail(err, "parse --metrics")
+	if err != nil {
+		return fmt.Errorf("parse --metrics: %w", err)
+	}
 
 	if *gpuBench {
-		fail(runGPUBench(*srcFlag, *distFlag, *startFlag, *framesFlag, *repsFlag, *cropFlag, *displayPath, metrics), "gpubench")
-		return
+		return bench(*srcFlag, *distFlag, *startFlag, *framesFlag, *repsFlag, *cropFlag, *displayPath, metrics)
 	}
 
 	if *jobsPath == "" || *outPath == "" {
-		fmt.Fprintln(os.Stderr, "Usage:")
-		fmt.Fprintln(os.Stderr, "  metriccompare --jobs jobs.json --out results.json [--metrics cvvdp,ssimu2] [--per-frame] [--display display.json]")
-		fmt.Fprintln(os.Stderr, "  metriccompare --gpubench --src X --dist Y --start N --frames 48 --reps 20 [--crop W:H:X:Y]")
-		os.Exit(1)
+		return fmt.Errorf("usage:\n  metriccompare --jobs jobs.json --out results.json [--metrics cvvdp,ssimu2] [--per-frame] [--display display.json]\n  metriccompare --gpubench --src X --dist Y --start N --frames 48 --reps 20 [--crop W:H:X:Y]")
 	}
-	fail(runJobs(*jobsPath, *outPath, *displayPath, *perFrame, metrics), "run jobs")
+	return jobs(*jobsPath, *outPath, *displayPath, *perFrame, metrics)
 }
 
 func parseMetrics(csv string) (metricSet, error) {
@@ -149,6 +158,15 @@ func parseCrop(spec string) (*video.CropRect, error) {
 }
 
 func runJobs(jobsPath, outPath, displayPath string, perFrame bool, metrics metricSet) error {
+	return runJobsWithProcessors(jobsPath, outPath, displayPath, perFrame, metrics,
+		quality.NewVshipProcessor, quality.NewSSIMU2Processor, scoreJob)
+}
+
+func runJobsWithProcessors(jobsPath, outPath, displayPath string, perFrame bool, metrics metricSet,
+	newCVVDP func(uint32, uint32, *video.Info, string) (*quality.VshipProcessor, error),
+	newSSIMU2 func(uint32, uint32, *video.Info) (*quality.SSIMU2Processor, error),
+	score func(jobSpec, *video.Info, uint32, uint32, *quality.VshipProcessor, *quality.SSIMU2Processor, metricSet, bool) (jobResult, error),
+) error {
 	data, err := os.ReadFile(jobsPath)
 	if err != nil {
 		return fmt.Errorf("read jobs file: %w", err)
@@ -185,14 +203,14 @@ func runJobs(jobsPath, outPath, displayPath string, perFrame bool, metrics metri
 		if err != nil {
 			return fmt.Errorf("CVVDP display model: %w", err)
 		}
-		cvvdpProc, err = quality.NewVshipProcessor(width, height, baseInfo, resolvedDisplay)
+		cvvdpProc, err = newCVVDP(width, height, baseInfo, resolvedDisplay)
 		if err != nil {
 			return fmt.Errorf("create CVVDP processor: %w", err)
 		}
 		defer func() { _ = cvvdpProc.Close() }()
 	}
 	if metrics.ssimu2 {
-		ssimu2Proc, err = quality.NewSSIMU2Processor(width, height, baseInfo)
+		ssimu2Proc, err = newSSIMU2(width, height, baseInfo)
 		if err != nil {
 			return fmt.Errorf("create SSIMU2 processor: %w", err)
 		}
@@ -201,7 +219,7 @@ func runJobs(jobsPath, outPath, displayPath string, perFrame bool, metrics metri
 
 	results := make([]jobResult, 0, len(jf.Jobs))
 	for _, job := range jf.Jobs {
-		res, err := scoreJob(job, baseInfo, width, height, cvvdpProc, ssimu2Proc, metrics, perFrame)
+		res, err := score(job, baseInfo, width, height, cvvdpProc, ssimu2Proc, metrics, perFrame)
 		if err != nil {
 			return fmt.Errorf("job %q: %w", job.ID, err)
 		}
@@ -222,6 +240,21 @@ func runJobs(jobsPath, outPath, displayPath string, perFrame bool, metrics metri
 }
 
 func scoreJob(job jobSpec, baseInfo *video.Info, width, height uint32, cvvdpProc *quality.VshipProcessor, ssimu2Proc *quality.SSIMU2Processor, metrics metricSet, perFrame bool) (jobResult, error) {
+	return scoreJobWithMetrics(job, baseInfo, width, height, metrics, perFrame,
+		func(opts quality.CVVDPOptions) (quality.CVVDPResult, error) {
+			opts.Processor = cvvdpProc
+			return quality.ComputeChunkCVVDP(context.Background(), opts)
+		},
+		func(opts quality.SSIMU2Options) (quality.SSIMU2Result, error) {
+			opts.Processor = ssimu2Proc
+			return quality.ComputeChunkSSIMU2(context.Background(), opts)
+		})
+}
+
+func scoreJobWithMetrics(job jobSpec, baseInfo *video.Info, width, height uint32, metrics metricSet, perFrame bool,
+	cvvdp func(quality.CVVDPOptions) (quality.CVVDPResult, error),
+	ssimu2 func(quality.SSIMU2Options) (quality.SSIMU2Result, error),
+) (jobResult, error) {
 	srcInfo, err := video.Probe(job.Src)
 	if err != nil {
 		return jobResult{}, fmt.Errorf("probe source: %w", err)
@@ -247,7 +280,7 @@ func scoreJob(job jobSpec, baseInfo *video.Info, width, height uint32, cvvdpProc
 	jobChunk := chunk.Chunk{Idx: 0, Start: job.Start, End: job.Start + job.Frames}
 
 	if metrics.cvvdp {
-		cr, err := quality.ComputeChunkCVVDP(context.Background(), quality.CVVDPOptions{
+		cr, err := cvvdp(quality.CVVDPOptions{
 			SourcePath: job.Src,
 			ProbePath:  job.Dist,
 			Info:       srcInfo,
@@ -255,7 +288,6 @@ func scoreJob(job jobSpec, baseInfo *video.Info, width, height uint32, cvvdpProc
 			CropRect:   cropRect,
 			Width:      width,
 			Height:     height,
-			Processor:  cvvdpProc,
 		})
 		if err != nil {
 			return jobResult{}, fmt.Errorf("cvvdp: %w", err)
@@ -264,7 +296,7 @@ func scoreJob(job jobSpec, baseInfo *video.Info, width, height uint32, cvvdpProc
 	}
 
 	if metrics.ssimu2 {
-		sr, err := quality.ComputeChunkSSIMU2(context.Background(), quality.SSIMU2Options{
+		sr, err := ssimu2(quality.SSIMU2Options{
 			SourcePath: job.Src,
 			ProbePath:  job.Dist,
 			Info:       srcInfo,
@@ -272,7 +304,6 @@ func scoreJob(job jobSpec, baseInfo *video.Info, width, height uint32, cvvdpProc
 			CropRect:   cropRect,
 			Width:      width,
 			Height:     height,
-			Processor:  ssimu2Proc,
 		})
 		if err != nil {
 			return jobResult{}, fmt.Errorf("ssimu2: %w", err)
@@ -290,7 +321,31 @@ func scoreJob(job jobSpec, baseInfo *video.Info, width, height uint32, cvvdpProc
 // runGPUBench decodes the requested frame range once into RAM, then times
 // repeated metric compute passes over the cached frames only, isolating GPU
 // metric throughput from CPU decode.
+type cvvdpBenchProcessor interface {
+	ResetCVVDP() error
+	ComputeCVVDP(quality.FramePlanes, quality.FramePlanes) (float32, error)
+	Close() error
+}
+
+type ssimu2BenchProcessor interface {
+	ComputeSSIMU2(quality.FramePlanes, quality.FramePlanes) (float64, error)
+	Close() error
+}
+
 func runGPUBench(srcPath, distPath string, start, frames, reps int, cropSpec, displayPath string, metrics metricSet) error {
+	return benchWithProcessors(srcPath, distPath, start, frames, reps, cropSpec, displayPath, metrics,
+		func(w, h uint32, info *video.Info, path string) (cvvdpBenchProcessor, error) {
+			return quality.NewVshipProcessor(w, h, info, path)
+		},
+		func(w, h uint32, info *video.Info) (ssimu2BenchProcessor, error) {
+			return quality.NewSSIMU2Processor(w, h, info)
+		})
+}
+
+func benchWithProcessors(srcPath, distPath string, start, frames, reps int, cropSpec, displayPath string, metrics metricSet,
+	newCVVDP func(uint32, uint32, *video.Info, string) (cvvdpBenchProcessor, error),
+	newSSIMU2 func(uint32, uint32, *video.Info) (ssimu2BenchProcessor, error),
+) error {
 	if srcPath == "" || distPath == "" {
 		return fmt.Errorf("--gpubench requires --src and --dist")
 	}
@@ -329,7 +384,7 @@ func runGPUBench(srcPath, distPath string, start, frames, reps int, cropSpec, di
 		if err != nil {
 			return fmt.Errorf("CVVDP display model: %w", err)
 		}
-		proc, err := quality.NewVshipProcessor(width, height, srcInfo, resolvedDisplay)
+		proc, err := newCVVDP(width, height, srcInfo, resolvedDisplay)
 		if err != nil {
 			return fmt.Errorf("create CVVDP processor: %w", err)
 		}
@@ -354,7 +409,7 @@ func runGPUBench(srcPath, distPath string, start, frames, reps int, cropSpec, di
 	}
 
 	if metrics.ssimu2 {
-		proc, err := quality.NewSSIMU2Processor(width, height, srcInfo)
+		proc, err := newSSIMU2(width, height, srcInfo)
 		if err != nil {
 			return fmt.Errorf("create SSIMU2 processor: %w", err)
 		}

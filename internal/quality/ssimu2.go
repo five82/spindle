@@ -53,6 +53,14 @@ func ComputeChunkSSIMU2(ctx context.Context, opts SSIMU2Options) (SSIMU2Result, 
 		return SSIMU2Result{}, fmt.Errorf("invalid SSIMU2 dimensions %dx%d", opts.Width, opts.Height)
 	}
 
+	return computeChunkSSIMU2(ctx, opts, opts.Processor, newMetricBuffer)
+}
+
+type ssimu2Scorer interface {
+	ComputeSSIMU2(FramePlanes, FramePlanes) (float64, error)
+}
+
+func computeChunkSSIMU2(ctx context.Context, opts SSIMU2Options, processor ssimu2Scorer, allocate func(int) ([]byte, func(), error)) (SSIMU2Result, error) {
 	ref := opts.Reference
 	if ref == nil {
 		// The reference is read through the same denoise graph the encoder
@@ -87,12 +95,12 @@ func ComputeChunkSSIMU2(ctx context.Context, opts SSIMU2Options) (SSIMU2Result, 
 	frameSize := yuv420p10Size(opts.Width, opts.Height)
 	freeCh := make(chan *framePair, 2)
 	for i := 0; i < 2; i++ {
-		srcBuf, releaseSrc, err := newMetricBuffer(frameSize)
+		srcBuf, releaseSrc, err := allocate(frameSize)
 		if err != nil {
 			return SSIMU2Result{}, err
 		}
 		defer releaseSrc() // Runs after the producer's cancel/drain defer below.
-		distBuf, releaseDist, err := newMetricBuffer(frameSize)
+		distBuf, releaseDist, err := allocate(frameSize)
 		if err != nil {
 			return SSIMU2Result{}, err
 		}
@@ -147,7 +155,7 @@ func ComputeChunkSSIMU2(ctx context.Context, opts SSIMU2Options) (SSIMU2Result, 
 		if decoded.err != nil {
 			return SSIMU2Result{}, decoded.err
 		}
-		score, err := opts.Processor.ComputeSSIMU2(decoded.pair.srcPlanes, decoded.pair.distPlanes)
+		score, err := processor.ComputeSSIMU2(decoded.pair.srcPlanes, decoded.pair.distPlanes)
 		if err != nil {
 			return SSIMU2Result{}, fmt.Errorf("SSIMU2 failed on frame %d: %w", len(perFrame), err)
 		}

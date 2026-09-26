@@ -56,7 +56,30 @@ func main() {
 		os.Exit(2)
 	}
 	sourcePath, workDir := os.Args[1], os.Args[2]
+	handlers := 0
+	if len(os.Args) >= 4 {
+		handlers = mustAtoi(os.Args[3])
+	}
+	reps := 3
+	if len(os.Args) >= 5 {
+		reps = mustAtoi(os.Args[4])
+	}
+	runHandlerTest(sourcePath, workDir, handlers, reps, newHandlerScorer)
+}
 
+type handlerScorerFactory func(sourcePath, workDir, displayPath string, info *video.Info, crop *video.CropRect, width, height uint32) (func(chunk.Chunk) (float32, error), func(), error)
+
+func newHandlerScorer(sourcePath, workDir, displayPath string, info *video.Info, crop *video.CropRect, width, height uint32) (func(chunk.Chunk) (float32, error), func(), error) {
+	proc, err := quality.NewVshipProcessor(width, height, info, displayPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return func(ch chunk.Chunk) (float32, error) {
+		return scoreChunk(proc, sourcePath, ch, info, crop, width, height, workDir)
+	}, func() { _ = proc.Close() }, nil
+}
+
+func runHandlerTest(sourcePath, workDir string, handlers, reps int, newScorer handlerScorerFactory) {
 	srcInfo, err := video.Probe(sourcePath)
 	fail(err, "probe source")
 	manifest, err := readManifest(filepath.Join(workDir, "resume.json"))
@@ -85,37 +108,32 @@ func main() {
 	displayPath, err := quality.EnsureDisplayModel(workDir, srcInfo, "")
 	fail(err, "display model")
 
-	handlers := config.DefaultMetricWorkersForWidth(width)
-	if len(os.Args) >= 4 {
-		handlers = mustAtoi(os.Args[3])
+	if handlers == 0 {
+		handlers = config.DefaultMetricWorkersForWidth(width)
 	}
 	if handlers > len(chunks) {
 		handlers = len(chunks)
-	}
-	reps := 3
-	if len(os.Args) >= 5 {
-		reps = mustAtoi(os.Args[4])
 	}
 
 	fmt.Printf("Source: %s (%d frames)\nWorkdir: %s\nChunks: %d, output %dx%d, crop %q\nBand: %.2f +/- %.2f JOD | handlers=%d reps=%d EPS=%.3f\n\n",
 		sourcePath, frames, workDir, len(chunks), width, height, manifest.CropFilter, tq.Target, tq.Tolerance, handlers, reps, EPS)
 
-	score := func(proc *quality.VshipProcessor, ch chunk.Chunk) (float32, error) {
-		return scoreChunk(proc, sourcePath, ch, srcInfo, cropRect, width, height, workDir)
+	create := func() (func(chunk.Chunk) (float32, error), func(), error) {
+		return newScorer(sourcePath, workDir, displayPath, srcInfo, cropRect, width, height)
 	}
 
 	// Phase 1: truth -- one handler, serial. Definitionally race-free.
 	fmt.Println("Phase 1: single-handler serial truth...")
-	truthProc, err := quality.NewVshipProcessor(width, height, srcInfo, displayPath)
+	score, closeTruth, err := create()
 	fail(err, "truth processor")
 	truth := make(map[int]float32, len(chunks))
 	for i, ch := range chunks {
-		s, err := score(truthProc, ch)
+		s, err := score(ch)
 		fail(err, fmt.Sprintf("truth chunk %04d", ch.Idx))
 		truth[ch.Idx] = s
 		fmt.Printf("\r  scored %d/%d", i+1, len(chunks))
 	}
-	_ = truthProc.Close()
+	closeTruth()
 	mean, mn, below := stats(chunks, truth, tq)
 	fmt.Printf("\r  truth: mean=%.4f min=%.4f below_band=%d\n\n", mean, mn, below)
 
@@ -123,7 +141,7 @@ func main() {
 	worstDelta := 0.0
 	for rep := 0; rep < reps; rep++ {
 		fmt.Printf("Phase 2 rep %d: %d distinct handlers, concurrent...\n", rep+1, handlers)
-		conc := concurrentPass(handlers, chunks, score, width, height, srcInfo, displayPath)
+		conc := concurrentPass(handlers, chunks, create)
 		mean, mn, below := stats(chunks, conc, tq)
 		maxDelta, worstIdx := maxDeltaVsTruth(chunks, conc, truth)
 		if maxDelta > worstDelta {
@@ -149,18 +167,14 @@ func main() {
 
 // concurrentPass scores all chunks with `handlers` DISTINCT handlers, one per
 // worker goroutine, with no locking -- exactly how reel scores probes.
-func concurrentPass(handlers int, chunks []chunk.Chunk, score func(*quality.VshipProcessor, chunk.Chunk) (float32, error), width, height uint32, srcInfo *video.Info, displayPath string) map[int]float32 {
-	procs := make([]*quality.VshipProcessor, handlers)
+func concurrentPass(handlers int, chunks []chunk.Chunk, create func() (func(chunk.Chunk) (float32, error), func(), error)) map[int]float32 {
+	scorers := make([]func(chunk.Chunk) (float32, error), handlers)
 	for w := 0; w < handlers; w++ {
-		p, err := quality.NewVshipProcessor(width, height, srcInfo, displayPath)
+		score, closeScorer, err := create()
 		fail(err, fmt.Sprintf("concurrent processor %d", w))
-		procs[w] = p
+		defer closeScorer()
+		scorers[w] = score
 	}
-	defer func() {
-		for _, p := range procs {
-			_ = p.Close()
-		}
-	}()
 
 	out := make(map[int]float32, len(chunks))
 	var mu sync.Mutex
@@ -169,10 +183,10 @@ func concurrentPass(handlers int, chunks []chunk.Chunk, score func(*quality.Vshi
 	var wg sync.WaitGroup
 	for w := 0; w < handlers; w++ {
 		wg.Add(1)
-		go func(proc *quality.VshipProcessor) {
+		go func(score func(chunk.Chunk) (float32, error)) {
 			defer wg.Done()
 			for ch := range chunkCh {
-				s, err := score(proc, ch)
+				s, err := score(ch)
 				fail(err, fmt.Sprintf("concurrent chunk %04d", ch.Idx))
 				mu.Lock()
 				out[ch.Idx] = s
@@ -180,7 +194,7 @@ func concurrentPass(handlers int, chunks []chunk.Chunk, score func(*quality.Vshi
 				fmt.Printf("\r  scored %d/%d", done, len(chunks))
 				mu.Unlock()
 			}
-		}(procs[w])
+		}(scorers[w])
 	}
 	for _, ch := range chunks {
 		chunkCh <- ch

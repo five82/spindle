@@ -163,13 +163,30 @@ func ComputeChunkDenoiseCeiling(ctx context.Context, opts DenoiseCeilingOptions)
 // producer goroutine so CPU frame decode overlaps the GPU metric compute; two
 // buffer pairs rotate between the producer and the consumer. All GPU calls
 // stay on this goroutine.
+type cvvdpScorer interface {
+	ResetCVVDP() error
+	ComputeCVVDP(FramePlanes, FramePlanes) (float32, error)
+}
+
 func computeCVVDPFrames(
 	ctx context.Context,
-	processor *VshipProcessor,
+	processor cvvdpScorer,
 	width, height uint32,
 	frames int,
 	readRef, readDist func(i int, buf []byte) error,
 	observe func(i int, original, denoised []byte) error,
+) (CVVDPResult, error) {
+	return computeCVVDPFramesWithBuffer(ctx, processor, width, height, frames, readRef, readDist, observe, newMetricBuffer)
+}
+
+func computeCVVDPFramesWithBuffer(
+	ctx context.Context,
+	processor cvvdpScorer,
+	width, height uint32,
+	frames int,
+	readRef, readDist func(i int, buf []byte) error,
+	observe func(i int, original, denoised []byte) error,
+	allocate func(int) ([]byte, func(), error),
 ) (CVVDPResult, error) {
 	ctx, cancelDecode := context.WithCancel(ctx)
 	defer cancelDecode()
@@ -181,12 +198,12 @@ func computeCVVDPFrames(
 	frameSize := yuv420p10Size(width, height)
 	freeCh := make(chan *framePair, 2)
 	for i := 0; i < 2; i++ {
-		srcBuf, releaseSrc, err := newMetricBuffer(frameSize)
+		srcBuf, releaseSrc, err := allocate(frameSize)
 		if err != nil {
 			return CVVDPResult{}, err
 		}
 		defer releaseSrc() // Runs after the producer's cancel/drain defer below.
-		distBuf, releaseDist, err := newMetricBuffer(frameSize)
+		distBuf, releaseDist, err := allocate(frameSize)
 		if err != nil {
 			return CVVDPResult{}, err
 		}

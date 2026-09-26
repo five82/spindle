@@ -57,8 +57,26 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Usage: fullvalidate <source.mkv> <workdir>")
 		os.Exit(1)
 	}
-	sourcePath, workDir := os.Args[1], os.Args[2]
+	runValidation(os.Args[1], os.Args[2], newChunkScorer)
+}
 
+type chunkScorerFactory func(sourcePath, workDir, displayPath string, info *video.Info, crop *video.CropRect, width, height uint32) (func(chunk.Chunk) (float32, error), func(), error)
+
+func newChunkScorer(sourcePath, workDir, displayPath string, info *video.Info, crop *video.CropRect, width, height uint32) (func(chunk.Chunk) (float32, error), func(), error) {
+	proc, err := quality.NewVshipProcessor(width, height, info, displayPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return func(ch chunk.Chunk) (float32, error) {
+		res, err := quality.ComputeChunkCVVDP(context.Background(), quality.CVVDPOptions{
+			SourcePath: sourcePath, ProbePath: chunk.IVFPath(workDir, ch.Idx), Info: info,
+			Chunk: ch, CropRect: crop, Width: width, Height: height, Processor: proc,
+		})
+		return res.Score, err
+	}, func() { _ = proc.Close() }, nil
+}
+
+func runValidation(sourcePath, workDir string, factory chunkScorerFactory) {
 	srcInfo, err := video.Probe(sourcePath)
 	fail(err, "probe source")
 	manifest, err := readManifest(filepath.Join(workDir, "resume.json"))
@@ -115,26 +133,15 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			proc, err := quality.NewVshipProcessor(width, height, srcInfo, displayPath)
+			score, closeScorer, err := factory(sourcePath, workDir, displayPath, srcInfo, cropRect, width, height)
 			fail(err, "processor")
-			defer func() { _ = proc.Close() }()
+			defer closeScorer()
 			for ch := range chunkCh {
-				// Score the chunk's standalone encoded IVF from frame 0. This
-				// is the exact bitstream that is concatenated into the final
-				// muxed output, but reading it without a seek avoids the
-				// frame mis-alignment a seek into the muxed AV1 produces.
-				res, err := quality.ComputeChunkCVVDP(context.Background(), quality.CVVDPOptions{
-					SourcePath: sourcePath,
-					ProbePath:  chunk.IVFPath(workDir, ch.Idx),
-					Info:       srcInfo,
-					Chunk:      ch,
-					CropRect:   cropRect,
-					Width:      width,
-					Height:     height,
-					Processor:  proc,
-				})
+				// Each scorer reads a standalone IVF from frame zero, avoiding
+				// seek-induced misalignment in the final muxed AV1.
+				full, err := score(ch)
 				s := recorded[ch.Idx]
-				resultCh <- chunkResult{idx: ch.Idx, frames: ch.Frames(), full: res.Score, metric: s.Metric, recorded: s.FinalScore, probes: len(s.Probes), crf: s.FinalCRF, err: err}
+				resultCh <- chunkResult{idx: ch.Idx, frames: ch.Frames(), full: full, metric: s.Metric, recorded: s.FinalScore, probes: len(s.Probes), crf: s.FinalCRF, err: err}
 			}
 		}()
 	}
