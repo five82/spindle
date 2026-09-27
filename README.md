@@ -25,8 +25,7 @@ Spindle is a personal tool built for one encoding workflow, hardware setup, and
 set of preferences. It is open source in the spirit of sharing, but not
 actively maintained as a general-purpose product: behavior may change as the
 workflow evolves, and questions or issues may receive a slow response or none.
-Pull requests are welcome when they fit the project's goals. The project began
-as and remains an experiment — expect rough edges.
+The project began as and remains an experiment — expect rough edges.
 
 ## Install
 

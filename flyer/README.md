@@ -4,7 +4,7 @@ A read only terminal dashboard for [Spindle](https://github.com/five82/spindle),
 
 ## Expectations
 
-Flyer is a personal tool. I'm sharing it because I believe in open source but I'm not a maintainer. Pull requests are welcome when they fit the project's goals. Expect rough edges.
+Flyer is a personal tool. I'm sharing it because I believe in open source but I'm not a maintainer. Expect rough edges.
 
 ## Features
 
