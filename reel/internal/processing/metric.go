@@ -1,9 +1,9 @@
 package processing
 
 import (
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/quality"
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 // probeMetricFor picks the target-quality probe metric for a source. A

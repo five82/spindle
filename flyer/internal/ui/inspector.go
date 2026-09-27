@@ -9,7 +9,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/five82/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
 // inspectorTabLabels are the tab bar entries in tab order.

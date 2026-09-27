@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/reporter"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/reporter"
 )
 
 func TestProcessVideosTinySyntheticClip(t *testing.T) {

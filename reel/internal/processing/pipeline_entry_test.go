@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/media"
-	"github.com/five82/reel/internal/perf"
-	"github.com/five82/reel/internal/reporter"
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/media"
+	"github.com/five82/spindle/reel/internal/perf"
+	"github.com/five82/spindle/reel/internal/reporter"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 func TestProcessVideosSkipsMissingAndExistingOutput(t *testing.T) {

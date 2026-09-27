@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/five82/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
 // renderEstimatedSize renders the estimated output size during encoding.

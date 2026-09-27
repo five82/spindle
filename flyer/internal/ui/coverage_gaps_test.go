@@ -7,8 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/five82/flyer/internal/spindle"
-	"github.com/five82/flyer/internal/state"
+	"github.com/five82/spindle/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/state"
 )
 
 func TestQueueFilteringRenderingAndSelectionEdges(t *testing.T) {

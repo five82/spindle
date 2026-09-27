@@ -26,7 +26,7 @@ Flyer is a personal tool. I'm sharing it because I believe in open source but I'
 ## Install
 
 ```bash
-go install github.com/five82/flyer/cmd/flyer@latest
+go install github.com/five82/spindle/flyer/cmd/flyer@latest
 ```
 
 Requirements:
@@ -41,8 +41,8 @@ Requirements:
 Flyer runs anywhere it can reach the Spindle API. To build from a source checkout instead:
 
 ```bash
-git clone https://github.com/five82/flyer.git
-cd flyer && go build ./cmd/flyer
+git clone https://github.com/five82/spindle.git
+cd spindle/flyer && go build ./cmd/flyer
 ```
 
 ## Usage
@@ -87,12 +87,18 @@ for server setup.
 
 ## Development
 
+From the monorepo root:
+
 ```bash
-go run ./cmd/flyer     # run without installing
-go test ./...          # run tests
-./check-ci.sh          # full local CI: tests, race, lint, govulncheck
-./deploy.sh            # build this checkout over the installed binary
+go run ./flyer/cmd/flyer  # run without installing
+go test ./flyer/...       # Flyer-only tests; no encoder libraries needed
+./check-ci.sh             # full monorepo CI
+./deploy.sh flyer         # build this checkout over the installed binary
 ```
+
+GitHub is the public mirror; development and CI run on a private Forgejo
+instance. See the [root guide](../README.md#development-checks) for native
+dependencies required by full monorepo checks.
 
 The deploy script keeps the previous binary beside the installed one and
 verifies the installed copy.

@@ -2,7 +2,6 @@ version: "2"
 
 run:
   timeout: 5m
-  go: "1.26.6"
   allow-parallel-runners: true
 
 linters:
@@ -16,9 +15,17 @@ linters:
     - unused
   exclusions:
     presets:
+      - comments
+      - common-false-positives
+      - legacy
       - std-error-handling
     rules:
-      - path: _test\.go
+      # Preserve Flyer's additional checks without expanding migration scope.
+      - path-except: ^flyer/
+        linters:
+          - gocritic
+          - misspell
+      - path: ^flyer/.*_test\.go
         linters:
           - errcheck
   settings:
@@ -32,10 +39,15 @@ formatters:
   enable:
     - gofmt
     - goimports
+  exclusions:
+    paths:
+      - ^cmd/
+      - ^internal/
+      - ^reel/
   settings:
     goimports:
       local-prefixes:
-        - github.com/five82/flyer
+        - github.com/five82/spindle
 
 issues:
   max-issues-per-linter: 0

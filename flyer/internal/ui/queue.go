@@ -8,7 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/five82/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
 // updateQueueTable updates selection bounds when queue changes.

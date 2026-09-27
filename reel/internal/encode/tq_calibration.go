@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/five82/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/quality"
 )
 
 // ssimu2CalibrationMinSamples anchors the per-title SSIMU2 offset. Samples

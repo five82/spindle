@@ -7,7 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/five82/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
 // fieldWriter renders aligned label/value rows with word-wrapped values.

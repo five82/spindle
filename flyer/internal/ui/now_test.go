@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/flyer/internal/spindle"
-	"github.com/five82/flyer/internal/state"
+	"github.com/five82/spindle/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/state"
 )
 
 func TestNowBandOmitsIdleDriveState(t *testing.T) {

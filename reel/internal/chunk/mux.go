@@ -215,8 +215,8 @@ import (
 	"sync"
 	"unsafe"
 
-	nativeaudio "github.com/five82/reel/internal/audio"
-	"github.com/five82/reel/internal/media"
+	nativeaudio "github.com/five82/spindle/reel/internal/audio"
+	"github.com/five82/spindle/reel/internal/media"
 )
 
 const (

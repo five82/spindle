@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 func TestEmptyAudioJobAndDisplaySummary(t *testing.T) {

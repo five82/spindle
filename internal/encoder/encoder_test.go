@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/five82/reel"
+	"github.com/five82/spindle/reel"
 
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"

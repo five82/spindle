@@ -130,7 +130,7 @@ var versionOnce = sync.OnceValues(func() (string, string) {
 	spindle := info.Main.Version
 	reel := ""
 	for _, dep := range info.Deps {
-		if dep.Path == "github.com/five82/reel" {
+		if dep.Path == "github.com/five82/spindle/reel" {
 			reel = dep.Version
 			if dep.Replace != nil {
 				reel = dep.Replace.Version

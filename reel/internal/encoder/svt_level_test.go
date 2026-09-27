@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 // encodeNoiseIVF encodes deterministic high-entropy 10-bit noise frames and

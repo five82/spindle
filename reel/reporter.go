@@ -5,7 +5,7 @@
 
 package reel
 
-import "github.com/five82/reel/internal/reporter"
+import "github.com/five82/spindle/reel/internal/reporter"
 
 // Reporter defines the interface for progress reporting during encoding.
 // Implement this interface to receive detailed events about encoding progress.

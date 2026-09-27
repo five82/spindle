@@ -8,7 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/five82/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
 // renderTaskBoard renders the item's scheduler tasks: one row per task in

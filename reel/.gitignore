@@ -54,8 +54,6 @@ dmypy.json
 *.dylib
 *.test
 *.out
-go.work
-go.work.sum
 
 # Output doc
 docs/reel_output

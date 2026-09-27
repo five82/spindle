@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
 var ansiEscape = regexp.MustCompile("\x1b\\[[0-9;]*m")

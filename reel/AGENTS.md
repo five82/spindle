@@ -1,12 +1,10 @@
 # AGENTS.md
 
-This file provides guidance when working with code in this repository.
+Common repository rules live in [../AGENTS.md](../AGENTS.md).
 
-## TL;DR
-
-- Do not create git branches unless explicitly instructed.
-- Use `./deploy.sh` for deployments; do not reproduce its steps manually.
-- Run `./check-ci.sh` before handing work back.
+From the monorepo root, use `./deploy.sh reel` for deployments and run
+`./check-ci.sh` before handing work back. Do not reproduce deployment steps
+manually. Do not create branches unless explicitly instructed.
 
 ## Project
 
@@ -14,18 +12,10 @@ Reel is an **AV1 encoding tool** using the SVT-AV1 and FFmpeg/libav libraries (l
 
 Single-developer hobby project - prefer simple, maintainable solutions over clever abstractions.
 
-## Related Repos
-
-| Repo | Path | Role |
-|------|------|------|
-| flyer | `~/projects/flyer/` | Read-only terminal UI for Spindle |
-| reel | `~/projects/reel/` | AV1 encoding library and CLI (this repo) |
-| shuttle | `~/projects/shuttle/` | Read-only native macOS monitor for Spindle |
-| spindle | `~/projects/spindle/` | Orchestrator that embeds Reel during encoding |
-
-GitHub: [flyer](https://github.com/five82/flyer) | [reel](https://github.com/five82/reel) | [shuttle](https://github.com/five82/shuttle) | [spindle](https://github.com/five82/spindle)
-
-Spindle embeds reel as a library. Local spindle builds use a gitignored `go.work` pointing at `../reel`, so they always pick up the local reel working copy; the commit pin in spindle's `go.mod` exists only so spindle's CI and other machines build against current reel. After pushing reel changes, bump the pin in spindle (`go get github.com/five82/reel@latest && go mod tidy`), run spindle's `./check-ci.sh`, and commit/push spindle. Note the local check-ci run exercises the workspace copy, not the pin — a stale pin only surfaces in spindle's CI.
+Spindle embeds `github.com/five82/spindle/reel` directly from this module.
+There is no workspace or external Reel dependency pin. Keep the library-first
+API and `reel/internal` boundary; Reel must not depend on Spindle packages.
+Flyer remains an independent HTTP monitor.
 
 ## Critical Expectations
 
@@ -43,13 +33,17 @@ Spindle embeds reel as a library. Local spindle builds use a gitignored `go.work
 
 ## Build, Test, Lint
 
+From the monorepo root:
+
 ```bash
-go build -trimpath -o reel ./cmd/reel  # Build CLI without local paths
-go test ./...                         # Test
-go test -race ./...                   # Race detector
-golangci-lint run                     # Lint
-./check-ci.sh                         # Full CI (recommended before handoff)
+go build -trimpath -o reel/reel ./reel/cmd/reel
+go test ./reel/...
+go test -race ./reel/...
+./check-ci.sh
 ```
+
+Performance documentation and script commands use `reel/` as their working
+directory; change there before following those examples.
 
 ## Native Library Linking
 

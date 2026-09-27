@@ -13,10 +13,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/encoder"
-	"github.com/five82/reel/internal/grain"
-	"github.com/five82/reel/internal/perf"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/encoder"
+	"github.com/five82/spindle/reel/internal/grain"
+	"github.com/five82/spindle/reel/internal/perf"
 )
 
 func testGrainEstimate(t *testing.T) grain.Estimate {

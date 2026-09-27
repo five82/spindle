@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel"
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
+	"github.com/five82/spindle/reel"
 )
 
 func testEncoderLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

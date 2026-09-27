@@ -3,7 +3,8 @@
 ## Ground rules
 
 - Go toolchain only (`go build`, `go test`, `golangci-lint`); no alternate build systems.
-- Use `./deploy.sh` for deployments; do not reproduce its steps manually.
+- From the monorepo root, use `./deploy.sh spindle|flyer|reel` for deployments;
+  do not reproduce its steps manually. A target is required.
 - Before handing work back, run `./check-ci.sh` (tests, race, CGO, lint, govulncheck) or explain why you couldn't.
 - Finish the work you start; ask before dropping scope or leaving TODOs.
 - Coordinate major trade-offs with the user; never unilaterally defer functionality.
@@ -22,16 +23,24 @@ Queue writes go through the daemon HTTP API. Stopped-daemon exceptions:
 `status` / `queue list` / `queue show` fall back to a direct read-only DB
 read, and `queue clear --all` deletes the transient queue DB files.
 
-## Related Repos
+## Repository
 
-| Repo | Path | Role |
-|------|------|------|
-| flyer | `~/projects/flyer/` | Read-only terminal UI for Spindle |
-| reel | `~/projects/reel/` | AV1 encoder embedded by Spindle |
-| shuttle | `~/projects/shuttle/` | Read-only native macOS monitor for Spindle |
-| spindle | `~/projects/spindle/` | Daemon + CLI (this repo) |
+One Go module, `github.com/five82/spindle`, contains:
 
-GitHub: [flyer](https://github.com/five82/flyer) | [reel](https://github.com/five82/reel) | [shuttle](https://github.com/five82/shuttle) | [spindle](https://github.com/five82/spindle)
+| Component | Source | Role |
+|-----------|--------|------|
+| Spindle | `cmd/spindle`, `internal` | Daemon + CLI |
+| Flyer | `flyer/` | Read-only HTTP terminal monitor |
+| Reel | `reel/` | AV1 encoding library and CLI |
+
+The private Forgejo instance is authoritative; GitHub
+(`https://github.com/five82/spindle`) is a one-way public push mirror. Push
+development changes to `origin`, not GitHub. Keep private host addresses in
+local Git configuration, never in tracked files. Preserve Spindle's existing
+history; the mirror uses the original GitHub repository.
+
+Shuttle remains separate at `~/projects/shuttle/`:
+[GitHub](https://github.com/five82/shuttle).
 
 ## Complexity budget
 
@@ -69,12 +78,19 @@ or simplified.
   client packages. The `apply` stage owns all encoded-file rewrites after the
   encoding and analysis branches join.
 
-## Reel dependency
+## Component boundaries and checks
 
-Local dev uses a gitignored `go.work` referencing `../reel`; CI uses the
-`go.mod` pin and builds reel with `-tags no_vship` (no libvship on the
-runner). After pushing reel changes:
-`go get github.com/five82/reel@latest && go mod tidy`.
+Spindle embeds `github.com/five82/spindle/reel`; Reel must not import Spindle
+internals. Flyer only accesses daemon state through its read-only HTTP client
+(and existing local log access), never by importing daemon or encoder packages.
+Keep Flyer's build independent of CGO and encoder libraries. No shared utility
+or API package is needed merely because the components share a repository.
+
+There is one root `go.mod`, no `go.work`, and no Reel version pin. Run the root
+`./check-ci.sh` for all components. It selects `no_vship` without libvship;
+local deployment checks must exercise the default VSHIP build. Forgejo runs on
+the ARM64 `debian-13` runner, where ThreadSanitizer is unavailable; the AMD64
+workstation must pass race detection before deployment.
 
 ## Metrics
 

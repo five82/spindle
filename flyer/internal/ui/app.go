@@ -12,10 +12,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/five82/flyer/internal/config"
-	"github.com/five82/flyer/internal/prefs"
-	"github.com/five82/flyer/internal/spindle"
-	"github.com/five82/flyer/internal/state"
+	"github.com/five82/spindle/flyer/internal/config"
+	"github.com/five82/spindle/flyer/internal/prefs"
+	"github.com/five82/spindle/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/state"
 )
 
 // View represents the current active view.

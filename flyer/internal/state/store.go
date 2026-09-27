@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/five82/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
 // Snapshot represents the latest data available to the UI.

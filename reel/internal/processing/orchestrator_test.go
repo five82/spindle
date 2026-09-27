@@ -3,7 +3,7 @@ package processing
 import (
 	"testing"
 
-	"github.com/five82/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/config"
 )
 
 func TestLogSuggestionIncludesLogFile(t *testing.T) {

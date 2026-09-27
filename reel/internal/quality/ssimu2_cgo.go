@@ -46,7 +46,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 // SSIMU2Processor is a SSIMU2 scorer backed by VSHIP. Unlike CVVDP, SSIMU2 is

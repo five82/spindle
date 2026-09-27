@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/media"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/media"
 )
 
 func TestProcessVideosReportsTruncatedClipWithoutOutput(t *testing.T) {

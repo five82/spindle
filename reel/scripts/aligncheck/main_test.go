@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/video"
 	"testing"
 )
 

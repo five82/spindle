@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/chunkplan"
+	"github.com/five82/spindle/reel/internal/chunkplan"
 )
 
 func TestWriteScores(t *testing.T) {

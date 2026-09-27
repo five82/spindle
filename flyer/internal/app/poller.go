@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/five82/flyer/internal/spindle"
-	"github.com/five82/flyer/internal/state"
+	"github.com/five82/spindle/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/state"
 )
 
 const (

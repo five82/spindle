@@ -26,6 +26,8 @@ Related tools:
 
 ## Usage
 
+Run these commands from the monorepo's `reel/` directory.
+
 ```bash
 # Build the exact binary that will be measured.
 go build -trimpath -o reel ./cmd/reel

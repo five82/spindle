@@ -6,16 +6,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/five82/reel/internal/config"
-	encodepipe "github.com/five82/reel/internal/encode"
-	"github.com/five82/reel/internal/encoder"
-	"github.com/five82/reel/internal/media"
-	"github.com/five82/reel/internal/perf"
-	"github.com/five82/reel/internal/quality"
-	"github.com/five82/reel/internal/reporter"
-	"github.com/five82/reel/internal/util"
-	"github.com/five82/reel/internal/validation"
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/config"
+	encodepipe "github.com/five82/spindle/reel/internal/encode"
+	"github.com/five82/spindle/reel/internal/encoder"
+	"github.com/five82/spindle/reel/internal/media"
+	"github.com/five82/spindle/reel/internal/perf"
+	"github.com/five82/spindle/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/reporter"
+	"github.com/five82/spindle/reel/internal/util"
+	"github.com/five82/spindle/reel/internal/validation"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 // EncodeResult contains the result of a single file encode.

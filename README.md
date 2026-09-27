@@ -4,10 +4,20 @@ Spindle turns optical discs into a [Loom](https://github.com/five82/loom)-ready
 library. Insert a disc and the daemon handles identification with
 [TMDB](https://www.themoviedb.org/), ripping with
 [MakeMKV](https://www.makemkv.com/), AV1 encoding with
-[Reel](https://github.com/five82/reel), subtitles and commentary detection,
+[Reel](reel/README.md), subtitles and commentary detection,
 organization, Loom scans, and notifications.
 
-A single Go binary provides both the operator CLI and daemon.
+The monorepo contains three tools sharing one Go module:
+
+| Tool | Source | Role |
+|------|--------|------|
+| Spindle | `cmd/spindle`, `internal` | Operator CLI and daemon |
+| [Flyer](flyer/README.md) | `flyer/` | Read-only terminal monitor |
+| [Reel](reel/README.md) | `reel/` | AV1 encoding library and CLI |
+
+[GitHub](https://github.com/five82/spindle) hosts the public mirror. Development
+and CI run on a private Forgejo instance. The Go module path stays on GitHub so
+public installations do not require access to the development host.
 
 ## Expectations
 
@@ -43,14 +53,36 @@ To deploy a source checkout on the machine running Spindle:
 
 ```bash
 ./check-ci.sh
-./deploy.sh
+./deploy.sh spindle
 ```
 
 The deploy script builds the working tree, keeps the previous binary beside the
 installed one, and preserves daemon state: a running daemon is restarted while
 a stopped daemon remains stopped. Because the daemon drains in-flight work
 before exiting, a deploy waits at most for the current disc rip;
-`spindle stop --force` skips the drain.
+`spindle stop --force` skips the drain. Deploy the other tools independently
+with `./deploy.sh flyer` or `./deploy.sh reel`; a target is always required.
+
+### Development checks
+
+From the monorepo root, `./check-ci.sh` checks all three components: module
+tidiness, tests and coverage, race detection, CGO builds, lint, and
+vulnerabilities. It also tests and builds Flyer with CGO disabled, keeping the
+monitor independent of native encoder libraries. No sibling checkouts,
+`go.work`, or Reel dependency updates are needed.
+
+The script checks the default target-quality build when VSHIP is installed,
+otherwise the `no_vship` build. Forgejo uses the latter. Its ARM64 runner
+cannot run ThreadSanitizer, so run the full checks on the AMD64 encoding
+workstation before deployment to cover race detection and VSHIP. Deployment
+always builds Spindle and Reel with VSHIP support.
+
+Build just the desired command rather than the entire module when developing
+Flyer on a machine without the native encoding libraries:
+
+```bash
+go build -o /tmp/flyer ./flyer/cmd/flyer
+```
 
 ## Configure
 
@@ -84,7 +116,7 @@ verification; commentary reports its probability and decision rule instead of
 a generated explanation.
 
 To expose the daemon API to the read-only
-[Flyer](https://github.com/five82/flyer) monitor, configure a TCP listener and,
+[Flyer](flyer/README.md) monitor, configure a TCP listener and,
 for anything beyond trusted localhost access, a bearer token:
 
 ```toml

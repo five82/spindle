@@ -10,12 +10,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/five82/reel/internal/chunk"
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/grain"
-	"github.com/five82/reel/internal/perf"
-	"github.com/five82/reel/internal/quality"
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/chunk"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/grain"
+	"github.com/five82/spindle/reel/internal/perf"
+	"github.com/five82/spindle/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 // estimateGrainAndCeiling samples the already-aligned original/fftdnoiz pairs.

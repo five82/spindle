@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 // A tiny PCM WAV exercises libav probing without a video encode or external tool.

@@ -209,8 +209,8 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/five82/reel/internal/quality"
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 // FGSTableSupported reports whether the linked SVT-AV1 exposes the film grain

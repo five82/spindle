@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/five82/reel/internal/chunk"
+	"github.com/five82/spindle/reel/internal/chunk"
 )
 
 func TestScoreStatistics(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/five82/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/quality"
 )
 
 const (

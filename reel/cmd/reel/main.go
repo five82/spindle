@@ -12,13 +12,13 @@ import (
 	"syscall"
 
 	"github.com/fatih/color"
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/discovery"
-	"github.com/five82/reel/internal/logging"
-	"github.com/five82/reel/internal/processing"
-	"github.com/five82/reel/internal/quality"
-	"github.com/five82/reel/internal/reporter"
-	"github.com/five82/reel/internal/util"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/discovery"
+	"github.com/five82/spindle/reel/internal/logging"
+	"github.com/five82/spindle/reel/internal/processing"
+	"github.com/five82/spindle/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/reporter"
+	"github.com/five82/spindle/reel/internal/util"
 )
 
 const (

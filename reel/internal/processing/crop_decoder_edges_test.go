@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 func TestDetectCropSamplesSkipsUnreadableFrames(t *testing.T) {

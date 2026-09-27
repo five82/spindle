@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/five82/reel/internal/util"
+	"github.com/five82/spindle/reel/internal/util"
 )
 
 const (

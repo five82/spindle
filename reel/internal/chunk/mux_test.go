@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	nativeaudio "github.com/five82/reel/internal/audio"
-	"github.com/five82/reel/internal/media"
+	nativeaudio "github.com/five82/spindle/reel/internal/audio"
+	"github.com/five82/spindle/reel/internal/media"
 )
 
 func TestMuxFinalMissingInputs(t *testing.T) {

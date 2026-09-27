@@ -60,7 +60,7 @@ Follow VSHIP's installation instructions to install the library. See the [concur
 Then install Reel:
 
 ```bash
-go install -trimpath github.com/five82/reel/cmd/reel@latest
+go install -trimpath github.com/five82/spindle/reel/cmd/reel@latest
 ```
 
 ### Fixed-CRF-only build
@@ -68,7 +68,7 @@ go install -trimpath github.com/five82/reel/cmd/reel@latest
 Requires only the common dependencies above, without VSHIP or CUDA. Target-quality mode is unavailable in this build.
 
 ```bash
-go install -trimpath -tags no_vship github.com/five82/reel/cmd/reel@latest
+go install -trimpath -tags no_vship github.com/five82/spindle/reel/cmd/reel@latest
 ```
 
 ### Building from source
@@ -76,8 +76,8 @@ go install -trimpath -tags no_vship github.com/five82/reel/cmd/reel@latest
 With the dependencies for your chosen build installed:
 
 ```bash
-git clone https://github.com/five82/reel
-cd reel
+git clone https://github.com/five82/spindle.git
+cd spindle/reel
 go build -trimpath -o reel ./cmd/reel
 ```
 
@@ -114,7 +114,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/five82/reel"
+    "github.com/five82/spindle/reel"
 )
 
 func main() {
@@ -133,17 +133,24 @@ func main() {
 }
 ```
 
-Use `reel.New(reel.WithCRF(26.25))` to select fixed-CRF mode explicitly. Pass an event handler instead of `nil` to receive progress and completion events; see the [API documentation](https://pkg.go.dev/github.com/five82/reel).
+Use `reel.New(reel.WithCRF(26.25))` to select fixed-CRF mode explicitly. Pass an event handler instead of `nil` to receive progress and completion events; see the [API documentation](https://pkg.go.dev/github.com/five82/spindle/reel).
 
 ## Development
 
-Run the full local CI check before handing off changes:
+From the monorepo root, run the full local CI check before handing off changes:
 
 ```bash
 ./check-ci.sh
+./deploy.sh reel
 ```
 
-To install a source checkout over the `reel` on `PATH`, use `./deploy.sh` after the checks pass. Deployment builds with VSHIP support.
+Deployment builds with VSHIP support and installs over the `reel` on `PATH`.
+Spindle embeds the Reel source in this module directly; no separate dependency
+pin or workspace is needed. Development and CI run on a private Forgejo
+instance; GitHub is the public mirror.
+See the [root guide](../README.md#development-checks) for CI build variants.
+Reel's performance-tool commands and documentation use `reel/` as their working
+directory.
 
 ## Credits and license
 

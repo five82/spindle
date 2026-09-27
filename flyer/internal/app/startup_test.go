@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/five82/flyer/internal/spindle"
-	"github.com/five82/flyer/internal/ui"
+	"github.com/five82/spindle/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/ui"
 )
 
 func TestRunStartsUIWithConfiguredAndOverriddenAPI(t *testing.T) {

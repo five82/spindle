@@ -1,9 +1,10 @@
 #!/bin/bash
-# Dependency health check for spindle.
+# Dependency health check for the Spindle monorepo.
 # Reports reachable vulnerabilities immediately, declared Go module updates after a cooldown,
 # and newer CI action tags without changing files.
 
 set -euo pipefail
+cd "$(dirname "$0")"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -86,7 +87,7 @@ module_version_time_epoch() {
     local version=$2
     local release_time
 
-    if ! release_time=$(GOWORK=off go list -m -json "$module@$version" 2>/dev/null | awk -F '"' '/"Time":/ {print $4; exit}'); then
+    if ! release_time=$(go list -m -json "$module@$version" 2>/dev/null | awk -F '"' '/"Time":/ {print $4; exit}'); then
         return 1
     fi
 
@@ -126,7 +127,12 @@ if ! command -v govulncheck &>/dev/null; then
     go install golang.org/x/vuln/cmd/govulncheck@latest
 fi
 
-if GOWORK=off govulncheck ./...; then
+GO_TAGS_ARG=()
+if ! pkg-config --exists vship 2>/dev/null && [ ! -e /usr/local/lib/libvship.so ] && [ ! -e /usr/lib/libvship.so ] && [ ! -e /usr/lib64/libvship.so ]; then
+    print_success "VSHIP not found; checking fixed-CRF-only no_vship build"
+    GO_TAGS_ARG=(-tags no_vship)
+fi
+if govulncheck "${GO_TAGS_ARG[@]}" ./...; then
     print_success "No reachable vulnerabilities found"
 else
     print_error "Reachable vulnerabilities detected"
@@ -134,7 +140,7 @@ else
 fi
 
 print_step "Checking for available declared Go module updates"
-DECLARED_MODULES=$(GOWORK=off go mod edit -json | awk '
+DECLARED_MODULES=$(go mod edit -json | awk '
     /"Require": \[/ { in_require = 1; next }
     in_require && /^[[:space:]]*]/ { in_require = 0 }
     in_require && /"Path":/ {
@@ -143,7 +149,7 @@ DECLARED_MODULES=$(GOWORK=off go mod edit -json | awk '
         print
     }
 ')
-UPDATE_OUTPUT=$(GOWORK=off go list -m -u all)
+UPDATE_OUTPUT=$(go list -m -u all)
 OUTDATED_OUTPUT=""
 COOLDOWN_OUTPUT=""
 

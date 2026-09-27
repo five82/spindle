@@ -3,10 +3,10 @@ package encoder
 import (
 	"testing"
 
-	"github.com/five82/reel"
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/reel"
 )
 
 func TestReporterPersistsReelErrorAndVerboseMessageDoesNotMutateSnapshot(t *testing.T) {

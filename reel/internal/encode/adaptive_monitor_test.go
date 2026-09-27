@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/util"
+	"github.com/five82/spindle/reel/internal/util"
 )
 
 func TestAdaptiveMonitorSamplePreservesSwapAndPressureDecisions(t *testing.T) {

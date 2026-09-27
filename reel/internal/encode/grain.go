@@ -9,12 +9,12 @@ import (
 	"sort"
 	"time"
 
-	"github.com/five82/reel/internal/chunk"
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/encoder"
-	"github.com/five82/reel/internal/perf"
-	"github.com/five82/reel/internal/quality"
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/chunk"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/encoder"
+	"github.com/five82/spindle/reel/internal/perf"
+	"github.com/five82/spindle/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 // Grain treatment: grainy titles are encoded from a denoised source with a

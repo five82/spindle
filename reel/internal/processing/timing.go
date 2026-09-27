@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/five82/reel/internal/perf"
-	"github.com/five82/reel/internal/reporter"
+	"github.com/five82/spindle/reel/internal/perf"
+	"github.com/five82/spindle/reel/internal/reporter"
 )
 
 func startVerboseStep(rep reporter.Reporter, name string) func() {

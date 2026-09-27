@@ -25,8 +25,14 @@ jobs:
             build-essential \
             ca-certificates \
             git \
+            ffmpeg \
+            libavcodec-dev \
             libavfilter-dev \
-            libffms2-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libopusenc0 \
+            libswresample-dev \
+            libswscale-dev \
             libsvtav1enc-dev \
             pkg-config
           rm -rf /var/lib/apt/lists/*

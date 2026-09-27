@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	nativeaudio "github.com/five82/reel/internal/audio"
-	"github.com/five82/reel/internal/media"
+	nativeaudio "github.com/five82/spindle/reel/internal/audio"
+	"github.com/five82/spindle/reel/internal/media"
 )
 
 // ExtractAudio encodes source audio streams to Opus using native libav/libopusenc.

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/five82/reel/internal/encode"
+	"github.com/five82/spindle/reel/internal/encode"
 )
 
 func TestEncodePipelineErrorReportsVideoWhenAudioWasCanceledByVideoFailure(t *testing.T) {

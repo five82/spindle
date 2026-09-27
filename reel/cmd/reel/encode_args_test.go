@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/quality"
 )
 
 func TestRunEncodeArgumentErrors(t *testing.T) {

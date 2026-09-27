@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 func TestMetricBufferInvalidSize(t *testing.T) {

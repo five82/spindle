@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/chunk"
+	"github.com/five82/spindle/reel/internal/chunk"
 )
 
 type failingFrameReader struct{ err error }

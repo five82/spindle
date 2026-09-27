@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/five82/reel"
+	"github.com/five82/spindle/reel"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/encodingstate"

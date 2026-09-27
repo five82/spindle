@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/five82/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
 // stripANSI is defined in problems_test.go and reused here to check styled

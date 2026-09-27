@@ -1,8 +1,7 @@
 #!/bin/bash
-# Local full check for spindle.
-# Hosted CI uses no_vship because libvship is unavailable on GitHub runners.
-
+# Full monorepo checks, shared by local development and Forgejo Actions.
 set -euo pipefail
+cd "$(dirname "$0")"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -11,38 +10,31 @@ NC='\033[0m'
 GOLANGCI_VERSION=v2.14.0
 GOVULNCHECK_VERSION=v1.7.0
 
-print_step() {
-    echo -e "\n${BLUE}:: $1${NC}"
-}
-
-print_success() {
-    echo -e "${GREEN}   $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}   $1${NC}"
-}
-
-version_lt() {
-    [ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" != "$2" ]
-}
+print_step() { echo -e "\n${BLUE}:: $1${NC}"; }
+print_success() { echo -e "${GREEN}   $1${NC}"; }
+print_error() { echo -e "${RED}   $1${NC}"; }
 
 print_step "Checking Go toolchain"
-
 MIN_GO_VERSION=$(awk '$1 == "go" { print $2; exit }' go.mod)
 if ! command -v go &>/dev/null; then
     print_error "Go is not installed. Install Go $MIN_GO_VERSION or newer."
     exit 1
 fi
-
-GO_VERSION=$(go env GOVERSION 2>/dev/null | sed 's/^go//')
-if [ -z "$GO_VERSION" ]; then
-    GO_VERSION=$(go version | awk '{print $3}' | sed 's/^go//')
-fi
-
-if version_lt "$GO_VERSION" "$MIN_GO_VERSION"; then
+GO_VERSION=$(go env GOVERSION)
+GO_VERSION=${GO_VERSION#go}
+if [ "$(printf '%s\n' "$GO_VERSION" "$MIN_GO_VERSION" | sort -V | head -n1)" != "$MIN_GO_VERSION" ]; then
     print_error "Go $MIN_GO_VERSION or newer required (found $GO_VERSION)."
     exit 1
+fi
+
+GO_TAGS_ARG=()
+GOLANGCI_TAGS_ARG=()
+if pkg-config --exists vship 2>/dev/null || [ -e /usr/local/lib/libvship.so ] || [ -e /usr/lib/libvship.so ] || [ -e /usr/lib64/libvship.so ]; then
+    print_success "VSHIP found; checking default target-quality build"
+else
+    print_success "VSHIP not found; checking fixed-CRF-only no_vship build"
+    GO_TAGS_ARG=(-tags no_vship)
+    GOLANGCI_TAGS_ARG=(--build-tags no_vship)
 fi
 
 print_step "Checking golangci-lint $GOLANGCI_VERSION"
@@ -52,77 +44,51 @@ fi
 print_success "Go $GO_VERSION, golangci-lint $GOLANGCI_VERSION"
 
 print_step "Verifying go.mod is tidy"
-MOD_DIFF_BEFORE=$(mktemp)
-MOD_DIFF_AFTER=$(mktemp)
-cleanup_mod_diff() { rm -f "$MOD_DIFF_BEFORE" "$MOD_DIFF_AFTER"; }
-trap cleanup_mod_diff EXIT
-git diff -- go.mod go.sum > "$MOD_DIFF_BEFORE"
-GOWORK=off go mod tidy
-git diff -- go.mod go.sum > "$MOD_DIFF_AFTER"
-if ! cmp -s "$MOD_DIFF_BEFORE" "$MOD_DIFF_AFTER"; then
+CHECK_DIR=$(mktemp -d)
+trap 'rm -rf "$CHECK_DIR"' EXIT
+cp go.mod go.sum "$CHECK_DIR/"
+go mod tidy
+if ! cmp -s go.mod "$CHECK_DIR/go.mod" || ! cmp -s go.sum "$CHECK_DIR/go.sum"; then
     print_error "go mod tidy changed go.mod or go.sum. Review and commit the changes."
     exit 1
 fi
-cleanup_mod_diff
-trap - EXIT
 print_success "go.mod is tidy"
 
-print_step "Verifying build without go.work (pinned Reel dependency)"
-if GOWORK=off go build ./...; then
-    print_success "Pinned-dependency build passed"
-else
-    print_error "Build fails without go.work — update go.mod deps (e.g. go get github.com/five82/reel@latest)"
-    exit 1
-fi
-
 print_step "Running go test with coverage"
-if GOWORK=off go test -covermode=atomic -coverprofile=coverage.out ./...; then
-    print_success "Tests passed"
-    go tool cover -func=coverage.out | tail -n 1
-    print_success "Coverage profile: coverage.out (view with go tool cover -html=coverage.out)"
-else
-    print_error "Tests failed"
-    exit 1
-fi
+go test "${GO_TAGS_ARG[@]}" -covermode=atomic -coverprofile=coverage.out ./...
+print_success "Tests passed"
+go tool cover -func=coverage.out | tail -n 1
+print_success "Coverage profile: coverage.out (view with go tool cover -html=coverage.out)"
 
 print_step "Running go test -race ./..."
-if GOWORK=off go test -race -p 4 ./...; then
-    print_success "Race detection passed"
+# Blue's ARM64 Forgejo runner cannot run ThreadSanitizer. The AMD64 encoding
+# workstation must pass the race suite before deployment; do not skip it there.
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ "$(go env GOARCH)" = arm64 ]; then
+    print_success "Skipping race detection on the ARM64 Forgejo runner; run ./check-ci.sh on the AMD64 workstation before deployment."
 else
-    print_error "Race condition detected"
-    exit 1
+    go test "${GO_TAGS_ARG[@]}" -race -p 4 ./...
+    print_success "Race detection passed"
 fi
 
 print_step "Running CGO build"
-if ! command -v gcc &>/dev/null; then
-    print_error "CGO build requires gcc; install build-essential and rerun"
-    exit 1
-fi
-if GOWORK=off CGO_ENABLED=1 go build ./...; then
-    print_success "CGO build passed"
-else
-    print_error "CGO build failed"
-    exit 1
-fi
+CGO_ENABLED=1 go build "${GO_TAGS_ARG[@]}" -trimpath ./...
+print_success "CGO build passed"
+
+print_step "Checking Flyer without CGO or encoder libraries"
+CGO_ENABLED=0 go test ./flyer/...
+CGO_ENABLED=0 go build -trimpath -o "$CHECK_DIR/flyer" ./flyer/cmd/flyer
+print_success "Standalone Flyer build passed"
 
 print_step "Running golangci-lint"
-if GOWORK=off golangci-lint run; then
-    print_success "Lint passed"
-else
-    print_error "Lint issues found"
-    exit 1
-fi
+golangci-lint run "${GOLANGCI_TAGS_ARG[@]}"
+print_success "Lint passed"
 
 print_step "Running govulncheck"
 if ! command -v govulncheck &>/dev/null || ! govulncheck -version 2>&1 | grep -Fq "Scanner: govulncheck@$GOVULNCHECK_VERSION"; then
     echo "   Installing govulncheck $GOVULNCHECK_VERSION..."
     go install golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION
 fi
-if GOWORK=off govulncheck ./...; then
-    print_success "No vulnerabilities found"
-else
-    print_error "Vulnerabilities detected"
-    exit 1
-fi
+govulncheck "${GO_TAGS_ARG[@]}" ./...
+print_success "No vulnerabilities found"
 
 echo -e "\n${GREEN}All checks passed${NC}"

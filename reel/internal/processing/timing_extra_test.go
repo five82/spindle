@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/reporter"
+	"github.com/five82/spindle/reel/internal/reporter"
 )
 
 type verboseReporter struct {

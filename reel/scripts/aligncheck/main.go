@@ -17,7 +17,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 // cropRect matches the sullyhv autocrop (3840:1600:0:280) to exercise the

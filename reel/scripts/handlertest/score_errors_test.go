@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/chunk"
-	"github.com/five82/reel/internal/quality"
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/chunk"
+	"github.com/five82/spindle/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 func TestScoreChunkFailuresBeforeGPUCompute(t *testing.T) {
@@ -36,7 +36,11 @@ func TestScoreChunkFailuresBeforeGPUCompute(t *testing.T) {
 	if err := os.WriteFile(chunk.IVFPath(dir, 0), data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := scoreChunk(nil, path, ch, info, nil, 16, 16, dir); err == nil || !strings.Contains(err.Error(), "closed") {
-		t.Fatalf("closed handler: %v", err)
+	want := "closed"
+	if !quality.VshipBuildEnabled() {
+		want = "VSHIP support is not enabled"
+	}
+	if _, err := scoreChunk(nil, path, ch, info, nil, 16, 16, dir); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("unavailable handler (want %q): %v", want, err)
 	}
 }

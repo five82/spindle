@@ -7,10 +7,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/five82/reel/internal/chunk"
-	"github.com/five82/reel/internal/encoder"
-	"github.com/five82/reel/internal/video"
-	"github.com/five82/reel/internal/worker"
+	"github.com/five82/spindle/reel/internal/chunk"
+	"github.com/five82/spindle/reel/internal/encoder"
+	"github.com/five82/spindle/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/worker"
 )
 
 // A few frames of raw Y4M are enough to exercise the streaming worker's

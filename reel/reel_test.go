@@ -3,12 +3,14 @@ package reel
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/processing"
-	"github.com/five82/reel/internal/reporter"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/processing"
+	"github.com/five82/spindle/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/reporter"
 )
 
 func TestNewOptions(t *testing.T) {
@@ -31,11 +33,17 @@ func TestNewOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	e, err = New(WithQualityMode(config.QualityModeTarget), WithTargetQuality("9.3-9.7"), WithCVVDPDisplay(display))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if e.config.TargetQuality != "9.3-9.7" || e.config.CVVDPDisplay != display {
-		t.Errorf("unexpected target config: %+v", e.config)
+	if !quality.VshipBuildEnabled() {
+		if err == nil || !strings.Contains(err.Error(), "not available in no_vship builds") {
+			t.Fatalf("target quality without VSHIP: %v", err)
+		}
+	} else {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.config.TargetQuality != "9.3-9.7" || e.config.CVVDPDisplay != display {
+			t.Errorf("unexpected target config: %+v", e.config)
+		}
 	}
 	if _, err := New(WithCRF(99)); err == nil {
 		t.Error("invalid CRF accepted")

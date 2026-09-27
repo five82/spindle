@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/five82/flyer/internal/app"
+	"github.com/five82/spindle/flyer/internal/app"
 )
 
 func main() {

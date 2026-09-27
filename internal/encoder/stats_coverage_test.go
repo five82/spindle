@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/five82/reel"
+	"github.com/five82/spindle/reel"
 )
 
 func TestEncodeStatsAbsentAndRepeatedPhases(t *testing.T) {

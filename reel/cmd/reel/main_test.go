@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/five82/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/config"
 )
 
 func TestParseCRFQuarterSteps(t *testing.T) {

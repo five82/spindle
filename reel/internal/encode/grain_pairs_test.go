@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/chunk"
-	"github.com/five82/reel/internal/perf"
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/chunk"
+	"github.com/five82/spindle/reel/internal/perf"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 func TestGrainPairEstimatorMeasuresCeilingWithoutGPU(t *testing.T) {

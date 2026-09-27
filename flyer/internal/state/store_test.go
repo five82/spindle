@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/five82/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
 func TestStore_UpdateAndSnapshotClone(t *testing.T) {

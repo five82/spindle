@@ -3,7 +3,7 @@ package encoder
 import (
 	"testing"
 
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 func TestSVTConfigAcceptsColorAndQualityMetadata(t *testing.T) {

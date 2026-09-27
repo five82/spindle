@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/five82/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
 // renderNowBand renders the live resource occupancy band under the header:

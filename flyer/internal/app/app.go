@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/five82/flyer/internal/config"
-	"github.com/five82/flyer/internal/prefs"
-	"github.com/five82/flyer/internal/spindle"
-	"github.com/five82/flyer/internal/state"
-	"github.com/five82/flyer/internal/ui"
+	"github.com/five82/spindle/flyer/internal/config"
+	"github.com/five82/spindle/flyer/internal/prefs"
+	"github.com/five82/spindle/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/state"
+	"github.com/five82/spindle/flyer/internal/ui"
 )
 
 // Options configure the Flyer application.

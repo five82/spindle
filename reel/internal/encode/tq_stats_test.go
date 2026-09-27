@@ -3,7 +3,7 @@ package encode
 import (
 	"testing"
 
-	"github.com/five82/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/quality"
 )
 
 func TestTargetQualityStats(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 func testY4M(t *testing.T, w, h, frames int) string {

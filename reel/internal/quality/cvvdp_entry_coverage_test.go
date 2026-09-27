@@ -1,3 +1,5 @@
+//go:build cgo && !no_vship
+
 package quality
 
 import (
@@ -6,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/chunk"
-	"github.com/five82/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/chunk"
+	"github.com/five82/spindle/reel/internal/video"
 )
 
 func TestChunkCVVDPDecodesReferenceAndProbeWithFakeScorer(t *testing.T) {

@@ -7,10 +7,10 @@ import (
 	"testing"
 
 	"github.com/fatih/color"
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/processing"
-	"github.com/five82/reel/internal/quality"
-	"github.com/five82/reel/internal/reporter"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/processing"
+	"github.com/five82/spindle/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/reporter"
 )
 
 func TestExecuteEncodeForwardsTargetQualityOptions(t *testing.T) {

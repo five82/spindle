@@ -11,17 +11,17 @@ import (
 	"sync"
 	"time"
 
-	nativeaudio "github.com/five82/reel/internal/audio"
-	"github.com/five82/reel/internal/chunk"
-	"github.com/five82/reel/internal/chunkplan"
-	"github.com/five82/reel/internal/config"
-	"github.com/five82/reel/internal/encode"
-	"github.com/five82/reel/internal/media"
-	"github.com/five82/reel/internal/perf"
-	"github.com/five82/reel/internal/quality"
-	"github.com/five82/reel/internal/reporter"
-	"github.com/five82/reel/internal/video"
-	"github.com/five82/reel/internal/worker"
+	nativeaudio "github.com/five82/spindle/reel/internal/audio"
+	"github.com/five82/spindle/reel/internal/chunk"
+	"github.com/five82/spindle/reel/internal/chunkplan"
+	"github.com/five82/spindle/reel/internal/config"
+	"github.com/five82/spindle/reel/internal/encode"
+	"github.com/five82/spindle/reel/internal/media"
+	"github.com/five82/spindle/reel/internal/perf"
+	"github.com/five82/spindle/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/reporter"
+	"github.com/five82/spindle/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/worker"
 )
 
 // ProcessChunked runs the chunked encoding pipeline for a single file.

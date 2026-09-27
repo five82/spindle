@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/five82/reel"
+	"github.com/five82/spindle/reel"
 )
 
 // RunConsole encodes one file in-process with Reel's target-quality mode,

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/five82/reel"
+	"github.com/five82/spindle/reel"
 )
 
 func TestConsoleReporterProgressAndDetails(t *testing.T) {

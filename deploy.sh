@@ -1,8 +1,21 @@
 #!/bin/bash
-# Build the working tree and deploy it over the installed spindle.
+# Build one monorepo tool and deploy it over its installed binary.
 # Run ./check-ci.sh first; this script does not test what it ships.
 
 set -euo pipefail
+
+case "${1:-}" in
+    spindle) PACKAGE=./cmd/spindle; BUILD_CGO=1 ;;
+    flyer) PACKAGE=./flyer/cmd/flyer; BUILD_CGO=0 ;;
+    reel) PACKAGE=./reel/cmd/reel; BUILD_CGO=1 ;;
+    -h|--help) echo "Usage: $0 spindle|flyer|reel"; exit 0 ;;
+    *) echo "Usage: $0 spindle|flyer|reel" >&2; exit 2 ;;
+esac
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 spindle|flyer|reel" >&2
+    exit 2
+fi
+TOOL=$1
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -38,7 +51,11 @@ daemon_state() {
 
 deployment_failed() {
     print_error "$1"
-    echo "   Spindle remains stopped. No restoration was attempted."
+    if [ "$TOOL" = spindle ]; then
+        echo "   Spindle remains stopped. No restoration was attempted."
+    else
+        echo "   No restoration was attempted."
+    fi
     if [ -n "${PREVIOUS:-}" ]; then
         echo "   Previous binary: $PREVIOUS"
     fi
@@ -47,11 +64,11 @@ deployment_failed() {
 
 cd "$(dirname "$0")"
 
-print_step "Locating the installed spindle"
-if TARGET=$(command -v spindle 2>/dev/null); then
+print_step "Locating the installed $TOOL"
+if TARGET=$(command -v "$TOOL" 2>/dev/null); then
     print_success "$TARGET"
 else
-    TARGET="$(go env GOPATH)/bin/spindle"
+    TARGET="$(go env GOPATH)/bin/$TOOL"
     if [ -x "$TARGET" ]; then
         print_success "$TARGET"
     else
@@ -62,11 +79,11 @@ fi
 print_step "Building"
 BUILD=$(mktemp)
 trap 'rm -f "$BUILD"' EXIT
-CGO_ENABLED=1 go build -trimpath -o "$BUILD" ./cmd/spindle
+CGO_ENABLED=$BUILD_CGO go build -trimpath -o "$BUILD" "$PACKAGE"
 print_success "built $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree')"
 
 WAS_RUNNING=false
-if [ -x "$TARGET" ]; then
+if [ "$TOOL" = spindle ] && [ -x "$TARGET" ]; then
     print_step "Checking daemon state"
     if ! STATUS_BEFORE=$("$TARGET" status --json); then
         print_error "could not query the installed spindle"
@@ -107,6 +124,17 @@ if ! cp "$BUILD" "$TARGET"; then
     deployment_failed "could not install the candidate binary"
 fi
 print_success "installed $TARGET"
+
+print_step "Verifying installation"
+if ! cmp -s "$BUILD" "$TARGET"; then
+    deployment_failed "installed binary does not match the build"
+fi
+print_success "installed binary matches the build"
+
+if [ "$TOOL" != spindle ]; then
+    echo -e "\n${GREEN}Deployed${NC}"
+    exit 0
+fi
 
 if [ "$WAS_RUNNING" = true ]; then
     print_step "Starting the daemon"

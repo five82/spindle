@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/five82/flyer/internal/config"
-	"github.com/five82/flyer/internal/spindle"
-	"github.com/five82/flyer/internal/state"
+	"github.com/five82/spindle/flyer/internal/config"
+	"github.com/five82/spindle/flyer/internal/spindle"
+	"github.com/five82/spindle/flyer/internal/state"
 )
 
 func TestConnectingHeaderStates(t *testing.T) {

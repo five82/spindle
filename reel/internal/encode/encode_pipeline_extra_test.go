@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/reel/internal/chunk"
-	"github.com/five82/reel/internal/video"
-	"github.com/five82/reel/internal/worker"
+	"github.com/five82/spindle/reel/internal/chunk"
+	"github.com/five82/spindle/reel/internal/video"
+	"github.com/five82/spindle/reel/internal/worker"
 )
 
 func TestEncodeAllUnavailableSource(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/five82/reel/internal/util"
+	"github.com/five82/spindle/reel/internal/util"
 	"github.com/schollz/progressbar/v3"
 )
 

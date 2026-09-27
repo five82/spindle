@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/five82/reel/internal/perf"
-	"github.com/five82/reel/internal/quality"
+	"github.com/five82/spindle/reel/internal/perf"
+	"github.com/five82/spindle/reel/internal/quality"
 )
 
 // chunkTargetLog records one chunk's full CRF search for the per-chunk and

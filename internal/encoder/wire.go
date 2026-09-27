@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/five82/reel"
+	"github.com/five82/spindle/reel"
 )
 
 // The encode worker re-executes this binary, runs Reel in the child, and
