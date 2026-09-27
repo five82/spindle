@@ -1009,6 +1009,24 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 			},
 		},
 		{
+			name:           "seven episode play-all cannot skew the runtime median",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 1326, SegmentMap: "23"},
+				{ID: 1, Duration: 1326, SegmentMap: "22"},
+				{ID: 2, Duration: 9287, SegmentMap: "20,21,22,19,23,7,11"},
+				{ID: 3, Duration: 1326, SegmentMap: "21"},
+				{ID: 4, Duration: 1326, SegmentMap: "11"},
+				{ID: 5, Duration: 1326, SegmentMap: "20"},
+				{ID: 6, Duration: 1326, SegmentMap: "7"},
+				{ID: 7, Duration: 1326, SegmentMap: "19"},
+			},
+			expected:       make([]tmdb.Episode, 14),
+			wantIDs:        []int{0, 1, 3, 4, 5, 6, 7},
+			wantExtras:     1,
+			wantReasonByID: map[int]string{2: "combined_play_all_extra"},
+		},
+		{
 			// TNG S1 D1 real disc layout: 00027.mpls is a play-all
 			// segment-union playlist for two regular episodes, while
 			// 00040.mpls is an independent feature-length pilot. Keep the

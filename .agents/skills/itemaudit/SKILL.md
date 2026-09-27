@@ -1,6 +1,6 @@
 ---
 name: itemaudit
-description: Comprehensive audit of Spindle queue items through multi-layer artifact analysis. Use /itemaudit <item_id> to audit a specific queue item or /itemaudit for daemon-level issues.
+description: Root-cause debugging of Spindle queue items through multi-layer artifact analysis. Find underlying code bugs or identify non-code causes so they can be addressed. Use /itemaudit <item_id> for an item or /itemaudit for daemon-level issues.
 user-invocable: true
 argument-hint: [item_id]
 ---
@@ -16,7 +16,9 @@ Comprehensive audit of Spindle queue items through multi-layer artifact analysis
 
 ## Philosophy
 
-The goal is to **uncover problems that automated code does not detect**. Quick log scans saying "no warnings, no errors" are insufficient. This skill performs deep analysis of the applicable artifacts to find anomalies.
+The goal is to **debug the pipeline and root out bugs** using queue items as reproducible evidence. Quick log scans saying "no warnings, no errors" are insufficient. For every finding, trace backwards from the symptom to the earliest incorrect decision or violated invariant. Determine whether the cause is a code bug or something outside the code (disc/source data, external service, configuration, missing reference, operator action), and say what evidence supports that classification. Distinguish downstream consequences from independent faults; do not prescribe a manual workaround when the upstream code is wrong.
+
+This is a single-developer, single-operator project. An audit itself is read-only. When asked to **fix** an audited problem, fix the underlying bug rather than editing, relabeling, or otherwise patching that queue item's output to hide it. Add a regression test using the item's evidence, run the project checks, then reprocess the disc/item to verify the fix in the real pipeline when the source is available; compare the new audit with the original. Queue items are disposable and may be reprocessed. Follow the repository's daemon/deployment and queue rules; do not silently treat an unverified code change as proof that the item is fixed. If reprocessing is blocked, state exactly why and what remains to be verified.
 
 **Subtitle content is out of scope.** Never read, extract, sample, quote, compare, or judge subtitle/transcript cue text. The pipeline adopts a verified OpenSubtitles download (cleaned and retimed against the rip's WhisperX transcript) or skips subtitles for that title. Item audits check only subtitle pipeline integrity and metadata (adoption/skip outcome, validation verdicts, routing, assets, muxing, stream format/dispositions/labels). If subtitle wording is questioned, recommend re-running `spindle subtitle <mkv>` (retries adoption; useful after better uploads appear) or the whisperx-subtitles skill; do not run those modifying commands during an item audit.
 
@@ -345,7 +347,7 @@ Analyze only structural subtitle evidence from `media[].probe.streams` (codec_ty
 
 2. **Subtitle adoption outcome** (from `analysis.subtitle_summary`, `envelope.attributes.subtitle_generation_results`, and `analysis.decision_groups`):
    - The pipeline downloads the identified title's OpenSubtitles candidates, cleans them, retimes against the rip's WhisperX transcript with ffsubsync, and adopts the first candidate that passes the verification gate. When no candidate verifies (or none exists, or the title is multi-episode), it records `source=none` and the title completes WITHOUT subtitles. Spindle never generates subtitles itself.
-   - `decision_type=subtitle_source` is the core trace: `decision_result=adopted` (reason carries the candidate and gate metrics), `candidate_rejected` per rejected candidate (reason explains which gate failed), and `skipped` (reason explains why nothing was adopted). A skip also emits WARN `event_type=subtitle_skipped` and a pre-flagged warning anomaly ("N title(s) completed without subtitles"). Report a skip as a WARNING with the rejection reasons as evidence — the expected recovery is the whisperx-subtitles skill (or `spindle subtitle` after better uploads appear), not a pipeline retry.
+   - `decision_type=subtitle_source` is the core trace: `decision_result=adopted` (reason carries the candidate and gate metrics), `candidate_rejected` per rejected candidate (reason explains which gate failed), and `skipped` (reason explains why nothing was adopted). A skip also emits WARN `event_type=subtitle_skipped` and a pre-flagged warning anomaly ("N title(s) completed without subtitles"). Report a skip as a WARNING with the reason as evidence, then trace it upstream. If bad title selection or episode identity caused the skip, fix that bug and reprocess before considering subtitle-specific recovery. Only a genuine no-verified-candidate outcome calls for the whisperx-subtitles skill (or `spindle subtitle` after better uploads appear), not a blind pipeline retry.
    - `decision_type=subtitle_duration_source` shows whether the verification gate measured video duration from ffprobe or fell back to the transcript span.
    - `decision_type=subtitle_mux` with `decision_result=skipped` indicates muxing was disabled in config.
    - `decision_type=transcription_asset` and `decision_type=transcription_profile` show which asset/profile WhisperX processed for the sync reference. Use `logs.events` entries (`transcription_extract_complete`, `transcription_whisperx_complete`, `transcription_complete`) for transcription timing before falling back to the raw files in `logs.paths`.
@@ -405,7 +407,7 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 | Missing commentary | Audio Analysis | Count mismatch vs blu-ray.com review using `media[].probe.streams` | Commentary tracks not preserved |
 | Unlabeled commentary | Apply | `final_validation` failed check `commentary track N ... lacks a Commentary label` or `... missing the comment flag` | Commentary track is not clearly labeled; output routed to review |
 | Stereo downmix kept | Audio Analysis | Extra 2ch audio track in `media[].probe.streams` | Unnecessary audio bloat |
-| Subtitle skipped | Subtitles | `subtitle_generation_results[].source` is `none`; WARN `event_type=subtitle_skipped`; pre-flagged warning anomaly | Title has no subtitles; WARNING not CRITICAL — recovery is the whisperx-subtitles skill or a `spindle subtitle` retry |
+| Subtitle skipped | Subtitles | `subtitle_generation_results[].source` is `none`; WARN `event_type=subtitle_skipped`; pre-flagged warning anomaly | Title has no subtitles; WARNING not CRITICAL on its own — fix an upstream selection/identity bug first, or use subtitle-specific recovery if no verified candidate exists |
 | SRT validation review | Subtitles | `subtitle_generation_results[].validation_result` is `needs_review`; `review_issues` populated; review routing present | Subtitle pipeline flagged output for separate review; do not inspect its text here |
 | Subtitle tail mismatch | Subtitles | An adopted `subtitle_source` reports `reference_tail_gap_s` over 600 seconds despite the gate, or other structural validation explicitly rejected/review-routed the tail; do not use Matroska `tags.DURATION`, video-tail length, or a below-threshold raw WhisperX tail alone | Incomplete or wrong candidate adopted despite the gate |
 | Extra/forced/default subtitle | Apply | `final_validation` failed check naming the stream count, the forced flag, or the default flag | Incorrect subtitle output; the apply stage routes it to review. Without a matching failed check the file is stale, not pipeline output |
@@ -458,6 +460,7 @@ These details are optional context. Some are parsed into decision groups when de
 The analysis must remain exhaustive, but the *presentation* should be proportional to findings. Use compact formats for clean data and expand only where anomalies exist.
 
 **Issues Found actionability:**
+- Lead with the root cause (code bug vs non-code cause, with evidence and the appropriate fix). Group dependent symptoms such as unresolved identity, subtitle skip, and review routing under their cause unless they require independent action. Never recommend hand-editing a bad output as the fix for an upstream bug.
 - Only put items in **Issues Found** when there is a real defect, user-visible impact, review/failure routing, an unexpected mismatch, or a near-threshold condition worth monitoring.
 - Do not promote normal telemetry into an INFO finding. If no corrective action is needed, keep it in the relevant Artifact Analysis section as neutral context or omit it.
 - Use `[INFO]` findings sparingly for unusual/borderline observations, not for expected below-threshold QC flags.
@@ -483,7 +486,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 
 **Do not report as findings (these are normal):**
 - Individual subtitle wording or transcription accuracy — subtitle content is outside this skill's scope
-- A subtitle skip as CRITICAL — it is a designed no-verified-candidate outcome, already pre-flagged as a warning anomaly; report it once as a WARNING with its recovery path
+- A subtitle skip as CRITICAL on its own — determine whether it is a consequence of an upstream bug or a genuine no-verified-candidate outcome; report the latter once as a WARNING with its recovery path
 - Non-sequential disc title ordering — disc layout varies by manufacturer and is irrelevant once content ID resolves episodes
 - Inconsistent source audio track counts across titles on the same disc — different playlists routinely carry different language sets
 - Audio refinement stripping non-English tracks — that's its job
@@ -515,12 +518,14 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 
 ### Issues Found
 
-**[CRITICAL] <Issue Name>**
-- Evidence: <specific data from the audit output>
+**[CRITICAL] <Root Cause>**
+- Cause: <code bug and violated invariant, or non-code condition; separate confirmed facts from inference>
+- Evidence: <specific data from the audit output, including the earliest wrong decision>
 - Expected: <what should have happened>
-- Actual: <what did happen>
+- Actual: <what did happen, including downstream consequences>
 - Impact: <user-facing consequence>
-- Recommendation: <specific action>
+- Fix: <underlying code change or non-code condition to address, not an output workaround>
+- Verification: <regression test plus reprocess/re-audit where possible>
 
 **[WARNING] <Issue Name>**
 ...
@@ -579,7 +584,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Stream layout and labels: <from analysis.final_validation: passed, or the failed_checks naming the stream count, codec, language tag, label, or forced/default flag>
 - Validation result: <aggregate subtitle_generation_results.validation_result; list structured review_issues only when they affected routing, without inspecting cue text>
 - Subtitle mux/output: <mux status and the apply stage's subtitle layout verdict; skipped titles legitimately have no subtitle stream>
-- Content review: <not performed; subtitle text is out of scope. For skipped titles recommend the whisperx-subtitles skill or a later `spindle subtitle` retry>
+- Content review: <not performed; subtitle text is out of scope. For skips, name the upstream cause; recommend subtitle-specific recovery only for a genuine no-verified-candidate outcome>
 
 #### Commentary (if phase_commentary)
 - Decisions: <from analysis.decision_groups; for Jev include P(commentary) and its 0.65 rule, not episode-confidence bands>
@@ -607,6 +612,7 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] Read full JSON `transitions` for stage starts/terminal outcomes and encoding substages; used `analysis.stage_timings` for the timing table, not nonexistent `logs.stages`
 - [ ] If TV: reconciled scanned, selected, placeholder, manifest, ripped, and final episode counts; investigated every reduction
 - [ ] For failed items: diagnosed failure cause from `item.error_message` and log events
+- [ ] Traced each finding to its earliest wrong decision or non-code cause; grouped dependent symptoms and distinguished evidence from inference
 
 ### Post-Ripping (phase_rip_cache)
 - [ ] Analyzed rip cache metadata
@@ -647,3 +653,4 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] Generated report with only applicable sections
 - [ ] Applied presentation density guidelines (compact for clean data, expanded for anomalies)
 - [ ] Used `analysis.decision_groups` for decision trace
+- [ ] Recommended an underlying fix or identified the non-code condition to address; if a fix was requested, verified it by reprocessing and re-auditing when possible, or stated the blocker

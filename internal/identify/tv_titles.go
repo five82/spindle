@@ -97,15 +97,20 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int, expected 
 		return result
 	}
 
-	alive := excludeGrossOutliers(candidates, &result)
-	if len(alive) == 1 && len(candidates) > 1 {
+	alive := candidates
+	median := durationWeightedMedian(candidates)
+	shortestComponent := 0
+	// Exclude proven Blu-ray play-all playlists before applying the outlier
+	// bar, and cap the bar at their shortest component. This protects proven
+	// episodes without relaxing the original bar more than necessary.
+	// DVD maps are title-local PGC cell numbers, not structural evidence.
+	if discSource == "bluray" {
+		alive, shortestComponent = resolveComposites(alive, &result)
+	}
+	alive = excludeGrossOutliers(alive, median, shortestComponent, &result)
+	if len(alive) == 1 && len(candidates) > 1 && result.Decisions[alive[0].decisionIndex].Reason != "combined_double_episode_candidate" {
 		result.Ambiguous = true
 		result.AmbiguityReasons = append(result.AmbiguityReasons, "single_episode_length_candidate")
-	}
-	// Only Blu-ray segment maps are structural evidence. DVD maps are
-	// title-local PGC cell numbers, and an unknown source is not safe to infer.
-	if discSource == "bluray" {
-		alive = resolveComposites(alive, &result)
 	}
 	alive = excludeRuntimeMismatches(alive, expected, &result)
 	alive = capToExpectedCount(alive, expected, &result)
@@ -135,10 +140,13 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int, expected 
 
 // excludeGrossOutliers drops candidates shorter than tvGrossOutlierRatio of
 // the duration-weighted median. The duration weighting keeps the bar anchored
-// to episode-length content even when short extras outnumber episodes.
-func excludeGrossOutliers(candidates []tvTitleCandidate, result *tvTitleSelectionResult) []tvTitleCandidate {
-	median := durationWeightedMedian(candidates)
+// to episode-length content even when short extras outnumber episodes. A proven
+// play-all component caps the bar so it cannot be classified as an extra.
+func excludeGrossOutliers(candidates []tvTitleCandidate, median, shortestComponent int, result *tvTitleSelectionResult) []tvTitleCandidate {
 	bar := int(float64(median) * tvGrossOutlierRatio)
+	if shortestComponent > 0 {
+		bar = min(bar, shortestComponent)
+	}
 	result.WeightedMedianSeconds = median
 	result.OutlierBarSeconds = bar
 	alive := make([]tvTitleCandidate, 0, len(candidates))
@@ -180,10 +188,10 @@ func durationWeightedMedian(candidates []tvTitleCandidate) int {
 // the disc has exactly one composite, its components share segments, and no
 // independent same-length alternate exists, the combined title is the real
 // program and the halves are partial cuts.
-func resolveComposites(alive []tvTitleCandidate, result *tvTitleSelectionResult) []tvTitleCandidate {
+func resolveComposites(alive []tvTitleCandidate, result *tvTitleSelectionResult) ([]tvTitleCandidate, int) {
 	composites := detectComposites(alive)
 	if len(composites) == 0 {
-		return alive
+		return alive, 0
 	}
 
 	if len(composites) == 1 {
@@ -205,15 +213,21 @@ func resolveComposites(alive []tvTitleCandidate, result *tvTitleSelectionResult)
 				}
 				kept = append(kept, candidate)
 			}
-			return kept
+			return kept, 0
 		}
 	}
 
 	excluded := make(map[int]struct{}, len(composites))
+	shortestComponent := 0
 	for _, composite := range composites {
 		result.Decisions[composite.candidate.decisionIndex].Reason = "combined_play_all_extra"
 		result.ExtraCount++
 		excluded[composite.candidate.decisionIndex] = struct{}{}
+		for _, component := range composite.components {
+			if shortestComponent == 0 || component.title.Duration < shortestComponent {
+				shortestComponent = component.title.Duration
+			}
+		}
 	}
 	kept := make([]tvTitleCandidate, 0, len(alive)-len(excluded))
 	for _, candidate := range alive {
@@ -222,7 +236,7 @@ func resolveComposites(alive []tvTitleCandidate, result *tvTitleSelectionResult)
 		}
 		kept = append(kept, candidate)
 	}
-	return kept
+	return kept, shortestComponent
 }
 
 // detectComposites scans candidates longest-first for titles explainable as a
