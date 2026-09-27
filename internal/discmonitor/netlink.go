@@ -82,20 +82,35 @@ func (n *NetlinkMonitor) monitorLoop(ctx context.Context) {
 	queue := make(chan netlink.UEvent, 1)
 	errs := make(chan error, 1)
 
-	matcher := n.buildMatcher()
-	monitorQuit := n.conn.Monitor(queue, errs, matcher)
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		defer close(errs)
+		n.conn.MonitorWithContext(ctx, queue, errs, n.buildMatcher())
+	}()
+	defer func() {
+		cancel()
+		// Join the reader before closing done, so Stop cannot close the socket
+		// during a receive. Cancellation also unblocks pending channel sends.
+		for range errs {
+		}
+	}()
 
 	for {
 		select {
 		case <-n.quit:
-			close(monitorQuit)
 			return
 		case <-ctx.Done():
-			close(monitorQuit)
 			return
-		case uevent := <-queue:
+		case uevent, ok := <-queue:
+			if !ok {
+				queue = nil // Drain any final error before exiting.
+				continue
+			}
 			n.handleEvent(ctx, uevent)
-		case err := <-errs:
+		case err, ok := <-errs:
+			if !ok {
+				return
+			}
 			n.logger.Warn("netlink monitor error",
 				"event_type", "netlink_monitor_error",
 				"error_hint", err.Error(),

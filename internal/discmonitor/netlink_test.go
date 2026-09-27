@@ -3,9 +3,11 @@
 package discmonitor
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,6 +65,48 @@ func TestNetlinkMonitorLifecycle(t *testing.T) {
 	n.Stop() // idempotent
 	if n.conn != nil {
 		t.Fatal("stopped monitor retained connection")
+	}
+}
+
+func TestNetlinkMonitorAlreadyCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	// Exercise shutdown racing the reader's startup, as happens when the
+	// daemon is cancelled before Run starts its optional services.
+	for range 32 {
+		n := NewNetlinkMonitor("/dev/not-a-drive", func(context.Context, string) {
+			t.Error("unexpected disc event")
+		}, func() bool { return false }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err := n.Start(ctx); err != nil {
+			t.Skipf("netlink unavailable: %v", err)
+		}
+		select {
+		case <-n.done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("monitor did not join the reader on cancellation")
+		}
+		n.Stop()
+		if n.conn != nil {
+			t.Fatal("stopped monitor retained connection")
+		}
+	}
+}
+
+func TestNetlinkMonitorReaderFailureIsLoggedBeforeExit(t *testing.T) {
+	var output bytes.Buffer
+	n := NewNetlinkMonitor("/dev/not-a-drive", func(context.Context, string) {
+		t.Error("unexpected disc event")
+	}, func() bool { return false }, slog.New(slog.NewTextHandler(&output, nil)))
+	n.conn = &netlink.UEventConn{NetlinkConn: netlink.NetlinkConn{Fd: -1}}
+	go n.monitorLoop(context.Background())
+	select {
+	case <-n.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("monitor did not exit after reader failure")
+	}
+	n.Stop()
+	if got := output.String(); strings.Count(got, "netlink monitor error") != 1 || !strings.Contains(got, "netlink socket not connected") {
+		t.Fatalf("reader error was not logged once: %s", got)
 	}
 }
 
