@@ -84,6 +84,7 @@ func TestConfigInitDefaultPathAndUnwritableDestination(t *testing.T) {
 }
 
 func TestConfigValidateEnsuresDirectories(t *testing.T) {
+	t.Setenv("TMDB_API_KEY", "test-key")
 	old := cfg
 	t.Cleanup(func() { cfg = old })
 	loaded, err := config.Load("", nil)
