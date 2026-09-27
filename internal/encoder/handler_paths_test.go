@@ -1,6 +1,7 @@
 package encoder
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -87,19 +88,36 @@ func TestEncodeJobFailureAndSuccessPersistAssets(t *testing.T) {
 	}
 }
 
-func TestEncodeJobClearsActiveAssetOnFailure(t *testing.T) {
+func TestEncodeJobDrainCancellationDoesNotFailAsset(t *testing.T) {
+	// Item #2's worker returned context canceled during a daemon drain. The
+	// stage resumes, so Flyer must not show its in-flight episode as failed.
 	sess := encoderSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}})
-	sess.Logger = testEncoderLogger()
+	var logOutput bytes.Buffer
+	sess.Logger = slog.New(slog.NewTextHandler(&logOutput, nil))
 	h := New(&config.Config{})
 	job := stage.AssetJob{Key: "movie", Input: ripspec.Asset{Path: filepath.Join(t.TempDir(), "absent.mkv")}, ProgressTotal: 1}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := h.encodeJob(ctx, sess, t.TempDir(), job)
-	if err != nil && !errors.Is(err, context.Canceled) {
-		t.Fatalf("encode job: %v", err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("encode job: %v, want context canceled", err)
 	}
 	if sess.Task.ActiveAssetKey != "" {
 		t.Fatalf("active asset after job = %q", sess.Task.ActiveAssetKey)
+	}
+	if strings.Contains(logOutput.String(), "encode_error") {
+		t.Fatalf("cancellation logged as encoding error: %s", logOutput.String())
+	}
+	fresh, err := sess.Store.GetByID(sess.Item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ripspec.Parse(fresh.RipSpecData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(env.Assets.Encoded) != 0 {
+		t.Fatalf("cancellation persisted a failed asset: %+v", env.Assets.Encoded)
 	}
 }
 

@@ -237,6 +237,11 @@ func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encodedDir
 		encErr = errors.Join(encErr, reporter.eventErr)
 	}
 	if encErr != nil {
+		// A drain cancels this context and resumes the same asset after restart.
+		// Only a real encode failure may leave a failed asset or ERROR log.
+		if err := ctx.Err(); err != nil {
+			return encodeJobResult{}, err
+		}
 		return encodeJobResult{failed: true}, h.handleEncodeFailure(logger, sess, job, encErr)
 	}
 
