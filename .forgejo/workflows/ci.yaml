@@ -18,24 +18,40 @@ jobs:
       - name: Checkout code
         uses: https://data.forgejo.org/actions/checkout@v7
 
-      - name: Install native dependencies
+      - name: Install native runtime and Go build dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential \
-            ca-certificates \
-            git \
-            ffmpeg \
-            libavcodec-dev \
-            libavfilter-dev \
-            libavformat-dev \
-            libavutil-dev \
-            libopusenc0 \
-            libswresample-dev \
-            libswscale-dev \
-            libsvtav1enc-dev \
-            pkg-config
-          rm -rf /var/lib/apt/lists/*
+            build-essential ca-certificates git libdav1d-dev libopusenc0 pkg-config
+
+      - name: Restore native dependencies
+        id: native-cache
+        uses: https://data.forgejo.org/actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/spindle-native
+          key: native-debian13-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.forgejo/build-native.sh', '.forgejo/workflows/ci.yaml') }}
+
+      - name: Build native dependencies on cache miss
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: |
+          apt-get install -y --no-install-recommends clang cmake lld nasm
+          ./.forgejo/build-native.sh "$RUNNER_TEMP/spindle-native"
+
+      - name: Install and verify native dependencies
+        run: |
+          cp -a "$RUNNER_TEMP/spindle-native/usr/local/." /usr/local/
+          ldconfig
+          pkg-config --modversion SvtAv1Enc libavcodec
+          ldd /usr/local/lib/libavcodec.so | tee "$RUNNER_TEMP/libavcodec-deps"
+          ! grep -E 'not found|libSvtAv1Enc' "$RUNNER_TEMP/libavcodec-deps"
+
+      # Save verified native artifacts even if subsequent application tests fail.
+      - name: Save native dependencies
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: https://data.forgejo.org/actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/spindle-native
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
 
       - name: Set up Go
         uses: https://data.forgejo.org/actions/setup-go@v7
