@@ -44,9 +44,22 @@ func (m Model) nowBandContent(styles Styles) string {
 
 		for _, h := range res.Holders {
 			info := stageDisplay(h.Task)
+			activity := roleStyle(info.role, styles).Render(strings.ToLower(info.label))
+			if h.Task == "encoding" {
+				for _, item := range m.snapshot.Queue {
+					if item.ID != h.ItemID {
+						continue
+					}
+					for _, task := range item.Tasks {
+						if task.Type == h.Task && !task.IsWorking() {
+							activity = styles.FaintText.Render("reserved")
+						}
+					}
+					break
+				}
+			}
 			seg := styles.MutedText.Render(rlabel+": ") +
-				styles.Text.Render(fmt.Sprintf("#%d ", h.ItemID)) +
-				roleStyle(info.role, styles).Render(strings.ToLower(info.label))
+				styles.Text.Render(fmt.Sprintf("#%d ", h.ItemID)) + activity
 			if !compact {
 				for _, extra := range m.holderExtras(h) {
 					seg += styles.AccentText.Render(" " + extra)
@@ -71,7 +84,7 @@ func (m Model) holderExtras(h spindle.ResourceHolder) []string {
 			continue
 		}
 		for _, t := range item.Tasks {
-			if t.Type != h.Task || !t.IsRunning() {
+			if t.Type != h.Task || !t.IsWorking() {
 				continue
 			}
 			var extras []string

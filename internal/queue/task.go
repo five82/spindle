@@ -265,7 +265,7 @@ func scanTask(rows *sql.Rows) (*Task, error) {
 func (s *Store) StartTask(t *Task) error {
 	err := retryOnBusy(func() error {
 		_, err := s.db.Exec(
-			`UPDATE tasks SET state = ?, attempts = attempts + 1, started_at = CURRENT_TIMESTAMP WHERE id = ?`,
+			`UPDATE tasks SET state = ?, attempts = attempts + 1, started_at = CURRENT_TIMESTAMP, active_asset_key = '' WHERE id = ?`,
 			string(TaskRunning), t.ID)
 		return err
 	})
@@ -273,6 +273,7 @@ func (s *Store) StartTask(t *Task) error {
 		return fmt.Errorf("start task %d: %w", t.ID, err)
 	}
 	t.State = TaskRunning
+	t.ActiveAssetKey = ""
 	t.Attempts++
 	return nil
 }
@@ -281,7 +282,7 @@ func (s *Store) StartTask(t *Task) error {
 func (s *Store) FinishTask(t *Task, state TaskState, errMsg string) error {
 	err := retryOnBusy(func() error {
 		_, err := s.db.Exec(
-			`UPDATE tasks SET state = ?, error_message = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?`,
+			`UPDATE tasks SET state = ?, error_message = ?, finished_at = CURRENT_TIMESTAMP, active_asset_key = '' WHERE id = ?`,
 			string(state), errMsg, t.ID)
 		return err
 	})
@@ -289,6 +290,7 @@ func (s *Store) FinishTask(t *Task, state TaskState, errMsg string) error {
 		return fmt.Errorf("finish task %d: %w", t.ID, err)
 	}
 	t.State = state
+	t.ActiveAssetKey = ""
 	t.ErrorMsg = errMsg
 	return nil
 }
@@ -297,7 +299,7 @@ func (s *Store) FinishTask(t *Task, state TaskState, errMsg string) error {
 // startup and shutdown.
 func (s *Store) ResetRunningTasks() error {
 	return retryOnBusy(func() error {
-		_, err := s.db.Exec(`UPDATE tasks SET state = ? WHERE state = ?`, string(TaskPending), string(TaskRunning))
+		_, err := s.db.Exec(`UPDATE tasks SET state = ?, active_asset_key = '' WHERE state = ?`, string(TaskPending), string(TaskRunning))
 		return err
 	})
 }

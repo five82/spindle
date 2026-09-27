@@ -15,7 +15,7 @@ func TestQueueFilteringRenderingAndSelectionEdges(t *testing.T) {
 	m := newAppTestModel(t)
 	m.width, m.height = 120, 9
 	m.snapshot.Queue = []spindle.QueueItem{
-		{ID: 11, DisplayTitle: "Encoding", Stage: "encoding", DiscNumber: 2, UpdatedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339), Tasks: []spindle.Task{{Type: "encoding", State: "running", Progress: spindle.TaskProgress{Percent: 42}}, {Type: "copy", State: "done"}}},
+		{ID: 11, DisplayTitle: "Encoding", Stage: "encoding", DiscNumber: 2, UpdatedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339), Tasks: []spindle.Task{{Type: "encoding", State: "running", ActiveAssetKey: "movie", Progress: spindle.TaskProgress{Percent: 42}}, {Type: "copy", State: "done"}}},
 		{ID: 12, DisplayTitle: "Failed", Stage: "failed", Tasks: []spindle.Task{{Type: "ripping", State: "failed"}}},
 		{ID: 13, DisplayTitle: "Review", NeedsReview: true},
 		{ID: 14, DisplayTitle: "Done", Stage: "completed", Encoding: &spindle.EncodingStatus{EncodedSize: 100, SizeReductionPercent: 35}},
@@ -163,7 +163,7 @@ func TestAppNavigationContextAndTickPaths(t *testing.T) {
 
 func TestNowBandHolderFiguresAndFallback(t *testing.T) {
 	m := newAppTestModel(t)
-	item := spindle.QueueItem{ID: 42, Stage: "encoding", Tasks: []spindle.Task{{Type: "encoding", State: "running", Progress: spindle.TaskProgress{Percent: 51}}}, Encoding: &spindle.EncodingStatus{FPS: 78, ETASeconds: 125}}
+	item := spindle.QueueItem{ID: 42, Stage: "encoding", Tasks: []spindle.Task{{Type: "encoding", State: "running", ActiveAssetKey: "movie", Progress: spindle.TaskProgress{Percent: 51}}}, Encoding: &spindle.EncodingStatus{FPS: 78, ETASeconds: 125}}
 	m.snapshot.Queue = []spindle.QueueItem{item}
 	h := spindle.ResourceHolder{ItemID: 42, Task: "encoding"}
 	extras := strings.Join(m.holderExtras(h), " ")

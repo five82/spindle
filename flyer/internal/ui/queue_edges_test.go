@@ -30,7 +30,7 @@ func TestQueueScrollFilterPromptAndProgressEdges(t *testing.T) {
 	m.selectedRow = 0
 	m.queueScroll = 0
 	m.queueFilterQuery = ""
-	m.snapshot.Queue = []spindle.QueueItem{{ID: 42, DisplayTitle: "Active", Stage: "encoding", Tasks: []spindle.Task{{Type: "encoding", State: "running", Progress: spindle.TaskProgress{Percent: 150}}, {Type: "ripping", State: "pending"}}}}
+	m.snapshot.Queue = []spindle.QueueItem{{ID: 42, DisplayTitle: "Active", Stage: "encoding", Tasks: []spindle.Task{{Type: "encoding", State: "running", ActiveAssetKey: "movie", Progress: spindle.TaskProgress{Percent: 150}}, {Type: "ripping", State: "pending"}}}}
 	styles := m.theme.Styles()
 	cols := computeQueueColumns(m.snapshot.Queue, 120)
 	if got := runningTaskPercent(m.snapshot.Queue[0]); got != 100 {
@@ -41,6 +41,19 @@ func TestQueueScrollFilterPromptAndProgressEdges(t *testing.T) {
 		if !strings.Contains(got, "100%") {
 			t.Fatalf("bar progress: %q", got)
 		}
+	}
+	m.snapshot.Queue[0].Tasks[0].ActiveAssetKey = ""
+	if got := runningTaskPercent(m.snapshot.Queue[0]); got != 0 {
+		t.Fatalf("idle encode percent = %v", got)
+	}
+	if got := stripANSI(m.renderTaskStrip(m.snapshot.Queue[0], styles)); !strings.HasPrefix(got, "○") {
+		t.Fatalf("idle encode strip = %q", got)
+	}
+	if got := plainTaskStrip(m.snapshot.Queue[0]); !strings.HasPrefix(got, "○") {
+		t.Fatalf("idle encode plain strip = %q", got)
+	}
+	if m.countProcessingItems() != 0 {
+		t.Fatal("idle encoder counted as processing")
 	}
 	m.snapshot.Queue[0].Tasks[0].Progress.Percent = 0
 	if got := m.queueProgressCell(m.snapshot.Queue[0], cols, styles.Text, styles, false); got != "" {

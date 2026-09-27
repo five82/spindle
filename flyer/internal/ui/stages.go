@@ -132,7 +132,7 @@ func itemSortRank(item spindle.QueueItem) int {
 		return 0
 	case strings.EqualFold(item.Stage, "failed"):
 		return 1
-	case len(item.RunningTasks()) > 0:
+	case len(item.WorkingTasks()) > 0:
 		return 2
 	case !item.IsTerminal():
 		return 3

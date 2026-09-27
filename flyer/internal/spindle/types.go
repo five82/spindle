@@ -122,10 +122,13 @@ type TaskProgress struct {
 	TotalBytes  int64   `json:"totalBytes"`
 }
 
-// Task state helpers.
-func (t Task) IsRunning() bool { return t.State == "running" }
-func (t Task) IsDone() bool    { return t.State == "done" }
-func (t Task) IsFailed() bool  { return t.State == "failed" }
+// IsWorking distinguishes an active encode from its reserved, idle worker.
+// Other stages begin work when their scheduler task starts.
+func (t Task) IsWorking() bool {
+	return t.State == "running" && (t.Type != "encoding" || t.ActiveAssetKey != "")
+}
+func (t Task) IsDone() bool   { return t.State == "done" }
+func (t Task) IsFailed() bool { return t.State == "failed" }
 
 // ParsedStartedAt returns the task's start time when it parses.
 func (t Task) ParsedStartedAt() time.Time { return parseTime(t.StartedAt) }
@@ -142,22 +145,22 @@ func (t Task) Duration() time.Duration {
 	return end.Sub(start)
 }
 
-// RunningTasks returns the item's running tasks in pipeline order.
-func (q QueueItem) RunningTasks() []Task {
-	var running []Task
+// WorkingTasks returns the item's active tasks in pipeline order.
+func (q QueueItem) WorkingTasks() []Task {
+	var working []Task
 	for _, t := range q.Tasks {
-		if t.IsRunning() {
-			running = append(running, t)
+		if t.IsWorking() {
+			working = append(working, t)
 		}
 	}
-	return running
+	return working
 }
 
 // PrimaryTask picks the task that best represents "what is happening now":
-// the first running task, else the first failed task, else the first
-// pending task. Returns nil for terminal or task-less items.
+// the first working task, else the first failed task, else the first
+// pending or idle task. Returns nil for terminal or task-less items.
 func (q QueueItem) PrimaryTask() *Task {
-	for _, pick := range []func(Task) bool{Task.IsRunning, Task.IsFailed, func(t Task) bool { return t.State == "pending" }} {
+	for _, pick := range []func(Task) bool{Task.IsWorking, Task.IsFailed, func(t Task) bool { return t.State == "pending" || t.State == "running" }} {
 		for i := range q.Tasks {
 			if pick(q.Tasks[i]) {
 				return &q.Tasks[i]
@@ -182,7 +185,7 @@ func (q QueueItem) FailedTask() *Task {
 func (q QueueItem) ActiveAssetKeys() map[string]bool {
 	keys := make(map[string]bool)
 	for _, t := range q.Tasks {
-		if t.IsRunning() && t.ActiveAssetKey != "" {
+		if t.IsWorking() && t.ActiveAssetKey != "" {
 			keys[strings.ToLower(t.ActiveAssetKey)] = true
 		}
 	}

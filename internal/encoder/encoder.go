@@ -217,6 +217,7 @@ func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encodedDir
 		"episode_key", job.Key,
 	)
 	sess.Progress(job.Percent(0), message, stage.WithActiveEpisode(job.Key))
+	defer sess.ClearActiveEpisode() // The worker can stay scheduled between ripped assets.
 
 	// Reset encoding snapshot and force-persist.
 	snap := h.initialEncodingSnapshot(ctx, logger, job)

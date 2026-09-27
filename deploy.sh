@@ -78,7 +78,8 @@ fi
 
 print_step "Building"
 BUILD=$(mktemp)
-trap 'rm -f "$BUILD"' EXIT
+INSTALL_TMP=""
+trap 'rm -f "$BUILD"; if [ -n "$INSTALL_TMP" ]; then rm -f "$INSTALL_TMP"; fi' EXIT
 CGO_ENABLED=$BUILD_CGO go build -trimpath -o "$BUILD" "$PACKAGE"
 print_success "built $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree')"
 
@@ -120,9 +121,18 @@ if [ -x "$TARGET" ]; then
     fi
     echo "   previous binary kept at $PREVIOUS"
 fi
-if ! cp "$BUILD" "$TARGET"; then
+# Replace by rename: copying over a running Flyer binary fails with ETXTBSY.
+# Keep the candidate beside the target so the rename stays on one filesystem.
+if ! INSTALL_TMP=$(mktemp "$TARGET.deploy.XXXXXX"); then
+    deployment_failed "could not create the install candidate"
+fi
+if ! cp "$BUILD" "$INSTALL_TMP" || ! chmod 755 "$INSTALL_TMP"; then
+    deployment_failed "could not prepare the install candidate"
+fi
+if ! mv -f "$INSTALL_TMP" "$TARGET"; then
     deployment_failed "could not install the candidate binary"
 fi
+INSTALL_TMP=""
 print_success "installed $TARGET"
 
 print_step "Verifying installation"

@@ -15,7 +15,7 @@ const compactWidthThreshold = 100
 
 // isProcessingItem reports whether an item has live scheduler work.
 func isProcessingItem(item spindle.QueueItem) bool {
-	return len(item.RunningTasks()) > 0
+	return len(item.WorkingTasks()) > 0
 }
 
 // headerPart is one header segment with a drop rank: when the line

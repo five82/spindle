@@ -198,6 +198,53 @@ func TestResetRunningTasks(t *testing.T) {
 	}
 }
 
+func TestTaskLifecycleClearsActiveAsset(t *testing.T) {
+	store := openTestStore(t)
+	item, _ := store.NewDisc("A", "fp1")
+	if err := store.EnsureTasks(item, testSpecs); err != nil {
+		t.Fatal(err)
+	}
+	tasks, _ := store.TasksForItem(item.ID)
+	task := tasks[0]
+	check := func(want string) {
+		t.Helper()
+		got, err := store.TasksForItem(item.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got[0].ActiveAssetKey != want {
+			t.Fatalf("active asset = %q, want %q", got[0].ActiveAssetKey, want)
+		}
+	}
+	if err := store.StartTask(task); err != nil {
+		t.Fatal(err)
+	}
+	task.ActiveAssetKey = "one"
+	if err := store.UpdateTaskProgress(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FinishTask(task, TaskPending, ""); err != nil {
+		t.Fatal(err)
+	}
+	check("")
+	task.ActiveAssetKey = "stale"
+	if err := store.UpdateTaskProgress(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.StartTask(task); err != nil {
+		t.Fatal(err)
+	}
+	check("")
+	task.ActiveAssetKey = "two"
+	if err := store.UpdateTaskProgress(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ResetRunningTasks(); err != nil {
+		t.Fatal(err)
+	}
+	check("")
+}
+
 func TestStopItemsRecordsStoppedStageForRetry(t *testing.T) {
 	store := openTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")

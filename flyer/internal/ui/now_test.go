@@ -36,6 +36,29 @@ func TestNowBandOmitsIdleDriveState(t *testing.T) {
 	}
 }
 
+func TestNowBandDistinguishesReservedEncode(t *testing.T) {
+	m := Model{
+		width: 80,
+		theme: GetTheme("Nightfox"),
+		snapshot: state.Snapshot{
+			Queue: []spindle.QueueItem{{ID: 42, Tasks: []spindle.Task{
+				{Type: "ripping", State: "running"},
+				{Type: "encoding", State: "running"},
+			}}},
+			Status: spindle.StatusResponse{Scheduler: &spindle.SchedulerStatus{Resources: map[string]spindle.ResourceStatus{
+				"encode": {Used: 1, Holders: []spindle.ResourceHolder{{ItemID: 42, Task: "encoding"}}},
+			}}},
+		},
+	}
+	if got := stripANSI(m.nowBandContent(m.theme.BandStyles())); !strings.Contains(got, "#42 reserved") || strings.Contains(got, "#42 encoding") {
+		t.Fatalf("idle encoder in NOW band: %q", got)
+	}
+	m.snapshot.Queue[0].Tasks[1].ActiveAssetKey = "movie"
+	if got := stripANSI(m.nowBandContent(m.theme.BandStyles())); !strings.Contains(got, "#42 encoding") {
+		t.Fatalf("active encoder in NOW band: %q", got)
+	}
+}
+
 func TestNowBandShowsBusyDriveHolder(t *testing.T) {
 	m := Model{
 		width: 80,

@@ -411,7 +411,7 @@ func completedReductionCell(item spindle.QueueItem) string {
 // runningTaskPercent returns the primary running task's percent.
 func runningTaskPercent(item spindle.QueueItem) float64 {
 	for _, t := range item.Tasks {
-		if t.IsRunning() && t.Progress.Percent > 0 {
+		if t.IsWorking() && t.Progress.Percent > 0 {
 			return clampPercent(t.Progress.Percent)
 		}
 	}
@@ -432,7 +432,7 @@ func queueStageCell(item spindle.QueueItem, styles Styles) (string, lipgloss.Sty
 	if item.IsTerminal() {
 		label = info.doneLabel
 		style = styles.MutedText
-	} else if len(item.RunningTasks()) == 0 {
+	} else if len(item.WorkingTasks()) == 0 {
 		label = "waiting"
 		style = styles.FaintText
 	}
@@ -443,7 +443,7 @@ func queueStageCell(item spindle.QueueItem, styles Styles) (string, lipgloss.Sty
 // running task's percent, or blank.
 func queuePercentCell(item spindle.QueueItem) string {
 	for _, t := range item.Tasks {
-		if t.IsRunning() && t.Progress.Percent > 0 {
+		if t.IsWorking() && t.Progress.Percent > 0 {
 			return fmt.Sprintf("%3.0f%%", clampPercent(t.Progress.Percent))
 		}
 	}
@@ -501,11 +501,17 @@ func (m Model) renderTaskStrip(item spindle.QueueItem, styles Styles) string {
 		case "done":
 			style = styles.SuccessText
 		case "running":
-			style = roleStyle(stageDisplay(t.Type).role, styles)
+			if t.IsWorking() {
+				style = roleStyle(stageDisplay(t.Type).role, styles)
+			}
 		case "failed":
 			style = styles.DangerText
 		}
-		b.WriteString(style.Render(taskStateGlyph(t.State)))
+		state := t.State
+		if state == "running" && !t.IsWorking() {
+			state = "pending"
+		}
+		b.WriteString(style.Render(taskStateGlyph(state)))
 	}
 	return b.String()
 }
@@ -517,7 +523,11 @@ func plainTaskStrip(item spindle.QueueItem) string {
 	}
 	var b strings.Builder
 	for _, t := range item.Tasks {
-		b.WriteString(taskStateGlyph(t.State))
+		state := t.State
+		if state == "running" && !t.IsWorking() {
+			state = "pending"
+		}
+		b.WriteString(taskStateGlyph(state))
 	}
 	return b.String()
 }

@@ -87,6 +87,22 @@ func TestEncodeJobFailureAndSuccessPersistAssets(t *testing.T) {
 	}
 }
 
+func TestEncodeJobClearsActiveAssetOnFailure(t *testing.T) {
+	sess := encoderSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}})
+	sess.Logger = testEncoderLogger()
+	h := New(&config.Config{})
+	job := stage.AssetJob{Key: "movie", Input: ripspec.Asset{Path: filepath.Join(t.TempDir(), "absent.mkv")}, ProgressTotal: 1}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := h.encodeJob(ctx, sess, t.TempDir(), job)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("encode job: %v", err)
+	}
+	if sess.Task.ActiveAssetKey != "" {
+		t.Fatalf("active asset after job = %q", sess.Task.ActiveAssetKey)
+	}
+}
+
 func TestEncodingProbeFailureAndCompletedJobSkip(t *testing.T) {
 	h := New(&config.Config{})
 	job := stage.AssetJob{Key: "one", Input: ripspec.Asset{Path: filepath.Join(t.TempDir(), "absent.mkv")}, ProgressTotal: 1}

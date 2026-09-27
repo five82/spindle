@@ -89,6 +89,10 @@ func taskDurationSum(item spindle.QueueItem) time.Duration {
 func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task spindle.Task, episodes []spindle.EpisodeStatus, totals spindle.EpisodeTotals, countWidth int, styles Styles, width int) {
 	info := stageDisplay(task.Type)
 
+	// Scheduling an encoder does not mean it has an asset to process.
+	if task.State == "running" && !task.IsWorking() {
+		task.State = "pending"
+	}
 	glyph := taskStateGlyph(task.State)
 	var glyphStyle, labelStyle lipgloss.Style
 	label := info.label
@@ -211,7 +215,7 @@ func taskEpisodeContext(task spindle.Task, episodes []spindle.EpisodeStatus) str
 // briefly stale active key cannot make the row move backwards.
 func stageTaskCount(key string, item spindle.QueueItem, task spindle.Task, episodes []spindle.EpisodeStatus, totals spindle.EpisodeTotals) (int, bool) {
 	completed, ok := stageThroughput(key, item, totals)
-	if !ok || !task.IsRunning() {
+	if !ok || !task.IsWorking() {
 		return completed, ok
 	}
 

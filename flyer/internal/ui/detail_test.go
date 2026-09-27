@@ -35,7 +35,7 @@ func TestOverviewActiveItem_FixedSkeleton(t *testing.T) {
 		Stage: "encoding",
 		Tasks: []spindle.Task{
 			{Type: "ripping", State: "done"},
-			{Type: "encoding", State: "running", Progress: spindle.TaskProgress{Percent: 42, Message: "pass 1"}},
+			{Type: "encoding", State: "running", ActiveAssetKey: "movie", Progress: spindle.TaskProgress{Percent: 42, Message: "pass 1"}},
 		},
 		Encoding: &spindle.EncodingStatus{
 			Percent:             42,
@@ -55,6 +55,38 @@ func TestOverviewActiveItem_FixedSkeleton(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("overview missing %q, got:\n%s", want, got)
 		}
+	}
+}
+
+func TestOverviewIdleEncodingLooksPending(t *testing.T) {
+	item := spindle.QueueItem{
+		ID: 1, Stage: "ripping",
+		Tasks: []spindle.Task{
+			{Type: "ripping", State: "running", Progress: spindle.TaskProgress{Percent: 14}},
+			{Type: "encoding", State: "running"},
+		},
+	}
+	idle := overviewFor(t, item)
+	item.Tasks[1].State = "pending"
+	if pending := overviewFor(t, item); idle != pending {
+		t.Fatalf("idle encoding differs from pending:\n%s\nwant:\n%s", idle, pending)
+	}
+
+	item.Tasks[1].State = "running"
+	item.Tasks[1].ActiveAssetKey = "movie"
+	item.Tasks[1].Progress.Message = "Phase 1/1 - Encoding movie"
+	active := overviewFor(t, item)
+	if !strings.Contains(active, "◉ Encoding") || strings.Contains(active, "waiting for rip") {
+		t.Fatalf("active encoder not shown as active:\n%s", active)
+	}
+
+	item.Encoding = &spindle.EncodingStatus{Substage: "complete"}
+	item.Tasks[1].ActiveAssetKey = "" // Encode completion clears the active asset.
+	item.Episodes = []spindle.EpisodeStatus{{Key: "ep1", EncodedPath: "/encoded/ep1"}, {Key: "ep2"}}
+	idle = overviewFor(t, item)
+	item.Tasks[1].State = "pending"
+	if pending := overviewFor(t, item); idle != pending {
+		t.Fatalf("encoder between TV rips differs from pending:\n%s\nwant:\n%s", idle, pending)
 	}
 }
 

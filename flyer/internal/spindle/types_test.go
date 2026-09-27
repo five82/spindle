@@ -78,8 +78,8 @@ func TestTaskHelpers(t *testing.T) {
 		{Type: "subtitling", State: "pending"},
 	}}
 
-	if running := item.RunningTasks(); len(running) != 1 || running[0].Type != "encoding" {
-		t.Fatalf("RunningTasks() = %#v, want single encoding task", running)
+	if working := item.WorkingTasks(); len(working) != 1 || working[0].Type != "encoding" {
+		t.Fatalf("WorkingTasks() = %#v, want single encoding task", working)
 	}
 
 	primary := item.PrimaryTask()
@@ -90,6 +90,15 @@ func TestTaskHelpers(t *testing.T) {
 	keys := item.ActiveAssetKeys()
 	if !keys["s01e02"] {
 		t.Fatalf("ActiveAssetKeys() = %#v, want lowercase s01e02", keys)
+	}
+	item.Tasks[1].ActiveAssetKey = ""
+	item.Tasks[1].Progress = TaskProgress{Percent: 100, Message: "previous episode"}
+	if item.Tasks[1].IsWorking() || len(item.WorkingTasks()) != 0 || len(item.ActiveAssetKeys()) != 0 {
+		t.Fatal("idle encoder with stale progress shown as working")
+	}
+	item.Tasks[0].State = "running"
+	if primary := item.PrimaryTask(); primary == nil || primary.Type != "ripping" {
+		t.Fatalf("primary task during rip = %+v", primary)
 	}
 
 	failed := QueueItem{Tasks: []Task{{Type: "encoding", State: "failed"}}}
