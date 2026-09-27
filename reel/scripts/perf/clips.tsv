@@ -1,0 +1,25 @@
+abbr	minutes	resolution	dynamic_range	start	end	clip	source
+air	5	1080p	sdr	00:30:20	00:35:20	air-5m-1080p-sdr.mkv	~/.cache/spindle/rips/4130be1355e908f2c569e9cfbd0ffcf418f95be7ba48df0688b9effafd0f3c88/Air_t01.mkv
+air	10	1080p	sdr	00:43:20	00:53:20	air-10m-1080p-sdr.mkv	~/.cache/spindle/rips/4130be1355e908f2c569e9cfbd0ffcf418f95be7ba48df0688b9effafd0f3c88/Air_t01.mkv
+air	20	1080p	sdr	01:01:20	01:21:20	air-20m-1080p-sdr.mkv	~/.cache/spindle/rips/4130be1355e908f2c569e9cfbd0ffcf418f95be7ba48df0688b9effafd0f3c88/Air_t01.mkv
+bts	5	1080p	sdr	00:25:04	00:30:04	bts-5m-1080p-sdr.mkv	~/.cache/spindle/rips/c77e2334170f48a5fe47d089015d396cb569dcb584ca03f6f1245fb87c831abf/Back To School_t00.mkv
+bts	10	1080p	sdr	00:35:48	00:45:48	bts-10m-1080p-sdr.mkv	~/.cache/spindle/rips/c77e2334170f48a5fe47d089015d396cb569dcb584ca03f6f1245fb87c831abf/Back To School_t00.mkv
+bts	20	1080p	sdr	00:51:33	01:11:33	bts-20m-1080p-sdr.mkv	~/.cache/spindle/rips/c77e2334170f48a5fe47d089015d396cb569dcb584ca03f6f1245fb87c831abf/Back To School_t00.mkv
+im	5	1080p	sdr	00:36:18	00:41:18	im-5m-1080p-sdr.mkv	~/.cache/spindle/rips/3740f16396d47fc8c72b438e49d1adc8102e664ec07c8824501e6c3698a04298/Inside Man_t02.mkv
+im	10	1080p	sdr	00:51:52	01:01:52	im-10m-1080p-sdr.mkv	~/.cache/spindle/rips/3740f16396d47fc8c72b438e49d1adc8102e664ec07c8824501e6c3698a04298/Inside Man_t02.mkv
+im	20	1080p	sdr	01:12:25	01:32:25	im-20m-1080p-sdr.mkv	~/.cache/spindle/rips/3740f16396d47fc8c72b438e49d1adc8102e664ec07c8824501e6c3698a04298/Inside Man_t02.mkv
+io	5	4k	hdr	00:24:23	00:29:23	io-5m-4k-hdr.mkv	~/.cache/spindle/rips/a47a003fede6d642ffd684bef44c28be0055b96c19b7cda5b32759e2a5368f8b/Inside Out_t02.mkv
+io	10	4k	hdr	00:34:50	00:44:50	io-10m-4k-hdr.mkv	~/.cache/spindle/rips/a47a003fede6d642ffd684bef44c28be0055b96c19b7cda5b32759e2a5368f8b/Inside Out_t02.mkv
+io	20	4k	hdr	00:50:17	01:10:17	io-20m-4k-hdr.mkv	~/.cache/spindle/rips/a47a003fede6d642ffd684bef44c28be0055b96c19b7cda5b32759e2a5368f8b/Inside Out_t02.mkv
+kbv1	5	4k	hdr	00:30:10	00:35:10	kbv1-5m-4k-hdr.mkv	~/.cache/spindle/rips/04e147e157035e35f234861557f04bf3e65d034dcdb03f8d05ebc22b0e0f3cac/Kill Bill- Vol. 1_t01.mkv
+kbv1	10	4k	hdr	00:43:05	00:53:05	kbv1-10m-4k-hdr.mkv	~/.cache/spindle/rips/04e147e157035e35f234861557f04bf3e65d034dcdb03f8d05ebc22b0e0f3cac/Kill Bill- Vol. 1_t01.mkv
+kbv1	20	4k	hdr	01:01:01	01:21:01	kbv1-20m-4k-hdr.mkv	~/.cache/spindle/rips/04e147e157035e35f234861557f04bf3e65d034dcdb03f8d05ebc22b0e0f3cac/Kill Bill- Vol. 1_t01.mkv
+ko	5	4k	hdr	00:36:50	00:41:50	ko-5m-4k-hdr.mkv	~/.cache/spindle/rips/70ef9ae4a16a349f5a0d73519c55c42595a35c28383b612b58b0fb064a4b0eb3/Knives Out-FPL_MainFeature_t17.mkv
+ko	10	4k	hdr	00:52:36	01:02:36	ko-10m-4k-hdr.mkv	~/.cache/spindle/rips/70ef9ae4a16a349f5a0d73519c55c42595a35c28383b612b58b0fb064a4b0eb3/Knives Out-FPL_MainFeature_t17.mkv
+ko	20	4k	hdr	01:13:23	01:33:23	ko-20m-4k-hdr.mkv	~/.cache/spindle/rips/70ef9ae4a16a349f5a0d73519c55c42595a35c28383b612b58b0fb064a4b0eb3/Knives Out-FPL_MainFeature_t17.mkv
+soms	5	1080p	sdr	00:29:50	00:34:50	soms-5m-1080p-sdr.mkv	~/.cache/spindle/rips/9611c8785641d06d09b4ceeb2d9b07de774a9107f1e715ba32844b49a1cdbc3f/The Secret of my Success_t00.mkv
+soms	10	1080p	sdr	00:42:37	00:52:37	soms-10m-1080p-sdr.mkv	~/.cache/spindle/rips/9611c8785641d06d09b4ceeb2d9b07de774a9107f1e715ba32844b49a1cdbc3f/The Secret of my Success_t00.mkv
+soms	20	1080p	sdr	01:00:25	01:20:25	soms-20m-1080p-sdr.mkv	~/.cache/spindle/rips/9611c8785641d06d09b4ceeb2d9b07de774a9107f1e715ba32844b49a1cdbc3f/The Secret of my Success_t00.mkv
+sully	5	4k	hdr	00:24:48	00:29:48	sully-5m-4k-hdr.mkv	~/.cache/spindle/rips/87412c40d71b450d67bd21a3867af2f2c10ca79548c811f6d3dac50fcebfe6db/Sully_t00.mkv
+sully	10	4k	hdr	00:35:25	00:45:25	sully-10m-4k-hdr.mkv	~/.cache/spindle/rips/87412c40d71b450d67bd21a3867af2f2c10ca79548c811f6d3dac50fcebfe6db/Sully_t00.mkv
+sully	20	4k	hdr	00:51:03	01:11:03	sully-20m-4k-hdr.mkv	~/.cache/spindle/rips/87412c40d71b450d67bd21a3867af2f2c10ca79548c811f6d3dac50fcebfe6db/Sully_t00.mkv

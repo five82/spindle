@@ -1,0 +1,61 @@
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Project specific
+output/
+temp/
+logs/
+*.log
+.env
+.env.*
+!.env.example
+
+# Test artifacts
+.tox/
+coverage.xml
+.coverage.*
+nosetests.xml
+test-output/
+
+# Documentation
+docs/_build/
+site/
+
+# Python bytecode (perf scripts import each other)
+__pycache__/
+*.pyc
+
+# Type checking
+.pytype/
+.pyre/
+.dmypy.json
+dmypy.json
+.aider*
+
+# AI
+.roomodes
+
+# Go
+/reel
+# Script tool binaries (go build ./scripts/<tool> writes <tool> to cwd)
+/aligncheck
+/chunkbench
+/fullvalidate
+/handlertest
+/metriccompare
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+
+# Output doc
+docs/reel_output
