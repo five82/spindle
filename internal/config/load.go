@@ -145,7 +145,7 @@ func defaultConfig() *Config {
 		},
 		LLM: LLMConfig{
 			BaseURL:        "https://openrouter.ai/api/v1/chat/completions",
-			Model:          "openai/gpt-5.6-luna",
+			Model:          "deepseek/deepseek-v4.1-flash",
 			Referer:        "https://github.com/five82/spindle",
 			Title:          "Spindle",
 			TimeoutSeconds: 60,

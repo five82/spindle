@@ -146,8 +146,8 @@ api_key = ""
 # Chat completions endpoint
 # base_url = "https://openrouter.ai/api/v1/chat/completions"
 
-# LLM model identifier
-# model = "openai/gpt-5.6-luna"
+# LLM model identifier or OpenRouter preset; requests use low reasoning effort
+# model = "deepseek/deepseek-v4.1-flash"
 
 # HTTP-Referer header for OpenRouter
 # referer = "https://github.com/five82/spindle"

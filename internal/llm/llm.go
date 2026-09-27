@@ -15,7 +15,7 @@ import (
 	"github.com/five82/spindle/internal/logs"
 )
 
-const defaultModel = "openai/gpt-5.6-luna"
+const defaultModel = "deepseek/deepseek-v4.1-flash"
 
 // Client sends chat completion requests to an OpenRouter-compatible API.
 type Client struct {
@@ -62,11 +62,10 @@ func New(cfg config.LLMConfig, logger *slog.Logger) *Client {
 
 // chatRequest is the OpenAI-compatible chat completion request body.
 type chatRequest struct {
-	Model          string           `json:"model"`
-	Messages       []chatMessage    `json:"messages"`
-	Temperature    float64          `json:"temperature"`
-	ResponseFormat *responseFormat  `json:"response_format,omitempty"`
-	Reasoning      *reasoningConfig `json:"reasoning,omitempty"`
+	Model          string          `json:"model"`
+	Messages       []chatMessage   `json:"messages"`
+	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+	Reasoning      reasoningConfig `json:"reasoning"`
 }
 
 type reasoningConfig struct {
@@ -107,11 +106,9 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
-		Temperature:    0,
 		ResponseFormat: &responseFormat{Type: "json_object"},
-	}
-	if c.model == defaultModel {
-		reqBody.Reasoning = &reasoningConfig{Effort: "low"}
+		// Keep classification at low effort even when a preset selects the model.
+		Reasoning: reasoningConfig{Effort: "low"},
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)

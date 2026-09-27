@@ -53,8 +53,8 @@ func TestLoadNoConfigReturnsDefaults(t *testing.T) {
 	if cfg.Library.ShortsDir != "shorts" {
 		t.Errorf("expected shorts directory %q, got %q", "shorts", cfg.Library.ShortsDir)
 	}
-	if cfg.LLM.Model != "openai/gpt-5.6-luna" {
-		t.Errorf("expected default LLM model openai/gpt-5.6-luna, got %q", cfg.LLM.Model)
+	if cfg.LLM.Model != "deepseek/deepseek-v4.1-flash" {
+		t.Errorf("expected default LLM model deepseek/deepseek-v4.1-flash, got %q", cfg.LLM.Model)
 	}
 	if cfg.Commentary.SimilarityThreshold != 0.92 {
 		t.Errorf("expected default similarity threshold 0.92, got %f", cfg.Commentary.SimilarityThreshold)

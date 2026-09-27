@@ -20,8 +20,8 @@ func TestNewEmptyAPIKey(t *testing.T) {
 
 func TestNewDefaultModel(t *testing.T) {
 	c := New(config.LLMConfig{APIKey: "test"}, nil)
-	if c.model != "openai/gpt-5.6-luna" {
-		t.Fatalf("default model = %q, want openai/gpt-5.6-luna", c.model)
+	if c.model != "deepseek/deepseek-v4.1-flash" {
+		t.Fatalf("default model = %q, want deepseek/deepseek-v4.1-flash", c.model)
 	}
 }
 
@@ -86,7 +86,7 @@ func TestCompleteJSONSuccess(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if req.Reasoning == nil || req.Reasoning.Effort != "low" {
+		if req.Reasoning.Effort != "low" {
 			t.Errorf("reasoning = %#v, want low effort", req.Reasoning)
 		}
 
@@ -118,6 +118,51 @@ func TestCompleteJSONSuccess(t *testing.T) {
 	}
 }
 
+func TestCompleteJSONRequestPolicy(t *testing.T) {
+	for _, model := range []string{"", defaultModel, "@preset/deepseek", "custom-model"} {
+		t.Run(model, func(t *testing.T) {
+			wantModel := model
+			if wantModel == "" {
+				wantModel = defaultModel
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req map[string]json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("decode request: %v", err)
+					http.Error(w, "invalid request", http.StatusBadRequest)
+					return
+				}
+				var gotModel string
+				if err := json.Unmarshal(req["model"], &gotModel); err != nil || gotModel != wantModel {
+					t.Errorf("model = %s, want %q (error: %v)", req["model"], wantModel, err)
+				}
+				if _, present := req["temperature"]; present {
+					t.Error("temperature must be omitted for reasoning requests")
+				}
+				var reasoning reasoningConfig
+				if err := json.Unmarshal(req["reasoning"], &reasoning); err != nil || reasoning.Effort != "low" {
+					t.Errorf("reasoning = %s, want low effort (error: %v)", req["reasoning"], err)
+				}
+				var format responseFormat
+				if err := json.Unmarshal(req["response_format"], &format); err != nil || format.Type != "json_object" {
+					t.Errorf("response_format = %s, want json_object (error: %v)", req["response_format"], err)
+				}
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"ok\":true}"}}]}`))
+			}))
+			defer srv.Close()
+
+			client := New(config.LLMConfig{APIKey: "key", BaseURL: srv.URL, Model: model}, nil)
+			var result struct{ OK bool }
+			if err := client.CompleteJSON(context.Background(), "system", "user", &result); err != nil {
+				t.Fatal(err)
+			}
+			if !result.OK {
+				t.Fatal("expected decoded result")
+			}
+		})
+	}
+}
+
 func TestCompleteJSONRetryOn429(t *testing.T) {
 	var calls atomic.Int32
 
@@ -127,8 +172,8 @@ func TestCompleteJSONRetryOn429(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if req.Reasoning != nil {
-			t.Errorf("reasoning = %#v for custom model, want nil", req.Reasoning)
+		if req.Reasoning.Effort != "low" {
+			t.Errorf("reasoning = %#v for custom model, want low effort", req.Reasoning)
 		}
 		if n == 1 {
 			w.WriteHeader(http.StatusTooManyRequests)
