@@ -33,4 +33,14 @@ func TestEncodeCommandChecksInputAndOutputBeforeStartingReel(t *testing.T) {
 	if err := cmd.RunE(cmd, []string{input}); err == nil || !strings.Contains(err.Error(), "create output dir") {
 		t.Fatalf("blocked output: %v", err)
 	}
+	if err := cmd.Flags().Set("output-dir", filepath.Join(dir, "encoded")); err != nil {
+		t.Fatal(err)
+	}
+	// A corrupt file fails inside Reel without touching the source or reporting success.
+	if err := cmd.RunE(cmd, []string{input}); err == nil || !strings.Contains(err.Error(), "encode failed") {
+		t.Fatalf("invalid input: %v", err)
+	}
+	if data, err := os.ReadFile(input); err != nil || string(data) != "source" {
+		t.Fatalf("source changed: %q %v", data, err)
+	}
 }

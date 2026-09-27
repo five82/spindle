@@ -92,4 +92,8 @@ func TestDiscoverRippedFileAndDriveInfo(t *testing.T) {
 	if vendor != "" || model != "" {
 		t.Fatalf("non-device drive: %s %s", vendor, model)
 	}
+	vendor, model = driveInfo("/dev/not-a-physical-drive-spindle-test")
+	if vendor != "" || model != "" {
+		t.Fatalf("missing sysfs identity: %q %q", vendor, model)
+	}
 }

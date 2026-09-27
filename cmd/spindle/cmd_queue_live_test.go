@@ -78,6 +78,28 @@ func TestQueueMutationsThroughDaemonSocket(t *testing.T) {
 	if err := retry.RunE(retry, []string{id}); err == nil || !strings.Contains(err.Error(), "not in failed state") {
 		t.Fatalf("missing episode: %v", err)
 	}
+	if err := retry.RunE(retry, []string{"bad"}); err == nil || !strings.Contains(err.Error(), "invalid item ID") {
+		t.Fatalf("bad episode item ID: %v", err)
+	}
+	if err := retry.RunE(retry, []string{"9999"}); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("missing episode item: %v", err)
+	}
+	if err := store.FailStage(item, queue.StageIdentification, "failed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := retry.RunE(retry, []string{id}); err == nil || !strings.Contains(err.Error(), "episode missing not found") {
+		t.Fatalf("missing episode on failed item: %v", err)
+	}
+	if err := retry.Flags().Set("episode", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := captureStdout(t, func() {
+		if err := retry.RunE(retry, []string{id}); err != nil {
+			t.Fatal(err)
+		}
+	}); !strings.Contains(got, "Retried 1") {
+		t.Fatalf("retry failed item: %s", got)
+	}
 	cancel := newQueueCancelCmd()
 	if got := captureStdout(t, func() {
 		if err := cancel.RunE(cancel, []string{id}); err != nil {

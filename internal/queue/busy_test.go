@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,6 +50,20 @@ func TestIsBusyErrorRealBusy(t *testing.T) {
 	}
 	if !isBusyError(fmt.Errorf("insert item: %w", busyErr)) {
 		t.Fatalf("isBusyError(wrapped %v) = false, want true", busyErr)
+	}
+	attempts := 0
+	if err := retryOnBusy(func() error {
+		attempts++
+		if attempts < 3 {
+			return busyErr
+		}
+		return nil
+	}); err != nil || attempts != 3 {
+		t.Fatalf("retry until success: %d attempts, %v", attempts, err)
+	}
+	attempts = 0
+	if err := retryOnBusy(func() error { attempts++; return busyErr }); err == nil || !strings.Contains(err.Error(), "database busy after 5 attempts") || attempts != 5 {
+		t.Fatalf("exhausted retries: %d attempts, %v", attempts, err)
 	}
 }
 

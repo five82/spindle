@@ -1452,6 +1452,23 @@ func TestResolveSearchYear_PriorityChain(t *testing.T) {
 			wantSource: "resolved_title",
 		},
 		{
+			name:       "disc title year when resolved title has no year",
+			discTitle:  "Munich (2005)",
+			queryTitle: "Munich",
+			wantTitle:  "Munich",
+			wantYear:   2005,
+			wantSource: "disc_title",
+		},
+		{
+			name:       "invalid bdinfo year falls back to disc title",
+			discTitle:  "Rush (2013)",
+			queryTitle: "Rush",
+			bdInfo:     &BDInfoResult{Year: "not a year"},
+			wantTitle:  "Rush",
+			wantYear:   2013,
+			wantSource: "disc_title",
+		},
+		{
 			name:       "no year anywhere",
 			discTitle:  "MUNICH",
 			queryTitle: "Munich",
