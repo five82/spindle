@@ -77,8 +77,13 @@ func (m *Model) renderItemEvents() string {
 		return styles.MutedText.Render("No stage events yet")
 	}
 	var b strings.Builder
-	for i, event := range m.itemEvents.events {
-		if i > 0 {
+	for _, event := range m.itemEvents.events {
+		// The encoding worker starts before a rip is available and may only be
+		// waiting. Its first substage is the first evidence of encode work.
+		if event.Type == "stage_start" && event.Stage == "encoding" {
+			continue
+		}
+		if b.Len() > 0 {
 			b.WriteByte('\n')
 		}
 		ts := event.Time
@@ -108,6 +113,9 @@ func (m *Model) renderItemEvents() string {
 		if event.DurationSeconds > 0 {
 			fmt.Fprintf(&b, " %s", styles.MutedText.Render(fmt.Sprintf("%.1fs", event.DurationSeconds)))
 		}
+	}
+	if b.Len() == 0 {
+		return styles.MutedText.Render("No stage events yet")
 	}
 	return b.String()
 }

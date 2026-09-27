@@ -11,6 +11,23 @@ import (
 	"github.com/five82/spindle/flyer/internal/state"
 )
 
+func TestItemEventsRenderKeepsLifecycleOutcomes(t *testing.T) {
+	m := New(Options{PrefsPath: t.TempDir() + "/prefs.toml"})
+	m.itemEvents.events = []spindle.ItemEvent{
+		{Type: "stage_start", Stage: "ripping"},
+		{Type: "stage_start", Stage: "encoding"},
+		{Type: "stage_complete", Stage: "ripping"},
+		{Type: "encoding_substage", Stage: "encoding", Substage: "Chunking"},
+		{Type: "stage_complete", Stage: "encoding"},
+	}
+	shown := stripANSI(m.renderItemEvents())
+	if strings.Contains(shown, "encoding started") || strings.Contains(shown, "\n\n") ||
+		!strings.Contains(shown, "ripping started") || !strings.Contains(shown, "encoding Chunking") ||
+		!strings.Contains(shown, "encoding completed") {
+		t.Fatalf("events = %q", shown)
+	}
+}
+
 func TestItemEventsTabPagesAndIgnoresStaleReplies(t *testing.T) {
 	var cursors []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +71,9 @@ func TestItemEventsTabPagesAndIgnoresStaleReplies(t *testing.T) {
 	if m.itemEvents.cursor != 1 || len(m.itemEvents.events) != 1 {
 		t.Fatalf("first page: %+v", m.itemEvents)
 	}
+	if shown := stripANSI(m.renderItemEvents()); shown != "No stage events yet" {
+		t.Fatalf("idle encoding shown as work: %q", shown)
+	}
 	m.handleItemEventBatch(msg) // duplicate response must not append twice
 	m.handleItemEventBatch(itemEventBatchMsg{itemID: 99, batch: spindle.ItemEventBatch{Next: 99}})
 	second := m.fetchItemEvents(&item)
@@ -62,8 +82,8 @@ func TestItemEventsTabPagesAndIgnoresStaleReplies(t *testing.T) {
 		t.Fatalf("pages %v, state %+v", cursors, m.itemEvents)
 	}
 	shown := stripANSI(m.renderItemEvents())
-	if !strings.Contains(shown, "encoding started") {
-		t.Fatalf("missing stage start: %q", shown)
+	if strings.Contains(shown, "encoding started") || strings.Contains(shown, "\n\n") {
+		t.Fatalf("idle encoding shown as work: %q", shown)
 	}
 	if !strings.Contains(shown, "Chunking") || !strings.Contains(shown, "s01e01") || !strings.Contains(shown, "Detecting shot cuts") || !strings.Contains(shown, "40.0%") {
 		t.Fatalf("missing substage context: %q", shown)
