@@ -1,12 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 	"github.com/five82/spindle/internal/queueaccess"
 )
 
-func TestLogsFollowReceivesNewEntriesAndStopsOnSignal(t *testing.T) {
+func TestLogsFollowReceivesNewEntriesAndStopsOnCancel(t *testing.T) {
 	oldCfg, oldSocket := cfg, flagSocket
 	t.Cleanup(func() { cfg, flagSocket = oldCfg, oldSocket })
 	dir := t.TempDir()
@@ -38,17 +39,39 @@ func TestLogsFollowReceivesNewEntriesAndStopsOnSignal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = original; _ = w.Close(); _ = r.Close() }()
+	lines := make(chan []string, 1)
 	go func() {
-		time.Sleep(100 * time.Millisecond)
-		buf.Append(httpapi.LogEntry{Time: "later", Level: "WARN", Msg: "followed entry"})
-		time.Sleep(1300 * time.Millisecond)
-		_ = syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-	}()
-	got := captureStdout(t, func() {
-		if err := logsFromAPI(acc, queueaccess.LogsQuery{Limit: 10}, true); err != nil {
-			t.Fatal(err)
+		var output []string
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			line := scanner.Text()
+			output = append(output, line)
+			if strings.Contains(line, "initial entry") {
+				buf.Append(httpapi.LogEntry{Time: "later", Level: "WARN", Msg: "followed entry"})
+			}
+			if strings.Contains(line, "followed entry") {
+				cancel()
+			}
 		}
-	})
+		lines <- output
+	}()
+	if err := logsFromAPI(ctx, acc, queueaccess.LogsQuery{Limit: 10}, true); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = original
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(<-lines, "\n")
 	for _, want := range []string{"initial entry", "followed entry"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("follow output missing %q: %s", want, got)
@@ -100,7 +123,7 @@ func TestLogsCommandFiltersThroughDaemonAPI(t *testing.T) {
 	if err := server.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := logsFromAPI(acc, queueaccess.LogsQuery{}, false); err == nil || !strings.Contains(err.Error(), "fetch logs") {
+	if err := logsFromAPI(context.Background(), acc, queueaccess.LogsQuery{}, false); err == nil || !strings.Contains(err.Error(), "fetch logs") {
 		t.Fatalf("fetch failure: %v", err)
 	}
 	flagSocket = filepath.Join(dir, "missing.sock")

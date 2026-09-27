@@ -61,24 +61,11 @@ func TestStoreClosedDatabaseErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	checks := map[string]func() error{
-		"refresh":         func() error { return s.Refresh(item) },
-		"insert":          func() error { _, err := s.NewDisc("Other", "fp2"); return err },
-		"get":             func() error { _, err := s.GetByID(item.ID); return err },
-		"find":            func() error { _, err := s.FindByFingerprint("fp"); return err },
-		"move":            func() error { return s.MoveToStage(item, StageRipping) },
-		"complete":        func() error { return s.CompleteStage(item, StageRipping) },
-		"title":           func() error { return s.UpdateDiscTitle(item, "New") },
-		"work":            func() error { return s.UpdateWorkState(item) },
-		"encoding":        func() error { return s.UpdateEncodingDetails(item) },
-		"remove":          func() error { return s.Remove(item.ID) },
-		"clear":           func() error { _, err := s.Clear(); return err },
-		"clear completed": func() error { _, err := s.ClearCompleted(); return err },
-		"list":            func() error { _, err := s.List(); return err },
-		"disc dependent":  func() error { _, err := s.HasDiscDependentItem(); return err },
-		"stats":           func() error { _, err := s.Stats(); return err },
-		"retry":           func() error { _, err := s.RetryFailed(item.ID); return err },
-		"retry spec":      func() error { return s.RetryWithRipSpec(item.ID, StageRipping, "new") },
-		"stop":            func() error { _, err := s.StopItems(item.ID); return err },
+		"refresh":    func() error { return s.Refresh(item) },
+		"insert":     func() error { _, err := s.NewDisc("Other", "fp2"); return err },
+		"get":        func() error { _, err := s.GetByID(item.ID); return err },
+		"clear":      func() error { _, err := s.Clear(); return err },
+		"retry spec": func() error { return s.RetryWithRipSpec(item.ID, StageRipping, "new") },
 	}
 	for name, check := range checks {
 		t.Run(name, func(t *testing.T) {

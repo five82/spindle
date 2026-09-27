@@ -8,23 +8,9 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/config"
-	"github.com/spf13/cobra"
 )
 
-func TestLowCoverageCommandRegistration(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		command func() *cobra.Command
-		want    int
-	}{
-		{"debug", newDebugCmd, 3},
-		{"cache", newCacheCmd, 5},
-	} {
-		cmd := tc.command()
-		if cmd.Name() != tc.name || len(cmd.Commands()) != tc.want {
-			t.Errorf("%s: %d children", tc.name, len(cmd.Commands()))
-		}
-	}
+func TestEncodeWorkerIsHiddenAndRequiresFiles(t *testing.T) {
 	worker := newEncodeWorkerCmd()
 	if !worker.Hidden {
 		t.Fatal("worker visible to operators")

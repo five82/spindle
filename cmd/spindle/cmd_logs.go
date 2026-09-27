@@ -30,7 +30,7 @@ Filters and --follow use the daemon API and require a running daemon.`,
 		Example: `  spindle logs -n 50
   spindle logs -f --item 3
   spindle logs --level warn --component encoder`,
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			hasFilter := query.Component != "" || query.Lane != "" || query.Request != "" ||
 				query.ItemID != 0 || query.Level != ""
 
@@ -41,7 +41,13 @@ Filters and --follow use the daemon API and require a running daemon.`,
 					return fmt.Errorf("daemon is not running (filters require the daemon API): %w", err)
 				}
 				query.Limit = lines
-				return logsFromAPI(acc, query, follow)
+				ctx := cmd.Context()
+				if follow {
+					var stop context.CancelFunc
+					ctx, stop = signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+					defer stop()
+				}
+				return logsFromAPI(ctx, acc, query, follow)
 			}
 
 			// No filters: tail the log file directly.
@@ -67,7 +73,7 @@ Filters and --follow use the daemon API and require a running daemon.`,
 }
 
 // logsFromAPI fetches logs from the daemon HTTP API.
-func logsFromAPI(acc *queueaccess.HTTPAccess, query queueaccess.LogsQuery, follow bool) error {
+func logsFromAPI(ctx context.Context, acc *queueaccess.HTTPAccess, query queueaccess.LogsQuery, follow bool) error {
 	query.Tail = true // seed the initial window from the tail
 	events, next, err := acc.Logs(query)
 	if err != nil {
@@ -80,9 +86,6 @@ func logsFromAPI(acc *queueaccess.HTTPAccess, query queueaccess.LogsQuery, follo
 	if !follow {
 		return nil
 	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
 
 	for {
 		select {
