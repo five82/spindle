@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -14,6 +15,46 @@ import (
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/queueaccess"
 )
+
+func TestLogsFollowReceivesNewEntriesAndStopsOnSignal(t *testing.T) {
+	oldCfg, oldSocket := cfg, flagSocket
+	t.Cleanup(func() { cfg, flagSocket = oldCfg, oldSocket })
+	dir := t.TempDir()
+	cfg = &config.Config{Paths: config.PathsConfig{StateDir: dir}}
+	flagSocket = filepath.Join(dir, "api.sock")
+	store, err := queue.Open(cfg.QueueDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	buf := httpapi.NewLogBuffer(10)
+	buf.Append(httpapi.LogEntry{Time: "start", Level: "INFO", Msg: "initial entry"})
+	server := httpapi.New(httpapi.Params{Store: store, LogBuffer: buf, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err := server.ListenUnix(flagSocket); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = server.Shutdown(context.Background()) }()
+	acc, err := queueaccess.OpenHTTP(flagSocket, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		buf.Append(httpapi.LogEntry{Time: "later", Level: "WARN", Msg: "followed entry"})
+		time.Sleep(1300 * time.Millisecond)
+		_ = syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+	}()
+	got := captureStdout(t, func() {
+		if err := logsFromAPI(acc, queueaccess.LogsQuery{Limit: 10}, true); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, want := range []string{"initial entry", "followed entry"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("follow output missing %q: %s", want, got)
+		}
+	}
+}
 
 func TestLogsCommandFiltersThroughDaemonAPI(t *testing.T) {
 	oldCfg, oldSocket := cfg, flagSocket

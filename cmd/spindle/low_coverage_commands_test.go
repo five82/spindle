@@ -274,6 +274,15 @@ func TestLogsCommandStoppedDaemon(t *testing.T) {
 	if err := cmd.RunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "filters require") {
 		t.Fatalf("filtered stopped daemon: %v", err)
 	}
+	if err := cmd.Flags().Set("level", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.RunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "read logs") {
+		t.Fatalf("missing log: %v", err)
+	}
 	got = captureStdout(t, func() {
 		printLogEntry(queueaccess.LogEntry{Time: "now", Level: "INFO", Msg: "message", Component: "stage", Lane: "gpu", ItemID: 7, Fields: map[string]string{"key": "value"}})
 	})

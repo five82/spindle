@@ -40,6 +40,41 @@ func TestEnqueuePipelineNewAndDuplicate(t *testing.T) {
 	if err != nil || len(items) != 1 {
 		t.Fatalf("queue items = %+v, err = %v", items, err)
 	}
+	// A second disc with no label must remain queueable under its fallback title.
+	if err := os.WriteFile(filepath.Join(mount, "VIDEO_TS", "VIDEO_TS.IFO"), []byte("different disc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unnamed, err := m.enqueuePipeline(context.Background(), &DiscEvent{Device: "/dev/not-a-drive", DiscType: "DVD", MountPath: mount})
+	if err != nil || unnamed == nil || unnamed.Item.DiscTitle != "Unknown Disc" {
+		t.Fatalf("unnamed disc: %+v, %v", unnamed, err)
+	}
+}
+
+func TestDetectionReportsClosedStoreAndMountFailures(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mount := t.TempDir()
+	if err := os.WriteFile(filepath.Join(mount, "disc.txt"), []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := New("/dev/not-a-drive", store, nil, nil)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Detect(context.Background()); err == nil || !strings.Contains(err.Error(), "check disc dependent items") {
+		t.Fatalf("Detect: %v", err)
+	}
+	if _, err := m.DetectAsync(context.Background()); err == nil || !strings.Contains(err.Error(), "check disc dependent items") {
+		t.Fatalf("DetectAsync: %v", err)
+	}
+	if _, err := m.enqueuePipeline(context.Background(), &DiscEvent{Device: "/dev/not-a-drive", MountPath: mount}); err == nil || !strings.Contains(err.Error(), "check duplicate fingerprint") {
+		t.Fatalf("closed store: %v", err)
+	}
+	if _, err := m.enqueuePipeline(context.Background(), &DiscEvent{Device: "/dev/not-a-drive", MountPath: ""}); err == nil || !strings.Contains(err.Error(), "resolve mount point") {
+		t.Fatalf("missing mount: %v", err)
+	}
 }
 
 func TestEnqueuePipelineMissingStore(t *testing.T) {

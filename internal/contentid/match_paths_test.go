@@ -64,6 +64,72 @@ func TestMatchEpisodesPersistsClaimsAndReviewsExtra(t *testing.T) {
 	}
 }
 
+func TestMatchEpisodesExpandsToCachedReferenceScope(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	item, err := store.NewDisc("Show", "fp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := ripspec.Envelope{Version: ripspec.CurrentVersion, Metadata: ripspec.Metadata{MediaType: "tv", ID: 42, SeasonNumber: 1, DiscNumber: 1}, Episodes: []ripspec.Episode{{Key: "second", TitleID: 2}}}
+	item.RipSpecData, err = env.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateWorkState(item); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := stage.NewSession(context.Background(), store, item, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := textutil.NewFingerprint("a bright green lighthouse stands beside the river")
+	other := textutil.NewFingerprint("orange stars and violet mountains across the horizon")
+	rips := []ripFingerprint{{EpisodeKey: "second", TitleID: 2, Vector: text, RawVector: text}}
+	refs := []referenceFingerprint{{EpisodeNumber: 1, Title: "First", Vector: other, RawVector: other}}
+	cached := map[int]referenceFingerprint{1: refs[0], 2: {EpisodeNumber: 2, Title: "Second", Vector: text, RawVector: text}}
+	plan := candidateEpisodePlan{InitialEpisodes: []int{1}, ExpandedEpisodes: []int{1, 2}}
+	h := New(&config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}}, nil, opensubtitles.New(opensubtitles.Params{APIKey: "test"}, nil), nil, nil)
+	if err := h.matchEpisodes(context.Background(), sess, sess.Env, &tmdb.Season{Episodes: []tmdb.Episode{{EpisodeNumber: 1, Name: "First"}, {EpisodeNumber: 2, Name: "Second"}}}, 1, plan, rips, refs, cached); err != nil {
+		t.Fatal(err)
+	}
+	if sess.Env.Episodes[0].Episode != 2 || !sess.Env.Episodes[0].NeedsReview || sess.Env.Attributes.ContentID == nil {
+		t.Fatalf("expanded match: %+v", sess.Env)
+	}
+}
+
+func TestMatchEpisodesReportsExpansionFailure(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	item, err := store.NewDisc("Show", "fp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := ripspec.Envelope{Version: ripspec.CurrentVersion, Metadata: ripspec.Metadata{MediaType: "tv", SeasonNumber: 1}}
+	item.RipSpecData, err = env.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateWorkState(item); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := stage.NewSession(context.Background(), store, item, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(&config.Config{}, nil, nil, nil, nil)
+	err = h.matchEpisodes(context.Background(), sess, sess.Env, nil, 1, candidateEpisodePlan{InitialEpisodes: []int{1}, ExpandedEpisodes: []int{1, 2}}, []ripFingerprint{{EpisodeKey: "first"}}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "fetch expanded references") {
+		t.Fatalf("expansion error: %v", err)
+	}
+}
+
 func TestFetchReferenceFingerprintsCachedAndMissing(t *testing.T) {
 	cfg := &config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}}
 	h := New(cfg, nil, opensubtitles.New(opensubtitles.Params{APIKey: "test"}, nil), nil, nil)
