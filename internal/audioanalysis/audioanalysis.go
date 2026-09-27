@@ -105,7 +105,10 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 // so similarity alone cannot prove that a track is duplicate program audio.
 //
 // Commentary detection is non-fatal: failures are logged and the track is
-// conservatively preserved as commentary.
+// conservatively preserved as commentary. A cancelled stage context is not a
+// detection failure -- the stage executor classifies a cancelled run as
+// cancelled and reverts its task to pending, so this fallback cannot let a
+// drained analysis stage complete (and the re-run overwrites it).
 func (h *Handler) detectCommentary(
 	ctx context.Context,
 	sess *stage.Session,

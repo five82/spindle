@@ -94,6 +94,12 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 		sess.Logger = runLogger
 		err = opts.Handler.Run(ctx, sess)
 	}
+	// A cancelled stage context makes the run a cancellation even when the
+	// handler swallowed the interruption and returned success: a stage that
+	// was cut short must revert to pending, never report completion.
+	if err == nil && errors.Is(ctx.Err(), context.Canceled) {
+		err = context.Canceled
+	}
 
 	if err != nil {
 		// A cancelled stage context makes any handler error a cancellation:

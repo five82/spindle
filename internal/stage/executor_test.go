@@ -78,6 +78,33 @@ func TestExecuteWorkflowStageClassifiesKilledSubprocessAsCancellation(t *testing
 	}
 }
 
+func TestExecuteWorkflowStageCanceledHandlerNeverCompletes(t *testing.T) {
+	store := openExecutorTestStore(t)
+	item, _ := store.NewDisc("A", "fp1")
+
+	// A drain can cancel the stage context while a handler is mid-work. If
+	// the handler swallows the interruption and returns success (the
+	// commentary analyzer's conservative fallback did exactly this), the
+	// cancellation must still win: the task reverts to pending instead of
+	// recording stage_complete.
+	ctx, cancel := context.WithCancel(context.Background())
+	res, err := ExecuteWorkflowStage(ctx, item, WorkflowOptions{
+		Store: store,
+		Handler: executorStubHandler{run: func(context.Context, *Session) error {
+			cancel()
+			return nil // swallow the interruption like the commentary analyzer did
+		}},
+		Stage: queue.StageAnalysis,
+	})
+	if !res.Canceled || res.Failed || !errors.Is(err, context.Canceled) {
+		t.Fatalf("result canceled=%v failed=%v err=%v, want cancellation", res.Canceled, res.Failed, err)
+	}
+	got, _ := store.GetByID(item.ID)
+	if got.Stage == queue.StageFailed {
+		t.Fatalf("item failed after cancellation: %q", got.ErrorMessage)
+	}
+}
+
 func TestExecuteWorkflowStageTreatsDegradedAsSuccess(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, err := store.NewDisc("A", "fp1")
