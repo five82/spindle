@@ -2,7 +2,9 @@
 
 ## Ground rules
 
-- Go toolchain only (`go build`, `go test`, `golangci-lint`); no alternate build systems.
+- Go applications use the Go toolchain (`go build`, `go test`, `golangci-lint`).
+  `.forgejo/build-native.sh` uses upstream build tools only to prepare cached
+  native CI dependencies, not to build the Go applications.
 - From the monorepo root, use `./deploy.sh spindle|flyer|reel` for deployments;
   do not reproduce its steps manually. A target is required.
 - Before handing work back, run `./check-ci.sh` (tests, race, CGO, lint, govulncheck) or explain why you couldn't.

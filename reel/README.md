@@ -28,7 +28,7 @@ Reel is developed and tested on Linux. Both build options below require native l
 
 - Go 1.27.1+
 - A C compiler and `pkg-config`, with cgo enabled
-- SVT-AV1 development headers and shared library (`libSvtAv1Enc`); automatic grain treatment requires version 2.3.0 or newer
+- SVT-AV1 development headers and shared library (`libSvtAv1Enc`); upstream 4.2.0 is tested in CI. Older distro packages can lack encoding parameters Reel uses.
 - `libopusenc` shared library for Opus audio encoding
 - FFmpeg/libav development libraries: `libavformat`, `libavcodec`, `libavutil`, `libavfilter`, `libswscale`, and `libswresample`
 
@@ -37,10 +37,14 @@ On Ubuntu/Debian, install the native dependencies with:
 ```bash
 sudo apt-get install build-essential pkg-config \
   libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev \
-  libswscale-dev libswresample-dev libopusenc0 libsvtav1enc-dev
+  libswscale-dev libswresample-dev libopusenc0
 ```
 
-Package versions vary by distribution release; older releases may need a newer SVT-AV1 installation. Install Go separately. The command above does not install VSHIP or CUDA.
+Install source-built SVT-AV1 separately; Debian 13's 2.3 package is too old for
+Reel's encoding defaults. Follow the build instructions for
+[upstream SVT-AV1 4.2.0](https://gitlab.com/AOMediaCodec/SVT-AV1/-/tree/v4.2.0)
+and install its shared library and headers into `/usr/local`. Install Go
+separately. The command above does not install VSHIP or CUDA.
 
 Choose one of the following builds.
 

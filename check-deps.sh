@@ -210,7 +210,9 @@ if [ -d .forgejo/workflows ]; then
             OUTDATED_ACTIONS=0
 
             while IFS= read -r action_ref; do
-                repo=${action_ref%@*}
+                # Absolute action URLs may include subdirectories (cache/restore).
+                # Tags belong to the host/owner/repository, not the subdirectory.
+                repo=$(printf '%s\n' "${action_ref%@*}" | cut -d/ -f1-5)
                 current_ref=${action_ref##*@}
 
                 echo "   $action_ref"

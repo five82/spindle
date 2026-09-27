@@ -72,10 +72,17 @@ monitor independent of native encoder libraries. No sibling checkouts,
 `go.work`, or Reel dependency updates are needed.
 
 The script checks the default target-quality build when VSHIP is installed,
-otherwise the `no_vship` build. Forgejo uses the latter. Its ARM64 runner
-cannot run ThreadSanitizer, so run the full checks on the AMD64 encoding
-workstation before deployment to cover race detection and VSHIP. Deployment
-always builds Spindle and Reel with VSHIP support.
+otherwise the `no_vship` build. Forgejo uses the latter and keeps the full
+non-GPU test suite, including real SVT encodes. On the stock Debian 13 runner,
+`.forgejo/build-native.sh` builds pinned upstream SVT-AV1 and FFmpeg revisions;
+Debian's older SVT lacks features Reel uses. The installed native artifacts are
+cached by OS, architecture, and build recipe. Ordinary application changes
+reuse that cache; recipe changes or eviction trigger an automatic rebuild.
+No custom CI image, registry credential, or workstation library change is needed.
+
+The ARM64 runner cannot run ThreadSanitizer, so run the full checks on the
+AMD64 encoding workstation before deployment to cover race detection and VSHIP.
+Deployment always builds Spindle and Reel with VSHIP support.
 
 Build just the desired command rather than the entire module when developing
 Flyer on a machine without the native encoding libraries:
