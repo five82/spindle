@@ -59,6 +59,11 @@ jobs:
           go-version-file: go.mod
           check-latest: true
           cache: true
+          # Go does not track changes to external CGO libraries and headers.
+          cache-dependency-path: |
+            go.sum
+            .forgejo/build-native.sh
+            .forgejo/workflows/ci.yaml
 
       - name: Run CI checks
         run: ./check-ci.sh
