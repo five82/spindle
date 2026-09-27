@@ -49,7 +49,7 @@ func TestDeployScript(t *testing.T) {
 			}
 			// Whitelist utilities rather than inheriting any directory that might
 			// contain the operator's real daemon, including /usr/bin.
-			for _, name := range []string{"awk", "chmod", "cmp", "cp", "dirname", "mkdir", "mktemp", "rm"} {
+			for _, name := range []string{"awk", "chmod", "cmp", "cp", "dirname", "mkdir", "mktemp", "mv", "rm"} {
 				path, err := exec.LookPath(name)
 				if err != nil {
 					t.Fatal(err)
