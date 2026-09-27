@@ -15,6 +15,7 @@ import (
 	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/stage"
 )
 
 func testStore(t *testing.T) *queue.Store {
@@ -132,6 +133,67 @@ func TestQueueEnqueueCachedCreatesRippingItem(t *testing.T) {
 	}
 	if item == nil || item.Stage != queue.StageRipping || item.RipSpecData == "" || item.MetadataJSON == "" {
 		t.Fatalf("cached item not persisted correctly: %+v", item)
+	}
+}
+
+func TestQueueEnqueueCachedWaitsForRestoredRip(t *testing.T) {
+	for _, mediaType := range []string{"movie", "tv"} {
+		t.Run(mediaType, func(t *testing.T) {
+			store := testStore(t)
+			srv := httpapi.New(httpapi.Params{Store: store, Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))})
+			key := "main"
+			var episodes []ripspec.Episode
+			if mediaType == "tv" {
+				key = "s01_001"
+				episodes = []ripspec.Episode{{Key: key, TitleID: 1}}
+			}
+			// Cache metadata from item 1 named a completed rip even though its
+			// staging path did not exist until the ripper restored the cache.
+			env := ripspec.Envelope{
+				Version:  ripspec.CurrentVersion,
+				Metadata: ripspec.Metadata{MediaType: mediaType, Cached: true},
+				Titles:   []ripspec.Title{{ID: 1, Duration: 6699, Playlist: "00800.mpls"}},
+				Episodes: episodes,
+				Assets: ripspec.Assets{
+					Ripped:  []ripspec.Asset{{EpisodeKey: key, TitleID: 1, Path: filepath.Join(t.TempDir(), "Air_t01.mkv"), Status: ripspec.AssetStatusCompleted}},
+					Encoded: []ripspec.Asset{{EpisodeKey: key, Path: "old-encode.mkv", Status: ripspec.AssetStatusCompleted}},
+				},
+			}
+			data, err := env.Encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(map[string]string{"disc_title": "Air (2023)", "fingerprint": "4130be1355e9", "rip_spec_data": data})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := httptest.NewRecorder()
+			srv.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/queue/enqueue-cached", strings.NewReader(string(body))))
+			if w.Code != http.StatusOK {
+				t.Fatalf("enqueue = %d: %s", w.Code, w.Body.String())
+			}
+			items, err := store.List()
+			if err != nil || len(items) != 1 {
+				t.Fatalf("items = %v, err = %v", items, err)
+			}
+			queued, err := ripspec.Parse(items[0].RipSpecData)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(queued.Titles) != 1 || queued.Titles[0].Playlist != "00800.mpls" || len(queued.Episodes) != len(episodes) {
+				t.Fatalf("cached identification lost: %+v", queued)
+			}
+			jobs, _ := stage.PendingKeyedAssetJobs(&queued, ripspec.AssetKindRipped, ripspec.AssetKindEncoded)
+			if len(jobs) != 0 || len(queued.Assets.Ripped) != 0 || len(queued.Assets.Encoded) != 0 {
+				t.Fatalf("cached assets marked ready before restore: %+v", queued.Assets)
+			}
+			// Once the ripper publishes the restored asset, encoding can stream it.
+			queued.Assets.AddAsset(ripspec.AssetKindRipped, env.Assets.Ripped[0])
+			jobs, _ = stage.PendingKeyedAssetJobs(&queued, ripspec.AssetKindRipped, ripspec.AssetKindEncoded)
+			if len(jobs) != 1 || jobs[0].Key != key {
+				t.Fatalf("restored rip not available to encoder: %+v", jobs)
+			}
+		})
 	}
 }
 

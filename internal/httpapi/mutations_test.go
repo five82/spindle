@@ -59,7 +59,7 @@ func TestCachedEnqueueDuplicateOverrideAndFilters(t *testing.T) {
 	srv := httpapi.New(httpapi.Params{Store: store, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	for i := 0; i < 2; i++ {
 		w := httptest.NewRecorder()
-		srv.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/queue/enqueue-cached", strings.NewReader(`{"disc_title":" Disc ","fingerprint":" fp ","rip_spec_data":"text","allow_duplicate":true}`)))
+		srv.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/queue/enqueue-cached", strings.NewReader(`{"disc_title":" Disc ","fingerprint":" fp ","rip_spec_data":"{\"version\":1}","allow_duplicate":true}`)))
 		if w.Code != http.StatusOK {
 			t.Fatalf("enqueue %d: %d %s", i, w.Code, w.Body.String())
 		}

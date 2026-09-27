@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/discmonitor"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/ripspec"
 )
 
 // Server is the HTTP API server.
@@ -345,12 +347,34 @@ func (s *Server) handleQueueEnqueueCached(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
+	// Cache metadata describes the previous rip, not files already restored
+	// into this item's staging directory. The encoder streams completed ripped
+	// assets immediately, so only the ripper may publish them after restore.
+	env, err := ripspec.Parse(body.RipSpecData)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid cached rip spec")
+		return
+	}
+	staleRips := len(env.Assets.Ripped)
+	env.Assets = ripspec.Assets{}
+	body.RipSpecData, err = env.Encode()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid cached rip spec")
+		return
+	}
 	item, err := s.store.NewCachedRip(body.DiscTitle, body.Fingerprint, body.RipSpecData, body.MetadataJSON)
 	if err != nil {
 		s.logger.Error("enqueue cached rip", "error", err, "fingerprint", body.Fingerprint)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue cached rip")
 		return
 	}
+	s.logger.Info("cached rip queued pending restore",
+		"item_id", item.ID,
+		"decision_type", logs.DecisionRipCache,
+		"decision_result", "pending_restore",
+		"decision_reason", "cached asset paths are not ready until the ripper restores and validates them",
+		"stale_ripped_assets", staleRips,
+	)
 	writeJSON(w, http.StatusOK, map[string]any{"item": ToItemResponse(item, nil, false)})
 }
 

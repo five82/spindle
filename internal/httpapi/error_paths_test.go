@@ -52,7 +52,7 @@ func TestQueueEnqueueClosedDatabaseWithDuplicateOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := httptest.NewRecorder()
-	srv.ServeHTTP(w, httptest.NewRequest("POST", "/api/queue/enqueue-cached", strings.NewReader(`{"disc_title":"Disc","fingerprint":"fp","rip_spec_data":"{}","allow_duplicate":true}`)))
+	srv.ServeHTTP(w, httptest.NewRequest("POST", "/api/queue/enqueue-cached", strings.NewReader(`{"disc_title":"Disc","fingerprint":"fp","rip_spec_data":"{\"version\":1}","allow_duplicate":true}`)))
 	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "failed to enqueue") {
 		t.Fatalf("got %d: %s", w.Code, w.Body.String())
 	}
