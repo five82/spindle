@@ -15,15 +15,37 @@ import (
 	"github.com/five82/spindle/internal/queueaccess"
 )
 
-// printTaskLines renders per-task status lines: running tasks show percent
-// and message (bytes and active asset key in verbose mode), failed tasks
-// show their error. Progress now lives per task (the scheduler's tasks
-// table), so what used to be a single item-level "Progress: X% message"
-// line is one line per running task.
+// An encoding task can reserve its slot before a completed rip is available.
+func taskIsWorking(t httpapi.TaskResponse) bool {
+	return t.State == string(queue.TaskRunning) && (t.Type != string(queue.StageEncoding) || t.ActiveAssetKey != "")
+}
+
+// Live tasks, not the scheduler's coarse item stage, describe current work.
+func queueDisplayStage(item queueaccess.Item) string {
+	if item.Stage == string(queue.StageFailed) || item.Stage == string(queue.StageCompleted) || len(item.Tasks) == 0 {
+		return item.Stage
+	}
+	var active []string
+	for _, t := range item.Tasks {
+		if taskIsWorking(t) {
+			active = append(active, t.Type)
+		}
+	}
+	if len(active) == 0 {
+		return "waiting"
+	}
+	return strings.Join(active, " + ")
+}
+
+// printTaskLines keeps each task's progress, idle state, and error independent.
 func printTaskLines(indent string, tasks []httpapi.TaskResponse, verbose bool) {
 	for _, t := range tasks {
 		switch queue.TaskState(t.State) {
 		case queue.TaskRunning:
+			if !taskIsWorking(t) {
+				fmt.Printf("%s%s waiting for a ripped asset\n", indent, labelStyle(fmt.Sprintf("Waiting (%s):", t.Type)))
+				continue
+			}
 			fmt.Printf("%s%s %s (%.0f%%)\n", indent, labelStyle(fmt.Sprintf("Progress (%s):", t.Type)), t.Progress.Message, t.Progress.Percent)
 			if verbose && t.Progress.TotalBytes > 0 {
 				fmt.Printf("%s  %s %s / %s\n", indent, labelStyle("Bytes:"), formatBytes(t.Progress.BytesCopied), formatBytes(t.Progress.TotalBytes))
@@ -110,36 +132,28 @@ reads the queue database directly (read-only).`,
 				return nil
 			}
 
+			stageWidth := 24
+			for _, item := range items {
+				stageWidth = max(stageWidth, len(queueDisplayStage(item)))
+			}
 			if flagVerbose {
-				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-40s %-6s %-24s %-30s %-30s %s", "ID", "Title", "Disc", "Stage", "Created", "Updated", "Fingerprint")))
-				fmt.Println(dimStyle(strings.Repeat("-", 168)))
-				for _, item := range items {
-					fmt.Printf("%-6d %-40s %-6s %-24s %-30s %-30s %s\n",
-						item.ID,
-						item.DiscTitle,
-						discNumberText(item.DiscNumber),
-						item.Stage,
-						item.CreatedAt,
-						item.UpdatedAt,
-						item.DiscFingerprint,
-					)
+				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-40s %-6s %-*s %-30s %-30s %s", "ID", "Title", "Disc", stageWidth, "Stage", "Created", "Updated", "Fingerprint")))
+				fmt.Println(dimStyle(strings.Repeat("-", 144+stageWidth)))
+			} else {
+				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-30s %-6s %-*s %-16s %-14s", "ID", "Title", "Disc", stageWidth, "Stage", "Created", "Fingerprint")))
+				fmt.Println(dimStyle(strings.Repeat("-", 76+stageWidth)))
+			}
+			for _, item := range items {
+				if flagVerbose {
+					fmt.Printf("%-6d %-40s %-6s %-*s %-30s %-30s %s\n", item.ID, item.DiscTitle,
+						discNumberText(item.DiscNumber), stageWidth, queueDisplayStage(item), item.CreatedAt, item.UpdatedAt, item.DiscFingerprint)
 					printTaskLines("       ", item.Tasks, flagVerbose)
 					if item.ErrorMessage != "" {
 						fmt.Printf("       %s %s\n", failStyle("Error:"), item.ErrorMessage)
 					}
-				}
-			} else {
-				fmt.Println(labelStyle(fmt.Sprintf("%-6s %-30s %-6s %-24s %-16s %-14s", "ID", "Title", "Disc", "Stage", "Created", "Fingerprint")))
-				fmt.Println(dimStyle(strings.Repeat("-", 100)))
-				for _, item := range items {
-					fmt.Printf("%-6d %-30s %-6s %-24s %-16s %-14s\n",
-						item.ID,
-						truncate(item.DiscTitle, 28),
-						discNumberText(item.DiscNumber),
-						item.Stage,
-						relativeAge(item.CreatedAt),
-						shortFP(item.DiscFingerprint),
-					)
+				} else {
+					fmt.Printf("%-6d %-30s %-6s %-*s %-16s %-14s\n", item.ID, truncate(item.DiscTitle, 28),
+						discNumberText(item.DiscNumber), stageWidth, queueDisplayStage(item), relativeAge(item.CreatedAt), shortFP(item.DiscFingerprint))
 				}
 			}
 			return nil
@@ -183,7 +197,7 @@ reads the queue database directly (read-only).`,
 			if item.DiscNumber > 0 {
 				fmt.Printf("%s %d\n", labelStyle("Disc:       "), item.DiscNumber)
 			}
-			fmt.Printf("%s %s\n", labelStyle("Stage:      "), item.Stage)
+			fmt.Printf("%s %s\n", labelStyle("Stage:      "), queueDisplayStage(*item))
 			if flagVerbose && item.FailedAtStage != "" {
 				fmt.Printf("%s %s\n", labelStyle("FailedAt:   "), item.FailedAtStage)
 			}

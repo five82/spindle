@@ -58,6 +58,33 @@ func TestOverviewActiveItem_FixedSkeleton(t *testing.T) {
 	}
 }
 
+func TestRipEncodeOverlapUsesIndependentTaskProgress(t *testing.T) {
+	item := spindle.QueueItem{
+		ID: 2, Stage: "ripping",
+		Tasks: []spindle.Task{
+			{Type: "ripping", State: "running", ActiveAssetKey: "s05_002", Progress: spindle.TaskProgress{Percent: 25, Message: "Ripping second title"}},
+			{Type: "encoding", State: "running", ActiveAssetKey: "s05_001", Progress: spindle.TaskProgress{Percent: 60, Message: "Encoding first title"}},
+		},
+	}
+	got := overviewFor(t, item)
+	for _, want := range []string{"◉ Ripping", "25%", "Ripping second title", "◉ Encoding", "60%", "Encoding first title"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("overlap missing %q:\n%s", want, got)
+		}
+	}
+	if got := plainTaskStrip(item); got != "◉◉" {
+		t.Fatalf("overlap task indicators = %q", got)
+	}
+	item.Tasks[0].State = "done"
+	item.Stage = "episode_identification" // Item 2's coarse stage lagged encoding.
+	if got := itemDisplayStage(item); got != "encoding" {
+		t.Fatalf("display stage = %q, want encoding", got)
+	}
+	if got := queuePercentCell(item); strings.TrimSpace(got) != "60%" {
+		t.Fatalf("queue progress = %q, want encoder progress", got)
+	}
+}
+
 func TestOverviewIdleEncodingLooksPending(t *testing.T) {
 	item := spindle.QueueItem{
 		ID: 1, Stage: "ripping",
