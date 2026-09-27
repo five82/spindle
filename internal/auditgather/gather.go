@@ -402,7 +402,7 @@ func extractLogTimestamp(filename string) string {
 var knownLogKeys = map[string]bool{
 	"time": true, "level": true, "msg": true,
 	"decision_type": true, "decision_result": true, "decision_reason": true,
-	"event_type": true, "error_hint": true, "error": true,
+	"event_type": true, "error_hint": true,
 	"stage": true, "stage_duration": true,
 	"item_id": true,
 }

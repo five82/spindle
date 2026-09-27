@@ -152,7 +152,6 @@ func defaultConfig() *Config {
 		},
 		Commentary: CommentaryConfig{
 			SimilarityThreshold: 0.92,
-			ConfidenceThreshold: 0.80,
 		},
 		ContentID: ContentIDConfig{
 			MinSimilarityScore:           0.58,

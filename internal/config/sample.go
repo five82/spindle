@@ -143,10 +143,10 @@ api_key = ""
 # OpenRouter API key (or set OPENROUTER_API_KEY env var)
 # api_key = ""
 
-# Chat completions endpoint
+# Chat completions endpoint; Jev uses its sibling /systemone endpoint
 # base_url = "https://openrouter.ai/api/v1/chat/completions"
 
-# LLM model identifier or OpenRouter preset; requests use low reasoning effort
+# Episode-verification model or preset; low reasoning effort (commentary uses Jev)
 # model = "deepseek/deepseek-v4.1-flash"
 
 # HTTP-Referer header for OpenRouter
@@ -165,8 +165,8 @@ api_key = ""
 # Cosine similarity threshold for duplicate-program-audio detection
 # similarity_threshold = 0.92
 
-# LLM confidence required for classification
-# confidence_threshold = 0.80
+# Uses Jev through OpenRouter with a fixed, evaluated commentary-probability
+# threshold of 0.65. The [llm] API key and timeout apply; its chat model does not.
 
 [content_id]
 # Minimum cosine similarity required to keep a candidate claim

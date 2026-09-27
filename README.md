@@ -78,6 +78,11 @@ The generated sample shows every option, environment override, and default. Use
 `spindle --help` / `spindle <command> --help` for the current command and flag
 reference.
 
+Commentary detection uses Jev through OpenRouter with the same API key as
+ambiguous episode verification. The configured chat model applies only to
+verification; commentary reports its probability and decision rule instead of
+a generated explanation.
+
 To expose the daemon API to the read-only
 [Flyer](https://github.com/five82/flyer) monitor, configure a TCP listener and,
 for anything beyond trusted localhost access, a bearer token:

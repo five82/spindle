@@ -17,14 +17,13 @@ import (
 
 const defaultModel = "deepseek/deepseek-v4.1-flash"
 
-// Client sends chat completion requests to an OpenRouter-compatible API.
+// Client sends chat completions and typed decisions through OpenRouter.
 type Client struct {
 	apiKey  string
 	baseURL string
 	model   string
 	referer string
 	title   string
-	timeout time.Duration
 	client  *http.Client
 	logger  *slog.Logger
 }
@@ -54,42 +53,9 @@ func New(cfg config.LLMConfig, logger *slog.Logger) *Client {
 		model:   model,
 		referer: cfg.Referer,
 		title:   cfg.Title,
-		timeout: timeout,
 		client:  &http.Client{Timeout: timeout},
 		logger:  logger,
 	}
-}
-
-// chatRequest is the OpenAI-compatible chat completion request body.
-type chatRequest struct {
-	Model          string          `json:"model"`
-	Messages       []chatMessage   `json:"messages"`
-	ResponseFormat *responseFormat `json:"response_format,omitempty"`
-	Reasoning      reasoningConfig `json:"reasoning"`
-}
-
-type reasoningConfig struct {
-	Effort string `json:"effort"`
-}
-
-// responseFormat constrains the LLM response to a specific format.
-type responseFormat struct {
-	Type string `json:"type"`
-}
-
-// chatMessage is a single message in the chat completion request.
-type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// chatResponse is the OpenAI-compatible chat completion response.
-type chatResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
 }
 
 // CompleteJSON sends a chat completion request with system and user messages,
@@ -100,18 +66,33 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 		return fmt.Errorf("llm client not configured")
 	}
 
-	reqBody := chatRequest{
-		Model: c.model,
-		Messages: []chatMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userPrompt},
-		},
-		ResponseFormat: &responseFormat{Type: "json_object"},
+	request := map[string]any{
+		"model":           c.model,
+		"messages":        []map[string]string{{"role": "system", "content": systemPrompt}, {"role": "user", "content": userPrompt}},
+		"response_format": map[string]string{"type": "json_object"},
 		// Keep classification at low effort even when a preset selects the model.
-		Reasoning: reasoningConfig{Effort: "low"},
+		"reasoning": map[string]string{"effort": "low"},
 	}
+	return c.complete(ctx, c.baseURL, c.model, request, func(body []byte) error {
+		var resp struct {
+			Choices []struct{ Message struct{ Content string } }
+		}
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return fmt.Errorf("unmarshal chat response: %w", err)
+		}
+		if len(resp.Choices) == 0 {
+			return fmt.Errorf("no choices in response")
+		}
+		if err := json.Unmarshal([]byte(sanitizeJSON(resp.Choices[0].Message.Content)), result); err != nil {
+			return fmt.Errorf("unmarshal response: %w", err)
+		}
+		return nil
+	})
+}
 
-	bodyBytes, err := json.Marshal(reqBody)
+// complete shares transport, retries and request logging across API surfaces.
+func (c *Client) complete(ctx context.Context, endpoint, model string, request any, decode func([]byte) error) error {
+	bodyBytes, err := json.Marshal(request)
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
 	}
@@ -122,21 +103,20 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 	start := time.Now()
 	c.logger.Info("LLM request started",
 		"event_type", "llm_request_start",
-		"model", c.model,
+		"model", model,
 	)
 
 	var lastErr error
 	for attempt := range maxAttempts {
 		attemptStart := time.Now()
-		content, err := c.doRequest(ctx, bodyBytes)
+		body, err := c.doRequest(ctx, endpoint, bodyBytes)
 		if err == nil {
-			sanitized := sanitizeJSON(content)
-			if unmarshalErr := json.Unmarshal([]byte(sanitized), result); unmarshalErr != nil {
-				return fmt.Errorf("unmarshal response: %w", unmarshalErr)
-			}
+			err = decode(body)
+		}
+		if err == nil {
 			c.logger.Info("LLM request completed",
 				"event_type", "llm_request_complete",
-				"model", c.model,
+				"model", model,
 				"attempt", attempt+1,
 				"attempt_duration_ms", time.Since(attemptStart).Milliseconds(),
 				"duration_ms", time.Since(start).Milliseconds(),
@@ -191,10 +171,10 @@ func isRetryable(err error) bool {
 }
 
 // doRequest performs a single HTTP request and returns the response content.
-func (c *Client) doRequest(ctx context.Context, bodyBytes []byte) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bytes.NewReader(bodyBytes))
+func (c *Client) doRequest(ctx context.Context, endpoint string, bodyBytes []byte) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
@@ -208,33 +188,23 @@ func (c *Client) doRequest(ctx context.Context, bodyBytes []byte) (string, error
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("http request: %w", err)
+		return nil, fmt.Errorf("http request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("read response: %w", err)
+		return nil, fmt.Errorf("read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		httpErr := fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody))
 		if resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-			return "", &retryableError{err: httpErr}
+			return nil, &retryableError{err: httpErr}
 		}
-		return "", httpErr
+		return nil, httpErr
 	}
-
-	var chatResp chatResponse
-	if err := json.Unmarshal(respBody, &chatResp); err != nil {
-		return "", fmt.Errorf("unmarshal chat response: %w", err)
-	}
-
-	if len(chatResp.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
-	}
-
-	return chatResp.Choices[0].Message.Content, nil
+	return respBody, nil
 }
 
 // sanitizeJSON strips markdown code fences and surrounding whitespace from s.

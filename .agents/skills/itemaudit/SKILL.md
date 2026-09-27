@@ -111,7 +111,7 @@ The `stage_gate` object in the audit output contains:
 Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors`, and `logs.stages`. **Go beyond simple error counts.**
 
 1. **Decision anomalies** (from `analysis.decision_groups`):
-   - Low confidence scores on decisions that were accepted anyway
+   - Scores that contradict the decision's own acceptance rule. Jev commentary uses P(commentary) >= 0.65, not an LLM confidence gate or the episode-match confidence bands below.
    - Unexpected fallbacks (encoding retries)
    - Decisions that contradict expected behavior for the content type
    - Look up groups by `decision_type` to find specific categories (`commentary_classification`, `tmdb_match`, etc.)
@@ -120,7 +120,7 @@ Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors
    - A WARN `event_type=keydb_download_error` means identification continued with a stale KeyDB catalog. Always report it as a **WARNING** because a newly added or corrected disc title may have been missed. A `keydb_refresh` decision with `decision_result=catalog_stale` followed by a successful `keydb_download_complete` is normal recovery, not a finding.
    - Movie title selection: `decision_type=title_selection_funnel` records each elimination stage (rule, `candidates_before/after`, `eliminated_title_ids`, `evidence` with the threshold values); the winner is the `decision_type=title_selection` "primary title decision" line. When the wrong cut/title was picked, the funnel shows which rule eliminated the right one.
    - Scheduler resource waits: `decision_type=stage_execution` with `decision_result=blocked` / `unblocked` shows a task waiting on GPU/drive/encode claims (`claims` attr) and the `waited` duration on grant. "stage started" lines also carry the resolved `claims` (so the GPU-for-TV choice is visible per dispatch). The `encode` claim has capacity 1 — encodes never run concurrently. A movie's encoding task takes that claim when identification completes and then polls without work until its rip finishes (`encoding_plan` logs `decision_result=deferred` for this; TV logs `streaming`). That idle hold is by design and is NOT a finding: ready tasks are ordered by item `created_at`, so the claim always goes to the oldest item still needing it, and under sequential ripping that is also the item whose rip completes first.
-   - Warnings/errors include `extras` maps with non-standard log fields for diagnostic context; decisions use structured fields only (full log lines available at the files in `logs.paths`)
+   - Warnings/errors and decision entries include `extras` maps with non-standard log fields for diagnostic context, including the underlying `extras.error` when logged. Jev commentary decisions carry `extras.commentary_probability` and `extras.track_index`; full log lines are also available at the files in `logs.paths`.
 
 2. **Timing/progress anomalies** (from `logs.stages` and `logs.events`):
    - Stages taking unusually long or short (use `duration_seconds` when available)
@@ -147,8 +147,8 @@ Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors
 4. **LLM decision review** (from `analysis.decision_groups`):
    - `decision_type=commentary_classification` entries
    - `decision_type=tmdb_match` and `decision_type=tmdb_match_preference` entries — verify acceptance thresholds are reasonable
-   - Evaluate if confidence levels and reasons make sense for the content
-   - Exclude subtitle wording from this review; only aggregate subtitle pipeline outcomes belong in this audit
+   - Evaluate scores against the rule and model that produced them. Jev commentary reasons intentionally report the probability comparison, not a generated explanation; this is not missing rationale. Episode verification still uses the configured chat model.
+   - Exclude subtitle/transcript wording from this review; use decisions, failure events, track metadata, and applicable external disc evidence.
 
 5. **TV episode pipeline checks** (TV only, from `analysis.decision_groups`, `logs.warnings`, and stage events):
    - Stage events with `stage=episode_identification` — verify the stage started/completed or identify where it failed
@@ -366,12 +366,15 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 
 1. **From decisions**: Find `decision_type=commentary_classification`, `commentary_stereo_filter`, `commentary_remapping`, and `commentary_disposition` groups
 2. **Expected behavior**:
-   - 2-channel English tracks that aren't stereo downmixes should be candidates
-   - High similarity to primary audio = stereo downmix (excluded)
-   - LLM should classify based on content
-   - Each candidate is transcribed ONCE (batched WhisperX invocation); the same transcript feeds both the similarity filter and LLM classification — there is no separate classification transcription or separate commentary model
+   - All non-primary English or unknown-language audio tracks are candidates, not just 2-channel tracks. Explicit non-English tracks are filtered before transcription.
+   - Every candidate is classified before similarity can exclude it. High similarity alone is NOT proof of duplicate audio: mixed commentary can contain extensive program dialogue. Exclusion requires both a non-commentary classification and similarity at or above the configured threshold; the reason distinguishes a stereo downmix from a multichannel duplicate/core.
+   - Commentary uses `typesafe/jev-1.13` through OpenRouter's System One API, with one typed Choice question and P(commentary) >= 0.65. Read `analysis.decision_groups[].entries[].extras.commentary_probability` and the comparison in `decision_reason`. The digest already renders both; `analysis.audio_summary.commentary_decisions` also preserves the evidence in JSON.
+   - The probability is NOT Jev's separate distribution-confidence statistic, the old chat-model confidence, or an episode-match score. A commentary acceptance at 0.65-0.79 is valid, not an automatic low-confidence finding. Jev returns no free-text explanation; reasons such as `Jev commentary probability 0.7 >= 0.65` are the intended diagnostic.
+   - For Jev-classified tracks, `envelope.attributes.audio_analysis.commentary_tracks[].confidence` (and the per-episode equivalent) stores P(commentary). On a conservative error fallback it is zero, meaning classification was unavailable, not that the track was confidently rejected. Read its `reason` and the matching warning.
+   - Each candidate is transcribed ONCE (batched WhisperX invocation); the same raw transcript feeds similarity and Jev classification. The classifier sees the title and first 4,000 bytes of SRT, so its decision cannot prove that no commentary exists later in the track. There is no separate classification transcription or separate WhisperX model.
    - The primary track fingerprint comes from the shared transcript artifact when one exists (`commentary_stereo_filter` with `decision_result=artifact_reused`); otherwise the primary is transcribed once and recorded as the artifact (`envelope.assets.transcript`)
-   - If the whole candidate batch transcription fails, ALL candidates are conservatively marked commentary (`reason: "transcription failed"`) — report the batch failure as the root cause, not per-track defects
+   - Missing or blank transcripts and API/schema failures conservatively preserve the affected candidate as commentary. Read WARN `event_type=commentary_detection_failed` and its impact; do not confuse this fallback with a successful Jev classification. If the whole candidate batch fails, ALL candidates are preserved (`reason: "transcription failed"`); report the batch failure as the root cause, not per-track defects.
+   - `commentary_llm_start` / `commentary_llm_complete` remain the item-specific timing events despite the switch to Jev; their names do not mean the old chat model was used.
 
 3. **Refinement impact**: Check `decision_type=commentary_remapping` — shows how many commentary tracks survived audio refinement. `remapped_count=0` means all commentary tracks were lost during refinement.
 
@@ -576,7 +579,8 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Content review: <not performed; subtitle text is out of scope. For skipped titles recommend the whisperx-subtitles skill or a later `spindle subtitle` retry>
 
 #### Commentary (if phase_commentary)
-- Decisions: <from analysis.decision_groups>
+- Decisions: <from analysis.decision_groups; for Jev include P(commentary) and its 0.65 rule, not episode-confidence bands>
+- Conservative fallbacks: <classification/transcription failures, if any; zero stored confidence is not a successful negative decision>
 - Tracks in output: <count from media probes>
 
 ### External Validation (if phase_external_validation)
@@ -621,7 +625,8 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] If TV: checked cross-episode consistency
 
 ### Post-Audio-Analysis (phase_commentary)
-- [ ] Reviewed commentary decisions from `analysis.decision_groups`
+- [ ] Reviewed commentary decisions from `analysis.decision_groups`, interpreting Jev probabilities with the 0.65 rule rather than an LLM/episode confidence gate
+- [ ] Checked conservative error fallbacks and verified that similarity did not exclude a track classified or preserved as commentary
 - [ ] If TV: verified cross-episode audio stream count consistency
 
 ### Post-Subtitling (phase_subtitles)

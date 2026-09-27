@@ -86,8 +86,11 @@ func TestSubtitleCommandResolvesIdentityBeforeExternalWork(t *testing.T) {
 func TestDebugCommentaryClassificationWithStubTranscripts(t *testing.T) {
 	old := cfg
 	t.Cleanup(func() { cfg = old })
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"{\"decision\":\"commentary\",\"confidence\":0.9,\"reason\":\"narration\"}"}}]}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/systemone" {
+			t.Errorf("debug used wrong endpoint: %s", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"answers":{"decision":{"type":"choice","choice":"commentary","confidence":0.1,"probabilities":{"commentary":0.9,"not_commentary":0.1}}}}`)
 	}))
 	defer server.Close()
 	cfg = &config.Config{}
@@ -127,13 +130,18 @@ done
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	cmd := newDebugCommentaryCmd()
-	output := captureStdout(t, func() {
-		if err := cmd.RunE(cmd, []string{file}); err != nil {
-			t.Fatal(err)
+	for _, threshold := range []float64{0.8, 0} {
+		cfg.Commentary.SimilarityThreshold = threshold
+		output := captureStdout(t, func() {
+			if err := cmd.RunE(cmd, []string{file}); err != nil {
+				t.Fatal(err)
+			}
+		})
+		for _, want := range []string{"LLM decision:", "commentary", "Commentary probability:", "0.900", "Jev commentary probability 0.9 >= 0.65"} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("missing %q in classification: %s", want, output)
+			}
 		}
-	})
-	if !strings.Contains(output, "LLM decision:") || !strings.Contains(output, "commentary") {
-		t.Fatalf("classification: %s", output)
 	}
 }
 

@@ -23,44 +23,6 @@ import (
 	"github.com/five82/spindle/internal/transcription"
 )
 
-// commentarySystemPrompt is the LLM system prompt for commentary classification.
-const commentarySystemPrompt = `You are an assistant that determines if an audio track is commentary or not.
-
-IMPORTANT: Commentary tracks come in two forms:
-1. Commentary-only: People talking about the film without movie audio
-2. Mixed commentary: Movie/TV dialogue plays while commentators talk over it
-
-Both forms are commentary. The presence of movie dialogue does NOT mean it's not commentary.
-Mixed commentary will have movie dialogue interspersed with people discussing the film,
-providing behind-the-scenes insights, or reacting to scenes.
-
-Commentary tracks include:
-- Director/cast commentary over the film (may include movie dialogue in background)
-- Behind-the-scenes discussion mixed with film audio
-- Any track where people discuss or react to the film while it plays
-- Tracks with movie dialogue AND additional voices providing commentary
-
-NOT commentary:
-- Alternate language dubs (foreign language replacing original dialogue)
-- Audio descriptions for visually impaired (narrator describing on-screen action)
-- Duplicate program audio (just the movie audio, no additional commentary)
-- Isolated music/effects tracks
-
-Given a transcript sample from an audio track, determine if it is commentary.
-
-You must respond ONLY with JSON: {"decision": "commentary" or "not_commentary", "confidence": 0.0-1.0, "reason": "brief explanation"}`
-
-// maxTranscriptLen is the maximum character length for transcripts sent to
-// the LLM. Longer transcripts are truncated with a marker appended.
-const maxTranscriptLen = 4000
-
-// commentaryLLMResponse is the expected JSON response from the LLM.
-type commentaryLLMResponse struct {
-	Decision   string  `json:"decision"`
-	Confidence float64 `json:"confidence"`
-	Reason     string  `json:"reason"`
-}
-
 // Handler implements stage.Handler for audio analysis.
 type Handler struct {
 	cfg         *config.Config
@@ -479,9 +441,6 @@ func (h *Handler) classifyTrack(
 		}
 	}
 
-	// Build user prompt.
-	userPrompt := buildCommentaryUserPrompt(stream, transcript)
-
 	logger.Info("LLM commentary classification started",
 		"event_type", "commentary_llm_start",
 		"episode_key", epKey,
@@ -489,11 +448,11 @@ func (h *Handler) classifyTrack(
 		"stream_index", stream.Index,
 	)
 	llmStart := time.Now()
-	var resp commentaryLLMResponse
-	if err := h.llmClient.CompleteJSON(ctx, commentarySystemPrompt, userPrompt, &resp); err != nil {
+	resp, err := Classify(ctx, h.llmClient, stream.Tags["title"], transcript)
+	if err != nil {
 		logger.Warn("LLM commentary classification failed, conservatively marking as commentary",
 			"event_type", "commentary_detection_failed",
-			"error_hint", "llm api error",
+			"error_hint", "commentary classification error",
 			"impact", "track preserved as commentary",
 			"error", err,
 			"track_index", idx,
@@ -513,33 +472,19 @@ func (h *Handler) classifyTrack(
 		"duration_ms", time.Since(llmStart).Milliseconds(),
 	)
 
-	if resp.Decision == "commentary" && resp.Confidence >= h.cfg.Commentary.ConfidenceThreshold {
-		logger.Info("track classified as commentary",
-			"decision_type", logs.DecisionCommentaryClassification,
-			"decision_result", "commentary",
-			"decision_reason", resp.Reason,
-			"track_index", idx,
-			"confidence", resp.Confidence,
-		)
-		return &ripspec.CommentaryTrackRef{
-			Index:      idx,
-			Confidence: resp.Confidence,
-			Reason:     resp.Reason,
-		}
-	}
-
-	logger.Info("track classified as not commentary",
+	logger.Info("track classified as "+strings.ReplaceAll(resp.Decision, "_", " "),
 		"decision_type", logs.DecisionCommentaryClassification,
-		"decision_result", "not_commentary",
+		"decision_result", resp.Decision,
 		"decision_reason", resp.Reason,
 		"track_index", idx,
-		"confidence", resp.Confidence,
+		"commentary_probability", resp.Probability,
 	)
+	if resp.Decision == "commentary" {
+		return &ripspec.CommentaryTrackRef{Index: idx, Confidence: resp.Probability, Reason: resp.Reason}
+	}
 	return nil
 }
 
-// buildCommentaryUserPrompt constructs the user prompt for commentary LLM
-// classification from the stream metadata and transcript text.
 func allowedAudioLanguage(tags map[string]string) (string, bool) {
 	raw := strings.ToLower(strings.TrimSpace(language.ExtractFromTags(tags)))
 	switch raw {
@@ -547,22 +492,6 @@ func allowedAudioLanguage(tags map[string]string) (string, bool) {
 		return raw, true
 	}
 	return raw, language.ToISO2(raw) == "en"
-}
-
-func buildCommentaryUserPrompt(stream ffprobe.Stream, transcript string) string {
-	title := strings.TrimSpace(stream.Tags["title"])
-
-	// Truncate transcript if needed.
-	if len(transcript) > maxTranscriptLen {
-		transcript = transcript[:maxTranscriptLen] + "\n[truncated]"
-	}
-
-	var b strings.Builder
-	if title != "" {
-		_, _ = fmt.Fprintf(&b, "Title: %s\n\n", title)
-	}
-	_, _ = fmt.Fprintf(&b, "Transcript sample:\n%s", transcript)
-	return b.String()
 }
 
 // tempOutputDir returns a temporary directory path for transcription output,

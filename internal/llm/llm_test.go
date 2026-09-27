@@ -11,6 +11,8 @@ import (
 	"github.com/five82/spindle/internal/config"
 )
 
+type chatRequest struct{ Reasoning struct{ Effort string } }
+
 func TestNewEmptyAPIKey(t *testing.T) {
 	c := New(config.LLMConfig{}, nil)
 	if c != nil {
@@ -139,11 +141,11 @@ func TestCompleteJSONRequestPolicy(t *testing.T) {
 				if _, present := req["temperature"]; present {
 					t.Error("temperature must be omitted for reasoning requests")
 				}
-				var reasoning reasoningConfig
+				var reasoning struct{ Effort string }
 				if err := json.Unmarshal(req["reasoning"], &reasoning); err != nil || reasoning.Effort != "low" {
 					t.Errorf("reasoning = %s, want low effort (error: %v)", req["reasoning"], err)
 				}
-				var format responseFormat
+				var format struct{ Type string }
 				if err := json.Unmarshal(req["response_format"], &format); err != nil || format.Type != "json_object" {
 					t.Errorf("response_format = %s, want json_object (error: %v)", req["response_format"], err)
 				}

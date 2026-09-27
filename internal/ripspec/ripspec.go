@@ -131,7 +131,7 @@ type AudioTrackRef struct {
 // CommentaryTrackRef identifies a commentary audio track.
 type CommentaryTrackRef struct {
 	Index      int     `json:"index"`
-	Confidence float64 `json:"confidence"`
+	Confidence float64 `json:"confidence"` // P(commentary); zero on conservative error fallback.
 	Reason     string  `json:"reason"`
 }
 

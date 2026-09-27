@@ -3,7 +3,6 @@ package audioanalysis
 import (
 	"testing"
 
-	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
@@ -120,59 +119,4 @@ func TestClassifySimilarityExclusion(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestBuildCommentaryUserPrompt_WithTitle(t *testing.T) {
-	stream := ffprobe.Stream{
-		Tags: map[string]string{"title": "Director Commentary"},
-	}
-	prompt := buildCommentaryUserPrompt(stream, "Some transcript text here.")
-
-	if !contains(prompt, "Title: Director Commentary") {
-		t.Errorf("expected title in prompt, got:\n%s", prompt)
-	}
-	if !contains(prompt, "Some transcript text here.") {
-		t.Errorf("expected transcript in prompt, got:\n%s", prompt)
-	}
-}
-
-func TestBuildCommentaryUserPrompt_NoTitle(t *testing.T) {
-	stream := ffprobe.Stream{
-		Tags: map[string]string{},
-	}
-	prompt := buildCommentaryUserPrompt(stream, "Transcript.")
-
-	if contains(prompt, "Title:") {
-		t.Errorf("expected no title line, got:\n%s", prompt)
-	}
-	if !contains(prompt, "Transcript.") {
-		t.Errorf("expected transcript in prompt, got:\n%s", prompt)
-	}
-}
-
-func TestBuildCommentaryUserPrompt_Truncation(t *testing.T) {
-	long := make([]byte, maxTranscriptLen+500)
-	for i := range long {
-		long[i] = 'a'
-	}
-
-	stream := ffprobe.Stream{Tags: map[string]string{}}
-	prompt := buildCommentaryUserPrompt(stream, string(long))
-
-	if !contains(prompt, "[truncated]") {
-		t.Error("expected truncation marker in prompt")
-	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && containsStr(s, substr)
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

@@ -127,7 +127,6 @@ type LLMConfig struct {
 type CommentaryConfig struct {
 	Enabled             bool    `toml:"enabled"`
 	SimilarityThreshold float64 `toml:"similarity_threshold"`
-	ConfidenceThreshold float64 `toml:"confidence_threshold"`
 }
 
 // ContentIDConfig defines episode identification policy thresholds.

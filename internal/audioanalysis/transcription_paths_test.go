@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 
 	"github.com/five82/spindle/internal/config"
@@ -32,7 +31,7 @@ func TestDetectCommentaryTranscribesOnceAndExcludesStereoDuplicate(t *testing.T)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":`+strconv.Quote(`{"decision":"not_commentary","confidence":0.99,"reason":"same program"}`)+`}}]}`)
+		_, _ = io.WriteString(w, `{"answers":{"decision":{"type":"choice","choice":"not_commentary","confidence":0.9,"probabilities":{"commentary":0.01,"not_commentary":0.99}}}}`)
 	}))
 	defer server.Close()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -51,7 +50,7 @@ func TestDetectCommentaryTranscribesOnceAndExcludesStereoDuplicate(t *testing.T)
 	}
 	sess.Logger = logger
 	sess.SetEnvelope(&ripspec.Envelope{Version: ripspec.CurrentVersion})
-	cfg := &config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}, Commentary: config.CommentaryConfig{SimilarityThreshold: .85, ConfidenceThreshold: .8}}
+	cfg := &config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}, Commentary: config.CommentaryConfig{SimilarityThreshold: .85}}
 	h := New(cfg, llm.New(config.LLMConfig{APIKey: "test", BaseURL: server.URL}, logger), transcription.New(transcription.Params{}, logger))
 	fingerprint := filepath.Base(t.TempDir())
 	t.Cleanup(func() { _ = os.RemoveAll(tempOutputDir(fingerprint, "main", 1)) })

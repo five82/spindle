@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -21,20 +20,20 @@ import (
 )
 
 func TestClassifyTrackResultsAndMissingTranscript(t *testing.T) {
-	response := `{"decision":"commentary","confidence":0.9,"reason":"director speaks"}`
+	response := `{"answers":{"decision":{"type":"choice","choice":"commentary","confidence":0.1,"probabilities":{"commentary":0.9,"not_commentary":0.1}}}}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":`+strconv.Quote(response)+`}}]}`)
+		_, _ = io.WriteString(w, response)
 	}))
 	defer server.Close()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg := &config.Config{Commentary: config.CommentaryConfig{ConfidenceThreshold: .8}}
+	cfg := &config.Config{}
 	h := New(cfg, llm.New(config.LLMConfig{APIKey: "test", BaseURL: server.URL}, logger), nil)
 	stream := ffprobe.Stream{Index: 1, Tags: map[string]string{"title": "Commentary"}}
 	ref := h.classifyTrack(context.Background(), logger, 1, stream, "main", "The director describes a scene", true)
 	if ref == nil || ref.Index != 1 || ref.Confidence != .9 {
 		t.Fatalf("commentary: %+v", ref)
 	}
-	response = `{"decision":"not_commentary","confidence":0.99,"reason":"program audio"}`
+	response = `{"answers":{"decision":{"type":"choice","choice":"not_commentary","confidence":0.9,"probabilities":{"commentary":0.01,"not_commentary":0.99}}}}`
 	if ref := h.classifyTrack(context.Background(), logger, 1, stream, "main", "ordinary dialogue", true); ref != nil {
 		t.Fatalf("program audio: %+v", ref)
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/five82/spindle/internal/audioanalysis"
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/media/ffprobe"
@@ -267,7 +268,7 @@ func newDebugCommentaryCmd() *cobra.Command {
 
 			fmt.Printf("\n%s\n", headerStyle("=== Commentary Analysis ==="))
 			fmt.Printf("%s %.3f\n", labelStyle("Duplicate-program-audio threshold:"), cfg.Commentary.SimilarityThreshold)
-			fmt.Printf("%s %.3f\n", labelStyle("Confidence threshold:"), cfg.Commentary.ConfidenceThreshold)
+			fmt.Println("Classifier: Jev through OpenRouter (commentary probability)")
 
 			// Use audio-relative indices for ffmpeg -map 0:a:N.
 			for candidateAudioIdx, candidate := range audioStreams[1:] {
@@ -318,34 +319,19 @@ func newDebugCommentaryCmd() *cobra.Command {
 						classification = "likely stereo downmix of primary"
 					}
 					fmt.Printf(" (>= %.3f, %s)\n", cfg.Commentary.SimilarityThreshold, classification)
-					continue
-				}
-				fmt.Println()
-
-				// LLM classification.
-				transcript := string(candidateText)
-				if len(transcript) > 4000 {
-					transcript = transcript[:4000] + "\n[truncated]"
+				} else {
+					fmt.Println()
 				}
 
-				var userPrompt strings.Builder
-				if title != "" {
-					fmt.Fprintf(&userPrompt, "Title: %s\n\n", title)
-				}
-				fmt.Fprintf(&userPrompt, "Transcript sample:\n%s", transcript)
-
-				var resp struct {
-					Decision   string  `json:"decision"`
-					Confidence float64 `json:"confidence"`
-					Reason     string  `json:"reason"`
-				}
-				if llmErr := llmClient.CompleteJSON(ctx, commentarySystemPrompt, userPrompt.String(), &resp); llmErr != nil {
-					fmt.Printf("LLM: error (%v)\n", llmErr)
+				// Like production, similarity must not bypass commentary classification.
+				resp, err := audioanalysis.Classify(ctx, llmClient, title, string(candidateText))
+				if err != nil {
+					fmt.Printf("LLM: error (%v)\n", err)
 					continue
 				}
 
 				fmt.Printf("%s %s\n", labelStyle("LLM decision:  "), resp.Decision)
-				fmt.Printf("%s %.2f\n", labelStyle("LLM confidence:"), resp.Confidence)
+				fmt.Printf("%s %.3f\n", labelStyle("Commentary probability:"), resp.Probability)
 				fmt.Printf("%s %s\n", labelStyle("LLM reason:    "), resp.Reason)
 			}
 
@@ -353,25 +339,3 @@ func newDebugCommentaryCmd() *cobra.Command {
 		},
 	}
 }
-
-// commentarySystemPrompt is the LLM system prompt for commentary classification.
-const commentarySystemPrompt = `You are an assistant that determines if an audio track is commentary or not.
-
-IMPORTANT: Commentary tracks come in two forms:
-1. Commentary-only: People talking about the film without movie audio
-2. Mixed commentary: Movie/TV dialogue plays while commentators talk over it
-
-Both forms are commentary. The presence of movie dialogue does NOT mean it's not commentary.
-
-Commentary tracks include:
-- Director/cast commentary over the film
-- Behind-the-scenes discussion mixed with film audio
-- Any track where people discuss or react to the film while it plays
-
-NOT commentary:
-- Alternate language dubs
-- Audio descriptions for visually impaired
-- Duplicate program audio
-- Isolated music/effects tracks
-
-Respond ONLY with JSON: {"decision": "commentary" or "not_commentary", "confidence": 0.0-1.0, "reason": "brief explanation"}`
