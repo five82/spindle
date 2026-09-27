@@ -384,22 +384,34 @@ func TestOverviewSubtitlingShowsReportedProgress(t *testing.T) {
 	}
 }
 
-func TestOverviewSubtitlingThroughputUsesGenerationCount(t *testing.T) {
-	episodes := make([]spindle.EpisodeStatus, 7)
-	got := overviewFor(t, spindle.QueueItem{
-		ID:                 6,
-		Stage:              "encoding",
-		Episodes:           episodes,
-		SubtitleGeneration: &spindle.SubtitleGenerationStatus{WhisperX: 7},
-		Tasks: []spindle.Task{
-			{Type: "subtitling", State: "done"},
-			{Type: "apply", State: "pending"},
-		},
-	})
-
-	normalized := strings.Join(strings.Fields(got), " ")
-	if !strings.Contains(normalized, "Subtitled 7/7") {
-		t.Fatalf("overview subtitle throughput = unexpected, got:\n%s", got)
+func TestOverviewSubtitlingThroughputUsesStageDecisions(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		generation *spindle.SubtitleGenerationStatus
+		want       string
+		absent     string
+	}{
+		{"all adopted", &spindle.SubtitleGenerationStatus{OpenSubtitles: 7}, "Subtitled 7/7", "skipped"},
+		{"mixed", &spindle.SubtitleGenerationStatus{OpenSubtitles: 4, Skipped: 3}, "Subs checked 7/7 3 skipped", "Subtitled 7/7"},
+		{"all skipped", &spindle.SubtitleGenerationStatus{Skipped: 7}, "Subs checked 7/7 7 skipped", "Subtitled 0/7"},
+		{"no decisions (disabled)", nil, "Subtitled", "Subtitled 0/7"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := overviewFor(t, spindle.QueueItem{
+				ID:                 6,
+				Stage:              "encoding",
+				Episodes:           make([]spindle.EpisodeStatus, 7),
+				SubtitleGeneration: tc.generation,
+				Tasks: []spindle.Task{
+					{Type: "subtitling", State: "done"},
+					{Type: "apply", State: "pending"},
+				},
+			})
+			normalized := strings.Join(strings.Fields(got), " ")
+			if !strings.Contains(normalized, tc.want) || strings.Contains(normalized, tc.absent) {
+				t.Fatalf("overview subtitle throughput = unexpected, got:\n%s", got)
+			}
+		})
 	}
 }
 

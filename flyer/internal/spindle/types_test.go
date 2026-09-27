@@ -1,6 +1,7 @@
 package spindle
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -37,6 +38,16 @@ func TestParseTimeLayouts(t *testing.T) {
 
 	if !parseTime("").IsZero() {
 		t.Fatalf("parseTime(\"\") should be zero time")
+	}
+}
+
+func TestSubtitleGenerationDecodesAPIFields(t *testing.T) {
+	var item QueueItem
+	if err := json.Unmarshal([]byte(`{"subtitleGeneration":{"opensubtitles":4,"skipped":3}}`), &item); err != nil {
+		t.Fatal(err)
+	}
+	if item.SubtitleGeneration == nil || item.SubtitleGeneration.OpenSubtitles != 4 || item.SubtitleGeneration.Skipped != 3 {
+		t.Fatalf("subtitle generation = %+v", item.SubtitleGeneration)
 	}
 }
 

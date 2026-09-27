@@ -197,9 +197,10 @@ func (q QueueItem) IsTerminal() bool {
 	return strings.EqualFold(q.Stage, "completed") || strings.EqualFold(q.Stage, "failed")
 }
 
-// SubtitleGenerationStatus summarizes generated display subtitles.
+// SubtitleGenerationStatus summarizes adopted and skipped display subtitles.
 type SubtitleGenerationStatus struct {
-	WhisperX int `json:"whisperx"`
+	OpenSubtitles int `json:"opensubtitles"`
+	Skipped       int `json:"skipped"`
 }
 
 // ContentID summarizes episode-identification provenance.

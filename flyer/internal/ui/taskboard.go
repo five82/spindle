@@ -101,6 +101,9 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 	case "done":
 		glyphStyle = styles.SuccessText
 		label = info.doneLabel
+		if task.Type == "subtitling" && item.SubtitleGeneration != nil && item.SubtitleGeneration.Skipped > 0 {
+			label = "Subs checked"
+		}
 		labelStyle = styles.Text
 	case "running":
 		glyphStyle = roleStyle(info.role, styles)
@@ -141,6 +144,10 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 			b.WriteString(styles.MutedText.Render(extra))
 		}
 	case "done":
+		if task.Type == "subtitling" && item.SubtitleGeneration != nil && item.SubtitleGeneration.Skipped > 0 {
+			b.WriteString("  ")
+			b.WriteString(styles.MutedText.Render(fmt.Sprintf("%d skipped", item.SubtitleGeneration.Skipped)))
+		}
 		// Sub-second tasks render "<1s" rather than a blank cell -- a gap
 		// in an otherwise complete duration column reads as missing data.
 		if d := task.Duration(); d > 0 {
@@ -232,8 +239,8 @@ func stageTaskCount(key string, item spindle.QueueItem, task spindle.Task, episo
 }
 
 // stageThroughput maps a catalog totals key to its completed count. Subtitle
-// generation is distinct from the subtitled asset: generation finishes before
-// apply creates that asset by placing or muxing the generated SRT.
+// decisions (adopted or skipped) are distinct from the subtitled asset: apply
+// creates that asset later by placing or muxing an adopted SRT.
 func stageThroughput(key string, item spindle.QueueItem, totals spindle.EpisodeTotals) (int, bool) {
 	switch key {
 	case "ripped":
@@ -242,9 +249,9 @@ func stageThroughput(key string, item spindle.QueueItem, totals spindle.EpisodeT
 		return totals.Encoded, true
 	case "subtitle_generated":
 		if item.SubtitleGeneration == nil {
-			return 0, true
+			return 0, false
 		}
-		return item.SubtitleGeneration.WhisperX, true
+		return item.SubtitleGeneration.OpenSubtitles + item.SubtitleGeneration.Skipped, true
 	case "final":
 		return totals.Final, true
 	default:
