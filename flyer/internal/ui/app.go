@@ -35,6 +35,7 @@ const (
 	tabEpisodes
 	tabProblems
 	tabLogs
+	tabEvents
 	tabCount
 )
 
@@ -114,6 +115,7 @@ type Model struct {
 	returnView        View // view Esc returns to
 	inspectorViewport viewport.Model
 	detailState       detailState
+	itemEvents        itemEventState
 
 	// Log state
 	logViewport viewport.Model
@@ -243,6 +245,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case logBatchMsg:
 		m.handleLogBatch(msg)
+		return m, nil
+
+	case itemEventBatchMsg:
+		m.handleItemEventBatch(msg)
+		return m, nil
+
+	case itemEventErrorMsg:
+		m.errorMsg = "Events fetch failed"
+		m.errorExpiry = time.Now().Add(5 * time.Second)
 		return m, nil
 
 	case logErrorMsg:
@@ -519,6 +530,10 @@ func (m Model) handleTick() (tea.Model, tea.Cmd) {
 					if cmd := m.refreshProblemsLogs(item); cmd != nil {
 						cmds = append(cmds, cmd)
 					}
+				case tabEvents:
+					if cmd := m.fetchItemEvents(item); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
 				}
 			}
 		}
@@ -656,7 +671,11 @@ func (m Model) manualRefreshCmds() tea.Cmd {
 		return nil
 	}}
 
-	if m.inspecting && m.inspectorTab == tabLogs {
+	if m.inspecting && m.inspectorTab == tabEvents {
+		if cmd := m.fetchItemEvents(m.getInspectedItem()); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	} else if m.inspecting && m.inspectorTab == tabLogs {
 		if cmd := m.refreshLogs(m.getInspectedItem()); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

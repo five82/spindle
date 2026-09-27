@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/queue"
 )
 
@@ -64,17 +63,35 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 	if opts.Store == nil {
 		return res, fmt.Errorf("stage execution: nil queue store")
 	}
-	// The executor owns the stage_start/stage_complete lifecycle events:
-	// exactly one of each per run, for scheduled and OneShot execution alike.
-	// Handlers must not emit them.
+	// A run has one start and one terminal event, including cancelled and
+	// one-shot runs. The queue journal, not the diagnostic log, owns them.
+	if eventErr := opts.Store.RecordEvent(queue.Event{ItemID: item.ID, Type: "stage_start", Stage: stageName}); eventErr != nil {
+		return res, &PersistenceError{Op: "persist stage start", Err: eventErr}
+	}
+	defer func() {
+		kind := "stage_complete"
+		switch {
+		case res.Canceled:
+			kind = "stage_canceled"
+		case res.UserStopped:
+			kind = "stage_stopped"
+		case res.Degraded:
+			kind = "stage_degraded"
+		case err != nil || res.Failed:
+			kind = "stage_failed"
+		}
+		eventErr := opts.Store.RecordEvent(queue.Event{
+			ItemID: item.ID, Type: kind, Stage: stageName,
+			DurationSeconds: time.Since(start).Seconds(),
+		})
+		if eventErr != nil {
+			err = errors.Join(err, &PersistenceError{Op: "persist stage outcome", Err: eventErr})
+		}
+	}()
 	runLogger := logger.With("item_id", item.ID)
 	sess, err := NewSession(ctx, opts.Store, item, opts.Task)
 	if err == nil {
 		sess.Logger = runLogger
-		runLogger.Debug("stage started",
-			"event_type", "stage_start",
-			"stage", stageName,
-		)
 		err = opts.Handler.Run(ctx, sess)
 	}
 
@@ -120,12 +137,6 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 			return res, err
 		}
 	}
-
-	runLogger.Debug("stage completed",
-		"event_type", "stage_complete",
-		"stage", stageName,
-		"stage_duration", logs.FormatDuration(time.Since(start)),
-	)
 
 	if opts.OneShot {
 		return res, nil

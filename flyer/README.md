@@ -14,7 +14,8 @@ Flyer is a personal tool. I'm sharing it because I believe in open source but I'
 - **Drive availability.** The header always shows whether the optical drive is
   AVAILABLE, BUSY, or PAUSED.
 - **Item inspector.** Full-screen drill-in for one item, with Overview,
-  Episodes, Problems, and Logs tabs. Episodes applies to TV box sets.
+  Episodes, Problems, Logs, and Events tabs. Episodes applies to TV box sets;
+  Events shows queue-backed stage and encoding-substage history across daemon restarts.
 - **Problems triage.** Every failed or review item with its lead reason, one
   keypress away from the details.
 - **Logs.** Daemon and per-item logs with highlighting, follow mode, and filters

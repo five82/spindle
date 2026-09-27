@@ -35,7 +35,7 @@ var stageOrder = func() map[queue.Stage]int {
 }()
 
 // Gather collects all audit artifacts for a queue item.
-func Gather(ctx context.Context, cfg *config.Config, item *httpapi.ItemResponse) (*Report, error) {
+func Gather(ctx context.Context, cfg *config.Config, item *httpapi.ItemResponse, transitions ...queue.Event) (*Report, error) {
 	if item == nil {
 		return nil, fmt.Errorf("nil queue item")
 	}
@@ -109,6 +109,9 @@ func Gather(ctx context.Context, cfg *config.Config, item *httpapi.ItemResponse)
 			r.Media = probes
 		}
 	}
+
+	// Lifecycle transitions come from the queue, independent of log rotation.
+	r.Transitions = transitions
 
 	// Pre-computed analysis.
 	r.Analysis = computeAnalysis(r)
@@ -493,22 +496,10 @@ func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis, 
 		})
 	}
 
-	// Stage events.
-	isStageEvent := strings.HasPrefix(eventType, "stage_")
-	if isStageEvent {
-		report.Stages = append(report.Stages, StageEvent{
-			TS:              ts,
-			EventType:       eventType,
-			Stage:           getString(entry, "stage"),
-			Message:         msg,
-			DurationSeconds: getStageDurationSeconds(entry),
-		})
-	}
-
 	// Item-specific INFO events that are not decisions or stage transitions.
 	// These carry progress/operation visibility such as encoding_progress,
 	// transcription completions, mux/copy progress, and plan summaries.
-	if strings.EqualFold(level, "INFO") && eventType != "" && decType == "" && !isStageEvent {
+	if strings.EqualFold(level, "INFO") && eventType != "" && decType == "" {
 		report.Events = append(report.Events, LogEntry{
 			TS:        ts,
 			Level:     level,
@@ -601,13 +592,6 @@ func getFloat(m map[string]any, key string) (float64, bool) {
 	}
 	f, ok := v.(float64)
 	return f, ok
-}
-
-// getStageDurationSeconds extracts stage duration in seconds; the format
-// contract (string vs legacy nanoseconds) lives with the writer in
-// internal/logs.
-func getStageDurationSeconds(entry map[string]any) float64 {
-	return logs.DurationSeconds(entry["stage_duration"])
 }
 
 func logLineMatchesItem(entry map[string]any, item *httpapi.ItemResponse) bool {

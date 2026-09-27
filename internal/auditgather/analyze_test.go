@@ -7,6 +7,7 @@ import (
 
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
@@ -106,10 +107,10 @@ func TestDecisionGroupJSONUsesDecisionFieldNames(t *testing.T) {
 }
 
 func TestComputeStageTimingsCollapsesDuplicateCompletes(t *testing.T) {
-	timings := computeStageTimings([]StageEvent{
-		{TS: "t1", EventType: "stage_start", Stage: "encoding"},
-		{TS: "t2", EventType: "stage_complete", Stage: "encoding"},
-		{TS: "t3", EventType: "stage_complete", Stage: "encoding", DurationSeconds: 12.5},
+	timings := computeStageTimings([]queue.Event{
+		{Time: "t1", Type: "stage_start", Stage: "encoding"},
+		{Time: "t2", Type: "stage_complete", Stage: "encoding"},
+		{Time: "t3", Type: "stage_complete", Stage: "encoding", DurationSeconds: 12.5},
 	})
 	if len(timings) != 1 {
 		t.Fatalf("timing count = %d, want 1", len(timings))

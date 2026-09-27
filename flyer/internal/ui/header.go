@@ -360,7 +360,7 @@ func (m Model) renderCommandBar() string {
 	switch {
 	case m.inspecting:
 		commands = []cmd{
-			{"1-4", "Tabs", 2},
+			{"1-5", "Tabs", 2},
 			{"Tab", "Next tab", 3},
 			{"j/k", "Scroll", 3},
 		}

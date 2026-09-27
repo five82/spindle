@@ -15,6 +15,7 @@ import (
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
@@ -104,8 +105,8 @@ func computeAnalysis(r *Report) *Analysis {
 		a.DecisionGroups = aggregateDecisions(r.Logs.Decisions)
 		a.NotableDecisions = selectNotableDecisions(r.Logs.Decisions)
 	}
-	if r.Logs != nil && len(r.Logs.Stages) > 0 {
-		a.StageTimings = computeStageTimings(r.Logs.Stages)
+	if len(r.Transitions) > 0 {
+		a.StageTimings = computeStageTimings(r.Transitions)
 	}
 
 	a.SourceSummary = computeSourceSummary(r)
@@ -239,28 +240,28 @@ func selectNotableDecisions(decisions []LogDecision) []LogDecision {
 	return out
 }
 
-func computeStageTimings(events []StageEvent) []StageTiming {
+func computeStageTimings(events []queue.Event) []StageTiming {
 	byStage := make(map[string]*StageTiming)
 	var order []string
 	for _, e := range events {
 		if e.Stage == "" {
 			continue
 		}
-		st := byStage[e.Stage]
+		st := byStage[string(e.Stage)]
 		if st == nil {
-			st = &StageTiming{Stage: e.Stage}
-			byStage[e.Stage] = st
-			order = append(order, e.Stage)
+			st = &StageTiming{Stage: string(e.Stage)}
+			byStage[string(e.Stage)] = st
+			order = append(order, string(e.Stage))
 		}
-		switch e.EventType {
+		switch e.Type {
 		case "stage_start":
 			st.Starts++
 			if st.StartedAt == "" {
-				st.StartedAt = e.TS
+				st.StartedAt = e.Time
 			}
 		case "stage_complete":
 			st.Completions++
-			st.CompletedAt = e.TS
+			st.CompletedAt = e.Time
 			if e.DurationSeconds > 0 {
 				st.DurationSeconds = e.DurationSeconds
 			}

@@ -5,6 +5,7 @@ import (
 
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
@@ -14,6 +15,7 @@ type Report struct {
 	StageGate    StageGate         `json:"stage_gate"`
 	Paths        AuditPaths        `json:"paths"`
 	Logs         *LogAnalysis      `json:"logs,omitempty"`
+	Transitions  []queue.Event     `json:"transitions,omitempty"`
 	RipCache     *RipCacheReport   `json:"rip_cache,omitempty"`
 	Envelope     *ripspec.Envelope `json:"envelope,omitempty"`
 	Encoding     *EncodingReport   `json:"encoding,omitempty"`
@@ -97,7 +99,6 @@ type LogAnalysis struct {
 	Errors        []LogEntry    `json:"errors,omitempty"`
 	Events        []LogEntry    `json:"events,omitempty"`
 	EventsOmitted int           `json:"events_omitted,omitempty"`
-	Stages        []StageEvent  `json:"stages,omitempty"`
 }
 
 // LogDecision captures a single decision from the log.
@@ -118,15 +119,6 @@ type LogEntry struct {
 	EventType string         `json:"event_type,omitempty"`
 	ErrorHint string         `json:"error_hint,omitempty"`
 	Extras    map[string]any `json:"extras,omitempty"`
-}
-
-// StageEvent captures a stage transition event from the log.
-type StageEvent struct {
-	TS              string  `json:"ts"`
-	EventType       string  `json:"event_type"`
-	Stage           string  `json:"stage"`
-	Message         string  `json:"message"`
-	DurationSeconds float64 `json:"duration_seconds,omitempty"`
 }
 
 // RipCacheReport holds rip cache lookup results. Disabled distinguishes a

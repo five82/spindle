@@ -96,6 +96,22 @@ func TestWireRoundTrip(t *testing.T) {
 	if !sawChunking {
 		t.Fatal("stage progress event not delivered")
 	}
+	events, _, err := store.Events(item.ID, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range events {
+		if event.Type == "encoding_substage" && event.EpisodeKey == "s01_001" && event.Substage == "Chunking" && event.Message == "Detecting shot cuts" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing chunking transition: %+v", events)
+	}
+	if bytes.Contains(logBuf.Bytes(), []byte("encoding_substage")) {
+		t.Fatalf("substage emitted through log: %s", logBuf.String())
+	}
 	if result == nil {
 		t.Fatal("result event not delivered")
 	}

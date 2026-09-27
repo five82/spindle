@@ -34,12 +34,20 @@ func TestInspectorNavigationAndMissingItem(t *testing.T) {
 		t.Fatalf("logs tab state = %d/%d", m.inspectorTab, m.logState.mode)
 	}
 	m, _ = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if m.inspectorTab != tabEvents {
+		t.Fatalf("events tab = %d", m.inspectorTab)
+	}
+	m, _ = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.inspectorTab != tabOverview {
 		t.Fatalf("tab wrap = %d", m.inspectorTab)
 	}
 	m, _ = updateApp(t, m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
-	if m.inspectorTab != tabLogs {
+	if m.inspectorTab != tabEvents {
 		t.Fatalf("reverse tab wrap = %d", m.inspectorTab)
+	}
+	m, _ = updateApp(t, m, appKey("5"))
+	if m.inspectorTab != tabEvents {
+		t.Fatalf("tab 5 = %d", m.inspectorTab)
 	}
 	m, _ = updateApp(t, m, appKey("3"))
 	if m.inspectorTab != tabProblems {
@@ -78,7 +86,7 @@ func TestInspectorRendersTabsAndEpisodeCollapse(t *testing.T) {
 		tab  inspectorTab
 		want string
 	}{
-		{tabOverview, "Overview"}, {tabEpisodes, "Episodes"}, {tabProblems, "Problems"}, {tabLogs, "Logs"},
+		{tabOverview, "Overview"}, {tabEpisodes, "Episodes"}, {tabProblems, "Problems"}, {tabLogs, "Logs"}, {tabEvents, "Events"},
 	} {
 		m.inspectorTab = tc.tab
 		m.updateInspectorViewport()

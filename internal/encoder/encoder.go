@@ -3,6 +3,7 @@ package encoder
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -222,9 +223,18 @@ func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encodedDir
 	item.EncodingDetailsJSON = snap.Marshal()
 	sess.Progress(sess.Task.ProgressPercent, sess.Task.ProgressMessage,
 		stage.WithEncodingDetails(item.EncodingDetailsJSON))
+	if err := sess.Store.RecordEvent(queue.Event{
+		ItemID: item.ID, Type: "encoding_substage", Stage: queue.StageEncoding,
+		EpisodeKey: job.Key, Substage: snap.Substage,
+	}); err != nil {
+		return encodeJobResult{}, fmt.Errorf("persist initial encoding substage: %w", err)
+	}
 
 	reporter := newSpindleReporter(sess, logger, job.Key, job.ProgressIndex, job.ProgressTotal)
 	result, encErr := runWorkerProcess(ctx, logger, job.Input.Path, encodedDir, reporter)
+	if reporter.eventErr != nil {
+		encErr = errors.Join(encErr, reporter.eventErr)
+	}
 	if encErr != nil {
 		return encodeJobResult{failed: true}, h.handleEncodeFailure(logger, sess, job, encErr)
 	}
@@ -472,6 +482,7 @@ type spindleReporter struct {
 	totalJobs     int
 	lastPush      time.Time
 	lastLog       time.Time
+	eventErr      error
 	now           func() time.Time // injectable clock for testing
 }
 
@@ -489,14 +500,29 @@ func newSpindleReporter(sess *stage.Session, logger *slog.Logger, episodeKey str
 
 // updateSnapshot mutates the encoding snapshot and persists it; persistence
 // failures are logged by Session.Progress.
-func (r *spindleReporter) updateSnapshot(mutate func(*encodingstate.Snapshot)) {
+func (r *spindleReporter) updateSnapshot(mutate func(*encodingstate.Snapshot), detail ...reel.StageProgress) {
 	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
 	if err != nil {
 		snap = encodingstate.Snapshot{}
 	}
+	previous := snap.Substage
 	mutate(&snap)
 	r.item.EncodingDetailsJSON = snap.Marshal()
 	r.sess.Progress(r.sess.Task.ProgressPercent, r.sess.Task.ProgressMessage, stage.WithEncodingDetails(r.item.EncodingDetailsJSON))
+	if snap.Substage != previous || len(detail) > 0 {
+		event := queue.Event{
+			ItemID: r.item.ID, Type: "encoding_substage", Stage: queue.StageEncoding,
+			EpisodeKey: r.episodeKey, Substage: snap.Substage,
+		}
+		if len(detail) > 0 {
+			event.Substage = detail[0].Stage
+			event.Message = detail[0].Message
+			event.Percent = float64(detail[0].Percent)
+		}
+		if err := r.sess.Store.RecordEvent(event); err != nil {
+			r.eventErr = errors.Join(r.eventErr, err)
+		}
+	}
 }
 
 func (r *spindleReporter) EncodingProgress(p reel.ProgressSnapshot) {
@@ -565,18 +591,7 @@ func (r *spindleReporter) Initialization(s reel.InitializationSummary) {
 func (r *spindleReporter) StageProgress(s reel.StageProgress) {
 	r.updateSnapshot(func(snap *encodingstate.Snapshot) {
 		snap.Substage = strings.ToLower(strings.TrimSpace(s.Stage))
-	})
-
-	attrs := []any{
-		"event_type", "encoding_substage",
-		"episode_key", r.episodeKey,
-		"substage", s.Stage,
-		"message", s.Message,
-	}
-	if s.Percent > 0 {
-		attrs = append(attrs, "percent", round1(float64(s.Percent)))
-	}
-	r.logger.Info("encoding substage", attrs...)
+	}, s)
 }
 
 func (r *spindleReporter) Verbose(message string) {

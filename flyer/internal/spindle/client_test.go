@@ -30,6 +30,7 @@ func TestClient_FetchesEndpointsAndEncodesQueries(t *testing.T) {
 	t.Parallel()
 
 	var gotLogsQuery url.Values
+	var gotEventsQuery url.Values
 	var gotUserAgent string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +45,9 @@ func TestClient_FetchesEndpointsAndEncodesQueries(t *testing.T) {
 		case "/api/logs":
 			gotLogsQuery = r.URL.Query()
 			_ = json.NewEncoder(w).Encode(LogBatch{Events: nil, Next: 99})
+		case "/api/queue/42/events":
+			gotEventsQuery = r.URL.Query()
+			_ = json.NewEncoder(w).Encode(ItemEventBatch{Events: []ItemEvent{{ID: 8, ItemID: 42, Stage: "encoding", Type: "encoding_substage", Substage: "chunking"}}, Next: 8})
 		default:
 			http.NotFound(w, r)
 		}
@@ -96,6 +100,11 @@ func TestClient_FetchesEndpointsAndEncodesQueries(t *testing.T) {
 		gotLogsQuery.Get("lane") != "fast" ||
 		gotLogsQuery.Get("request") != "abc" {
 		t.Fatalf("FetchLogs query = %v, want params encoded", gotLogsQuery)
+	}
+
+	events, err := c.FetchItemEvents(ctx, 42, 7)
+	if err != nil || gotEventsQuery.Get("since") != "7" || len(events.Events) != 1 || events.Events[0].Substage != "chunking" || events.Next != 8 {
+		t.Fatalf("FetchItemEvents = %+v, query %v, error %v", events, gotEventsQuery, err)
 	}
 
 	if gotUserAgent == "" || !strings.HasPrefix(gotUserAgent, "flyer/") {

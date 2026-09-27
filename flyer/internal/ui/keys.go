@@ -27,6 +27,7 @@ type keyMap struct {
 	Tab2        key.Binding
 	Tab3        key.Binding
 	Tab4        key.Binding
+	Tab5        key.Binding
 
 	// Queue actions
 	CycleFilter    key.Binding
@@ -128,6 +129,10 @@ func DefaultKeyMap() keyMap {
 			key.WithKeys("4"),
 			key.WithHelp("4", "Logs"),
 		),
+		Tab5: key.NewBinding(
+			key.WithKeys("5"),
+			key.WithHelp("5", "Events"),
+		),
 
 		// Queue actions
 		CycleFilter: key.NewBinding(
@@ -226,7 +231,7 @@ func (k keyMap) HelpSections() []HelpSection {
 		{
 			Title: "Inspector",
 			Bindings: []key.Binding{
-				k.Inspect, k.InspectLogs, k.Tab1, k.Tab2, k.Tab3, k.Tab4, k.Tab,
+				k.Inspect, k.InspectLogs, k.Tab1, k.Tab2, k.Tab3, k.Tab4, k.Tab5, k.Tab,
 			},
 		},
 		{

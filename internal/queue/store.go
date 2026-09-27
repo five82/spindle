@@ -70,6 +70,10 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("create tasks table: %w", err)
 	}
+	if _, err := db.Exec(createEventsTableSQL); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("create events table: %w", err)
+	}
 
 	return &Store{db: db}, nil
 }

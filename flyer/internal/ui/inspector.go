@@ -13,7 +13,7 @@ import (
 )
 
 // inspectorTabLabels are the tab bar entries in tab order.
-var inspectorTabLabels = [tabCount]string{"Overview", "Episodes", "Problems", "Logs"}
+var inspectorTabLabels = [tabCount]string{"Overview", "Episodes", "Problems", "Logs", "Events"}
 
 // getInspectedItem resolves the inspected item by ID from the full queue,
 // independent of filters and sorting. Returns nil when the item is gone.
@@ -74,6 +74,13 @@ func (m Model) switchInspectorTab(tab inspectorTab) (tea.Model, tea.Cmd) {
 		m.inspectorViewport.GotoTop()
 		m.updateInspectorViewport()
 		return m, m.refreshProblemsLogs(item)
+	case tabEvents:
+		if item != nil && item.ID != m.itemEvents.itemID {
+			m.itemEvents = itemEventState{itemID: item.ID}
+		}
+		m.inspectorViewport.GotoTop()
+		m.updateInspectorViewport()
+		return m, m.fetchItemEvents(item)
 	default:
 		m.inspectorViewport.GotoTop()
 		m.updateInspectorViewport()
@@ -109,6 +116,9 @@ func (m Model) handleInspectorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Tab4):
 		return m.switchInspectorTab(tabLogs)
+
+	case key.Matches(msg, m.keys.Tab5):
+		return m.switchInspectorTab(tabEvents)
 
 	case key.Matches(msg, m.keys.ToggleEpisodes):
 		m.toggleInspectedEpisodes()
@@ -194,6 +204,8 @@ func (m *Model) updateInspectorViewport() {
 		m.inspectorViewport.SetContent(m.renderEpisodesTab(*item))
 	case tabProblems:
 		m.inspectorViewport.SetContent(m.renderItemProblems(item))
+	case tabEvents:
+		m.inspectorViewport.SetContent(m.renderItemEvents())
 	default:
 		m.inspectorViewport.SetContent(m.renderDetailContent(*item, inner))
 	}

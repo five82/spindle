@@ -16,7 +16,6 @@ import (
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
-	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/reel"
 )
 
@@ -94,9 +93,11 @@ func TestRunWorkerProcess(t *testing.T) {
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
 			t.Setenv("SPINDLE_TEST_ENCODE_WORKER", tc.mode)
-			item := &queue.Item{}
+			sess := encoderSession(t, ripspec.Envelope{})
+			sess.Task = &queue.Task{}
+			item := sess.Item
 			rep := &spindleReporter{
-				sess: &stage.Session{Item: item, Task: &queue.Task{}}, item: item,
+				sess: sess, item: item,
 				logger: slog.New(slog.NewTextHandler(io.Discard, nil)), now: time.Now,
 			}
 			result, err := runWorkerProcess(context.Background(), rep.logger, "input.mkv", t.TempDir(), rep)

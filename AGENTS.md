@@ -7,6 +7,10 @@
   native CI dependencies, not to build the Go applications.
 - From the monorepo root, use `./deploy.sh spindle|flyer|reel` for deployments;
   do not reproduce its steps manually. A target is required.
+- For a queue schema change, stop Spindle and run `spindle queue clear --all --yes`
+  while stopped before `./deploy.sh spindle`: only the stopped-daemon command
+  deletes the transient DB files. The deploy script preserves stopped state,
+  so run `spindle start` afterward if the daemon should be running.
 - Before handing work back, run `./check-ci.sh` (tests, race, CGO, lint, govulncheck) or explain why you couldn't.
 - Finish the work you start; ask before dropping scope or leaving TODOs.
 - Coordinate major trade-offs with the user; never unilaterally defer functionality.

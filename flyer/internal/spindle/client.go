@@ -143,6 +143,20 @@ func (c *Client) FetchLogs(ctx context.Context, query LogQuery) (LogBatch, error
 	return payload, nil
 }
 
+// FetchItemEvents retrieves a page of an item's native stage transitions.
+func (c *Client) FetchItemEvents(ctx context.Context, itemID, since int64) (ItemEventBatch, error) {
+	if c == nil {
+		return ItemEventBatch{}, fmt.Errorf("client is nil")
+	}
+	values := url.Values{"since": {strconv.FormatInt(since, 10)}}
+	rel := &url.URL{Path: fmt.Sprintf("/api/queue/%d/events", itemID), RawQuery: values.Encode()}
+	var payload ItemEventBatch
+	if err := c.doURL(ctx, http.MethodGet, rel, &payload); err != nil {
+		return ItemEventBatch{}, err
+	}
+	return payload, nil
+}
+
 func (c *Client) do(ctx context.Context, method, path string, dest any) error {
 	rel := &url.URL{Path: path}
 	return c.doURL(ctx, method, rel, dest)

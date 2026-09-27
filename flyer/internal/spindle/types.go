@@ -348,6 +348,26 @@ func (q QueueItem) EpisodeSnapshot() ([]EpisodeStatus, EpisodeTotals) {
 	return episodes, tallyEpisodeTotals(episodes)
 }
 
+// ItemEvent is a queue-backed stage or encoding-substage transition.
+type ItemEvent struct {
+	ID              int64   `json:"id"`
+	ItemID          int64   `json:"itemId"`
+	Time            string  `json:"time"`
+	Type            string  `json:"type"`
+	Stage           string  `json:"stage"`
+	EpisodeKey      string  `json:"episodeKey,omitempty"`
+	Substage        string  `json:"substage,omitempty"`
+	Message         string  `json:"message,omitempty"`
+	Percent         float64 `json:"percent,omitempty"`
+	DurationSeconds float64 `json:"durationSeconds,omitempty"`
+}
+
+// ItemEventBatch is a page of transitions with an exclusive ID cursor.
+type ItemEventBatch struct {
+	Events []ItemEvent `json:"events"`
+	Next   int64       `json:"next"`
+}
+
 // LogEvent represents a single log entry from /api/logs.
 type LogEvent struct {
 	Sequence  uint64            `json:"seq"`

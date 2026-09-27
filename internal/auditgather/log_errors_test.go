@@ -32,9 +32,6 @@ func TestGatherLogsKeepsEarlierEventsOnLaterScanFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "scan log") || report == nil || len(report.Events) != 1 || report.Events[0].Message != "ripping" {
 		t.Fatalf("logs: %+v %v", report, err)
 	}
-	if got := getStageDurationSeconds(map[string]any{"stage_duration": "2.5s"}); got != 2.5 {
-		t.Fatalf("duration: %v", got)
-	}
 	if err := scanLogFile(filepath.Join(logDir, "missing"), item, &LogAnalysis{}, time.Time{}); err == nil || !strings.Contains(err.Error(), "open log") {
 		t.Fatalf("missing log: %v", err)
 	}

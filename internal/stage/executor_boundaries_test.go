@@ -20,7 +20,7 @@ func TestExecuteWorkflowStageReportsFailurePersistenceError(t *testing.T) {
 	}
 	result, err := ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{Store: store, Handler: executorStubHandler{run: func(context.Context, *Session) error { return errors.New("rip failed") }}, Stage: queue.StageRipping})
 	var persist *PersistenceError
-	if !result.Failed || !errors.As(err, &persist) || persist.Op != "persist stage failure" || !strings.Contains(persist.Error(), "persist stage failure") || errors.Unwrap(persist) == nil {
+	if result.Failed || !errors.As(err, &persist) || persist.Op != "persist stage start" || !strings.Contains(persist.Error(), "persist stage start") || errors.Unwrap(persist) == nil {
 		t.Fatalf("result=%+v error=%v", result, err)
 	}
 }

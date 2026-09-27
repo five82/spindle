@@ -113,6 +113,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/queue", s.authMiddleware(s.handleQueueList))
 	s.mux.HandleFunc("GET /api/queue/{id}", s.authMiddleware(s.handleQueueGet))
+	s.mux.HandleFunc("GET /api/queue/{id}/events", s.authMiddleware(s.handleQueueEvents))
 	s.mux.HandleFunc("POST /api/queue/retry", s.authMiddleware(s.handleQueueRetry))
 	s.mux.HandleFunc("POST /api/queue/retry-episode", s.authMiddleware(s.handleQueueRetryEpisode))
 	s.mux.HandleFunc("POST /api/queue/stop", s.authMiddleware(s.handleQueueStop))
@@ -182,6 +183,43 @@ func (s *Server) handleQueueGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"item": ToItemResponse(item, s.tasksFor(item.ID), true)})
+}
+
+// handleQueueEvents pages the item's native transitions using an exclusive ID cursor.
+func (s *Server) handleQueueEvents(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	cursor := int64(0)
+	if v := r.URL.Query().Get("since"); v != "" {
+		cursor, err = strconv.ParseInt(v, 10, 64)
+		if err != nil || cursor < 0 {
+			writeError(w, http.StatusBadRequest, "invalid since")
+			return
+		}
+	}
+	item, err := s.store.GetByID(id)
+	if err != nil {
+		s.logger.Error("get event item", "event_type", "queue_fetch_error", "error_hint", "event item lookup failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get item")
+		return
+	}
+	if item == nil {
+		writeError(w, http.StatusNotFound, "item not found")
+		return
+	}
+	events, next, err := s.store.Events(id, cursor, 500)
+	if err != nil {
+		s.logger.Error("get item events", "event_type", "queue_fetch_error", "error_hint", "event query failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get events")
+		return
+	}
+	if events == nil {
+		events = []queue.Event{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": events, "next": next})
 }
 
 // tasksFor loads an item's task rows for response building; a load failure

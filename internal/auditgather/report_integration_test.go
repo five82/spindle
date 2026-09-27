@@ -12,6 +12,7 @@ import (
 	"github.com/five82/spindle/internal/httpapi"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
@@ -23,7 +24,8 @@ func TestComputeAnalysisFromDeliveredTVReport(t *testing.T) {
 		Logs: &LogAnalysis{Decisions: []LogDecision{
 			{DecisionType: logs.DecisionFileProbe, DecisionResult: "found", DecisionReason: "resolution=3840x2160 codecs=hevc,ac3", Message: "input inspected"},
 			{DecisionType: logs.DecisionAudioSelection, DecisionResult: "selected", DecisionReason: "primary english", Message: "audio selected"},
-		}, Stages: []StageEvent{{Stage: "encoding", EventType: "stage_start", TS: "start"}, {Stage: "encoding", EventType: "stage_complete", TS: "end", DurationSeconds: 12}}},
+		}},
+		Transitions: []queue.Event{{Stage: "encoding", Type: "stage_start", Time: "start"}, {Stage: "encoding", Type: "stage_complete", Time: "end", DurationSeconds: 12}},
 		Envelope: &ripspec.Envelope{
 			Metadata:   ripspec.Metadata{MediaType: "tv"},
 			Episodes:   []ripspec.Episode{{Key: "s01e01", Season: 1, Episode: 1}, {Key: "s01e02", Season: 1, Episode: 2, NeedsReview: true}},

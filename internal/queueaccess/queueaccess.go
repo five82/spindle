@@ -158,6 +158,27 @@ func (a *HTTPAccess) Logs(q LogsQuery) ([]LogEntry, uint64, error) {
 	return resp.Events, resp.Next, nil
 }
 
+// Events pages an item's queue-backed transitions, including across restarts.
+func (a *HTTPAccess) Events(id int64) ([]queue.Event, error) {
+	var all []queue.Event
+	var cursor int64
+	for {
+		var resp struct {
+			Events []queue.Event `json:"events"`
+			Next   int64         `json:"next"`
+		}
+		path := fmt.Sprintf("/api/queue/%d/events?since=%d", id, cursor)
+		if err := a.getJSON(path, &resp); err != nil {
+			return nil, err
+		}
+		all = append(all, resp.Events...)
+		if len(resp.Events) < 500 {
+			return all, nil
+		}
+		cursor = resp.Next
+	}
+}
+
 // List returns queue items via HTTP, optionally filtered by stages.
 func (a *HTTPAccess) List(stages ...queue.Stage) ([]Item, error) {
 	path := "/api/queue"

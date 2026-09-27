@@ -182,7 +182,7 @@ func TestExecuteWorkflowStageOneShotTreatsDegradedAsError(t *testing.T) {
 	}
 }
 
-func TestExecuteWorkflowStageOneShotIgnoresCompletionPersistenceError(t *testing.T) {
+func TestExecuteWorkflowStageOneShotReportsOutcomePersistenceError(t *testing.T) {
 	store := openExecutorTestStore(t)
 	item, _ := store.NewDisc("A", "fp1")
 
@@ -195,8 +195,9 @@ func TestExecuteWorkflowStageOneShotIgnoresCompletionPersistenceError(t *testing
 		Stage:   queue.StageIdentification,
 		OneShot: true,
 	})
-	if err != nil || res.Failed || res.Canceled {
-		t.Fatalf("result err=%v failed=%v canceled=%v, want ignored completion persistence error", err, res.Failed, res.Canceled)
+	var persistErr *PersistenceError
+	if !errors.As(err, &persistErr) || persistErr.Op != "persist stage outcome" || res.Failed || res.Canceled {
+		t.Fatalf("result err=%v failed=%v canceled=%v, want outcome persistence error", err, res.Failed, res.Canceled)
 	}
 }
 
@@ -211,7 +212,7 @@ func TestExecuteWorkflowStageReturnsPersistenceError(t *testing.T) {
 		Stage:   queue.StageIdentification,
 	})
 	var persistErr *PersistenceError
-	if !errors.As(err, &persistErr) || persistErr.Op != "refresh after stage completion" || res.Failed {
+	if !errors.As(err, &persistErr) || persistErr.Op != "persist stage start" || res.Failed {
 		t.Fatalf("result err=%v persist=%v failed=%v, want completion persistence error", err, persistErr, res.Failed)
 	}
 }

@@ -36,7 +36,11 @@ func newQueueAuditCmd() *cobra.Command {
 				return fmt.Errorf("queue item %d not found", id)
 			}
 
-			report, err := auditgather.Gather(cmd.Context(), cfg, item)
+			transitions, err := acc.Events(id)
+			if err != nil {
+				return fmt.Errorf("fetch item events: %w", err)
+			}
+			report, err := auditgather.Gather(cmd.Context(), cfg, item, transitions...)
 			if err != nil {
 				return err
 			}
