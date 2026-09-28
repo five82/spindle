@@ -66,7 +66,7 @@ func TestAppTickRefreshesVisibleLogsAndProblems(t *testing.T) {
 	}
 }
 
-func TestAppLogSourceAndManualRefreshBranches(t *testing.T) {
+func TestOpeningDaemonLogsResetsSearchAndManualRefreshReadsStore(t *testing.T) {
 	m := newAppTestModel(t)
 	m, _ = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.logState.mode = logSourceItem
@@ -117,7 +117,7 @@ func TestAppLogSourceAndManualRefreshBranches(t *testing.T) {
 	}
 }
 
-func TestAppUpdateRoutingAndRenderingEdges(t *testing.T) {
+func TestAppRoutesKeysToActiveInputAndIgnoresUnknownView(t *testing.T) {
 	m := newAppTestModel(t)
 	m, _ = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
 	m.currentView = ViewLogs

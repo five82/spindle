@@ -22,7 +22,7 @@ func TestRunFreshMoviePersistsValidatedRipAndCache(t *testing.T) {
 		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	sess := ripCoverageSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}, Titles: []ripspec.Title{{ID: 1, Duration: 7200, SizeBytes: 52428801}}})
+	sess := newRipSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}, Titles: []ripspec.Title{{ID: 1, Duration: 7200, SizeBytes: 52428801}}})
 	cache := ripcache.New(t.TempDir(), 1)
 	h := New(&config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}, MakeMKV: config.MakeMKVConfig{OpticalDrive: "disc:0", RipTimeout: 10}}, nil, cache, nil, NoTitleOverride)
 	if err := h.Run(context.Background(), sess); err != nil {

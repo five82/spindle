@@ -14,7 +14,7 @@ import (
 	"github.com/five82/spindle/internal/stage"
 )
 
-func ripCoverageSession(t *testing.T, env ripspec.Envelope) *stage.Session {
+func newRipSession(t *testing.T, env ripspec.Envelope) *stage.Session {
 	t.Helper()
 	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
 	if err != nil {
@@ -40,7 +40,7 @@ func ripCoverageSession(t *testing.T, env ripspec.Envelope) *stage.Session {
 	return sess
 }
 
-func TestMapAndValidateAssetsMissingAndInvalid(t *testing.T) {
+func TestMapAndValidateAssetsReportsMissingOrInvalidRips(t *testing.T) {
 	for _, tc := range []struct {
 		name, media, file, want string
 		episodes                []ripspec.Episode
@@ -53,7 +53,7 @@ func TestMapAndValidateAssetsMissingAndInvalid(t *testing.T) {
 		{"movie absent directory", "movie", "", "asset mapping: read dir", nil, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sess := ripCoverageSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: tc.media}, Episodes: tc.episodes})
+			sess := newRipSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: tc.media}, Episodes: tc.episodes})
 			dir := filepath.Join(t.TempDir(), "rips")
 			if tc.name != "movie absent directory" {
 				if err := os.Mkdir(dir, 0o755); err != nil {
@@ -110,9 +110,9 @@ func TestMapAndValidateAssetsMissingAndInvalid(t *testing.T) {
 	}
 }
 
-func TestRipCacheIncompleteAndStats(t *testing.T) {
+func TestIncompleteRipCacheIsIgnoredAndRipStatsPersist(t *testing.T) {
 	env := ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "tv"}, Episodes: []ripspec.Episode{{Key: "one", TitleID: 1}, {Key: "two", TitleID: 2}}}
-	sess := ripCoverageSession(t, env)
+	sess := newRipSession(t, env)
 	dir := t.TempDir()
 	cache := ripcache.New(t.TempDir(), 1)
 	h := New(&config.Config{MakeMKV: config.MakeMKVConfig{OpticalDrive: "disc:0"}}, nil, cache, nil, NoTitleOverride)
@@ -146,13 +146,13 @@ func TestRipCacheIncompleteAndStats(t *testing.T) {
 	}
 }
 
-func TestRipTitlesResumeAndCancelled(t *testing.T) {
+func TestRipTitlesPreservesCompletedRipAndHonorsCancellation(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "show_t01.mkv")
 	if err := os.WriteFile(file, []byte("preserved"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sess := ripCoverageSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "tv"}, Episodes: []ripspec.Episode{{Key: "one", TitleID: 1}}})
+	sess := newRipSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "tv"}, Episodes: []ripspec.Episode{{Key: "one", TitleID: 1}}})
 	sess.Env.Assets.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{EpisodeKey: "one", TitleID: 1, Path: file, Status: ripspec.AssetStatusCompleted})
 	h := &Handler{}
 	if err := h.ripTitles(context.Background(), sess, dir, []ripspec.Title{{ID: 1}}); err != nil {

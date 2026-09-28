@@ -19,7 +19,7 @@ func TestRunRestoresValidCachedMovieWithoutDrive(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	staging := t.TempDir()
-	sess := ripCoverageSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}})
+	sess := newRipSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}})
 	src := t.TempDir()
 	file, err := os.Create(filepath.Join(src, "movie_t01.mkv"))
 	if err != nil {
@@ -57,7 +57,7 @@ func TestRunRestoresValidCachedMovieWithoutDrive(t *testing.T) {
 }
 
 func TestCacheFreshRipStoresMetadataAndFiles(t *testing.T) {
-	sess := ripCoverageSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie", DiscNumber: 3}})
+	sess := newRipSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie", DiscNumber: 3}})
 	src := t.TempDir()
 	if err := os.WriteFile(filepath.Join(src, "movie_t01.mkv"), []byte("video"), 0o644); err != nil {
 		t.Fatal(err)

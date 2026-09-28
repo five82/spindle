@@ -15,34 +15,7 @@ import (
 	"github.com/five82/spindle/internal/ripcache"
 )
 
-func TestEncodePreflightErrors(t *testing.T) {
-	oldCfg, oldSocket := cfg, flagSocket
-	t.Cleanup(func() { cfg, flagSocket = oldCfg, oldSocket })
-	dir := t.TempDir()
-	t.Setenv("XDG_RUNTIME_DIR", dir)
-	cfg = &config.Config{Paths: config.PathsConfig{StateDir: dir}}
-	flagSocket = filepath.Join(dir, "missing.sock")
-	encode := newEncodeCmd()
-	if err := encode.RunE(encode, []string{filepath.Join(dir, "missing.mkv")}); err == nil || !strings.Contains(err.Error(), "input file") {
-		t.Fatalf("missing encode input: %v", err)
-	}
-	input := filepath.Join(dir, "input.mkv")
-	if err := os.WriteFile(input, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	blocker := filepath.Join(dir, "blocker")
-	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := encode.Flags().Set("output-dir", filepath.Join(blocker, "out")); err != nil {
-		t.Fatal(err)
-	}
-	if err := encode.RunE(encode, []string{input}); err == nil || !strings.Contains(err.Error(), "create output dir") {
-		t.Fatalf("blocked encode output: %v", err)
-	}
-}
-
-func TestCacheCommandFailureBoundaries(t *testing.T) {
+func TestCacheCommandsRejectMissingEntriesAndUnreadableCache(t *testing.T) {
 	old := cfg
 	t.Cleanup(func() { cfg = old })
 	dir := t.TempDir()

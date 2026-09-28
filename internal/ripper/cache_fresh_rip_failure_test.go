@@ -14,7 +14,7 @@ import (
 )
 
 func TestCacheFreshRipFailureLeavesNoUnusableEntry(t *testing.T) {
-	sess := ripCoverageSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}})
+	sess := newRipSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}})
 	dir := t.TempDir()
 	ripped := filepath.Join(dir, "ripped")
 	if err := os.Mkdir(ripped, 0o755); err != nil {

@@ -30,7 +30,7 @@ printf '%s\n' 'PRGT:5024,0,"Saving"' 'PRGV:100,100,65536' 'MSG:5036,0,2,"Copy co
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	sess := ripCoverageSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "tv"}, Episodes: []ripspec.Episode{{Key: "one", TitleID: 1}}})
+	sess := newRipSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "tv"}, Episodes: []ripspec.Episode{{Key: "one", TitleID: 1}}})
 	h := &Handler{cfg: &config.Config{MakeMKV: config.MakeMKVConfig{OpticalDrive: "disc:0", RipTimeout: 10}}}
 	if err := h.ripTitles(context.Background(), sess, dir, []ripspec.Title{{ID: 1}}); err != nil {
 		t.Fatal(err)

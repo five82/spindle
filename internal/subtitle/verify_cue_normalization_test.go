@@ -7,7 +7,7 @@ import (
 	"github.com/five82/spindle/internal/srtutil"
 )
 
-func TestCueOverlapAndTokenNormalizationBoundaries(t *testing.T) {
+func TestNormalizeTokensStripsMarkupAndRejectsMultiwordAnchors(t *testing.T) {
 	if got := normalizeToken("<i>Hello</i>!"); got != "hello" {
 		t.Fatalf("markup token: %q", got)
 	}
@@ -20,12 +20,18 @@ func TestCueOverlapAndTokenNormalizationBoundaries(t *testing.T) {
 	if got := normalizeAnchorText("<i>Four</i>, useful words in this cue!"); got != "four useful words in this cue" {
 		t.Fatalf("anchor: %q", got)
 	}
+}
+
+func TestMedianAbsHandlesOddAndEvenSamples(t *testing.T) {
 	if got := medianAbs([]float64{-2, 5, -3, 10}); got != 4 {
 		t.Fatalf("even median absolute values: %f", got)
 	}
 	if got := medianAbs([]float64{-2, 5, -3}); got != 3 {
 		t.Fatalf("odd median: %f", got)
 	}
+}
+
+func TestCueTimeOverlapIgnoresDisjointAndZeroLengthCues(t *testing.T) {
 	a := []srtutil.Cue{{Start: 1, End: 3}, {Start: 10, End: 12}}
 	b := []srtutil.Cue{{Start: 2, End: 4}, {Start: 9, End: 11}}
 	if got := cueTimeOverlap(a, b); math.Abs(got-.5) > .0001 {

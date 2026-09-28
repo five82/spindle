@@ -16,7 +16,7 @@ import (
 	"github.com/five82/spindle/internal/queue"
 )
 
-func TestRunStartupFailureBoundaries(t *testing.T) {
+func TestRunRejectsBlockedQueueAndLockPaths(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	old := slog.Default()
 	t.Cleanup(func() { slog.SetDefault(old) })

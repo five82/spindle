@@ -12,7 +12,7 @@ import (
 	"github.com/five82/spindle/internal/stage"
 )
 
-func TestPrepareFreshRipBoundaries(t *testing.T) {
+func TestPrepareFreshRipResumesMonitorAfterReadinessFailure(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	dir := t.TempDir()

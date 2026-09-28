@@ -8,10 +8,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/five82/spindle/flyer/internal/spindle"
-	"github.com/five82/spindle/flyer/internal/state"
 )
 
-func TestQueueFilteringRenderingAndSelectionEdges(t *testing.T) {
+func TestQueueRowsFiltersAndSelectionStayConsistent(t *testing.T) {
 	m := newAppTestModel(t)
 	m.width, m.height = 120, 9
 	m.snapshot.Queue = []spindle.QueueItem{
@@ -28,9 +27,6 @@ func TestQueueFilteringRenderingAndSelectionEdges(t *testing.T) {
 				t.Fatalf("row missing title: %q", row)
 			}
 		}
-	}
-	if got := queueFileCount(m.snapshot.Queue[0]); got != "" {
-		t.Fatalf("synthetic percentage leaked: %s", got)
 	}
 	if got := m.queueProgressCell(m.snapshot.Queue[0], computeQueueColumns(m.snapshot.Queue, 60), styles.Text, styles, false); strings.Contains(stripANSI(got), "42%") {
 		t.Fatalf("compact progress: %q", got)
@@ -91,23 +87,28 @@ func TestQueueFilteringRenderingAndSelectionEdges(t *testing.T) {
 	}
 }
 
-func TestAppNavigationContextAndTickPaths(t *testing.T) {
+func TestAppNavigationHelpTracksActiveView(t *testing.T) {
 	m := newAppTestModel(t)
 	m, _ = updateApp(t, m, tea.WindowSizeMsg{Width: 100, Height: 22})
 	for _, tc := range []struct {
+		name       string
 		view       View
 		inspecting bool
 		tab        inspectorTab
 		want       string
 	}{
-		{ViewQueue, false, tabOverview, "Queue"}, {ViewLogs, false, tabOverview, "Logs"},
-		{ViewProblems, false, tabOverview, "Views"}, {ViewQueue, true, tabOverview, "Inspector"},
-		{ViewQueue, true, tabLogs, "Logs"},
+		{"queue help", ViewQueue, false, tabOverview, "Queue"},
+		{"daemon logs help", ViewLogs, false, tabOverview, "Logs"},
+		{"problems help", ViewProblems, false, tabOverview, "Views"},
+		{"inspector overview help", ViewQueue, true, tabOverview, "Inspector"},
+		{"inspector logs help", ViewQueue, true, tabLogs, "Logs"},
 	} {
-		m.currentView, m.inspecting, m.inspectorTab = tc.view, tc.inspecting, tc.tab
-		if got := m.helpContext(); got != tc.want {
-			t.Fatalf("context = %q, want %q", got, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			m.currentView, m.inspecting, m.inspectorTab = tc.view, tc.inspecting, tc.tab
+			if got := m.helpContext(); got != tc.want {
+				t.Fatalf("context = %q, want %q", got, tc.want)
+			}
+		})
 	}
 	m.inspecting = false
 	m.currentView = ViewQueue
@@ -142,23 +143,9 @@ func TestAppNavigationContextAndTickPaths(t *testing.T) {
 	if m.activeModal != nil {
 		t.Fatal("help modal should close on a key")
 	}
-	m.currentView = View(99)
-	if got := m.renderContent(); got != "" {
-		t.Fatalf("unexpected content: %q", got)
-	}
-	m.snapshot = state.Snapshot{HasStatus: true, Status: spindle.StatusResponse{Running: true}}
-	m.currentView = ViewLogs
-	m.logState.follow = true
-	if _, cmd := updateApp(t, m, tickMsg(time.Now())); cmd == nil {
-		t.Fatal("log tick not scheduled")
-	}
-	m.snapshot.ConsecutiveFailures = 1
-	if _, cmd := updateApp(t, m, tickMsg(time.Now())); cmd == nil {
-		t.Fatal("offline tick not scheduled")
-	}
 }
 
-func TestNowBandHolderFiguresAndFallback(t *testing.T) {
+func TestNowBandShowsActiveTaskAndFallsBackWithoutScheduler(t *testing.T) {
 	m := newAppTestModel(t)
 	item := spindle.QueueItem{ID: 42, Stage: "encoding", Tasks: []spindle.Task{{Type: "encoding", State: "running", ActiveAssetKey: "movie", Progress: spindle.TaskProgress{Percent: 51}}}, Encoding: &spindle.EncodingStatus{FPS: 78, ETASeconds: 125}}
 	item.Tasks[0].Activities = []spindle.Activity{{Operation: "video", State: "running", AssetKey: "movie", StartedAt: time.Now().Add(-time.Minute).Format(time.RFC3339), Completed: 51, Total: 100, Unit: "frames"}}
@@ -191,7 +178,7 @@ func TestNowBandHolderFiguresAndFallback(t *testing.T) {
 	}
 }
 
-func TestRelativeTimeAndFormattingBoundaries(t *testing.T) {
+func TestRelativeTimeDurationAndBytesFormatting(t *testing.T) {
 	for _, tc := range []struct {
 		d    time.Duration
 		want string

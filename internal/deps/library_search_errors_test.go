@@ -9,7 +9,7 @@ import (
 func TestLibraryRequirementFromSearchPathAndMissingName(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("LD_LIBRARY_PATH", root)
-	lib := "libspindle-coverage-test-unique.so"
+	lib := "libspindle-search-test-unique.so"
 	path := filepath.Join(root, lib)
 	if err := os.WriteFile(path, []byte("fixture"), 0o644); err != nil {
 		t.Fatal(err)

@@ -2,7 +2,7 @@ package auditgather
 
 import "testing"
 
-func TestAuditPathBoundaries(t *testing.T) {
+func TestPathWithinRootRejectsSiblingAndEmptyRoot(t *testing.T) {
 	for _, tc := range []struct {
 		path, root string
 		want       bool

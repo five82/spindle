@@ -12,31 +12,16 @@ import (
 	"github.com/five82/spindle/internal/config"
 )
 
-func TestEncodeAndDaemonCommandFailureBoundaries(t *testing.T) {
+func TestStartAndRestartRejectBlockedLogDirectory(t *testing.T) {
 	oldCfg, oldSocket := cfg, flagSocket
 	t.Cleanup(func() { cfg, flagSocket = oldCfg, oldSocket })
 	dir := t.TempDir()
-	cfg = &config.Config{Paths: config.PathsConfig{StateDir: dir}}
 	flagSocket = filepath.Join(dir, "absent.sock")
-	cmd := newEncodeCmd()
-	if err := cmd.RunE(cmd, []string{filepath.Join(dir, "missing.mkv")}); err == nil || !strings.Contains(err.Error(), "input file:") {
-		t.Fatalf("missing input: %v", err)
-	}
-	input := filepath.Join(dir, "input.mkv")
-	if err := os.WriteFile(input, []byte("bad media"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	blocker := filepath.Join(dir, "blocker")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := cmd.Flags().Set("output-dir", filepath.Join(blocker, "out")); err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.RunE(cmd, []string{input}); err == nil || !strings.Contains(err.Error(), "create output dir:") {
-		t.Fatalf("invalid output directory: %v", err)
-	}
-	cfg.Paths.StateDir = blocker
+	cfg = &config.Config{Paths: config.PathsConfig{StateDir: blocker}}
 	if err := newStartCmd().RunE(nil, nil); err == nil || !strings.Contains(err.Error(), "create log directory:") {
 		t.Fatalf("start with blocked directory: %v", err)
 	}
@@ -145,7 +130,7 @@ done
 	}
 }
 
-func TestDebugCommentaryProbePaths(t *testing.T) {
+func TestDebugCommentaryHandlesMissingOrUnusableAudio(t *testing.T) {
 	oldCfg := cfg
 	t.Cleanup(func() { cfg = oldCfg })
 	cfg = &config.Config{}
