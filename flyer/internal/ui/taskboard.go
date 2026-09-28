@@ -121,9 +121,9 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 	b.WriteString(" ")
 	b.WriteString(labelStyle.Render(fmt.Sprintf("%-12s", label)))
 
-	// Per-episode position for a running task, or completed throughput for
-	// every other state. This keeps the row aligned with its active episode:
-	// while episode 2 is being ripped the row reads 2/N, not 1/N.
+	// Running rows show the current work item; other states show completed
+	// throughput. Ripping counts completed titles plus the active rip because
+	// episode order can differ from disc title (rip) order.
 	if count, ok := stageTaskCount(info.totals, item, task, episodes, totals); ok && totals.Planned > 1 {
 		b.WriteString(" ")
 		b.WriteString(styles.MutedText.Render(fmt.Sprintf("%*d/%d", countWidth, count, totals.Planned)))
@@ -217,9 +217,10 @@ func taskEpisodeContext(task spindle.Task, episodes []spindle.EpisodeStatus) str
 }
 
 // stageTaskCount returns a task row's per-episode count. Running rows report
-// the one-based position of their active episode; pending, done, and failed
-// rows report completed throughput. The completion count is a floor so a
-// briefly stale active key cannot make the row move backwards.
+// the active episode's position, except ripping, which reports completed rips
+// plus the active title: episode order need not match rip order. Other states
+// report completed throughput. The completion count is a floor so a briefly
+// stale active key cannot make the row move backwards.
 func stageTaskCount(key string, item spindle.QueueItem, task spindle.Task, episodes []spindle.EpisodeStatus, totals spindle.EpisodeTotals) (int, bool) {
 	completed, ok := stageThroughput(key, item, totals)
 	if !ok || !task.IsWorking() {
@@ -229,6 +230,14 @@ func stageTaskCount(key string, item spindle.QueueItem, task spindle.Task, episo
 	activeKey := strings.TrimSpace(task.ActiveAssetKey)
 	if activeKey == "" {
 		return completed, true
+	}
+	if task.Type == "ripping" {
+		for _, ep := range episodes {
+			if strings.EqualFold(ep.Key, activeKey) && ep.RippedPath != "" {
+				return completed, true
+			}
+		}
+		return min(completed+1, totals.Planned), true
 	}
 	for i := range episodes {
 		if strings.EqualFold(episodes[i].Key, activeKey) {

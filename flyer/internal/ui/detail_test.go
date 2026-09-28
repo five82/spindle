@@ -370,6 +370,42 @@ func TestOverviewRunningStageCountUsesActiveEpisodePosition(t *testing.T) {
 	}
 }
 
+func TestOverviewRippingCountDoesNotUseEpisodeOrder(t *testing.T) {
+	got := overviewFor(t, spindle.QueueItem{
+		ID: 4, Stage: "ripping",
+		Episodes: []spindle.EpisodeStatus{
+			{Key: "s01_001", SourceTitleID: 3},
+			{Key: "s01_002", SourceTitleID: 1},
+			{Key: "s01_003", SourceTitleID: 2},
+		},
+		Tasks: []spindle.Task{{
+			Type: "ripping", State: "running", ActiveAssetKey: "s01_002",
+			Progress: spindle.TaskProgress{Percent: 1, Message: "Phase 1/3 - Ripping title 1"},
+		}},
+	})
+	if !strings.Contains(strings.Join(strings.Fields(got), " "), "Ripping 1/3") {
+		t.Fatalf("first rip should read 1/3 regardless of episode order, got:\n%s", got)
+	}
+}
+
+func TestOverviewRippingCountAfterTitleCompletes(t *testing.T) {
+	got := overviewFor(t, spindle.QueueItem{
+		ID: 4, Stage: "ripping",
+		Episodes: []spindle.EpisodeStatus{
+			{Key: "s01_001"},
+			{Key: "s01_002", RippedPath: "/ripped/title1.mkv"},
+			{Key: "s01_003"},
+		},
+		Tasks: []spindle.Task{{
+			Type: "ripping", State: "running", ActiveAssetKey: "s01_002",
+			Progress: spindle.TaskProgress{Percent: 33, Message: "Phase 1/3 - Ripped title 1"},
+		}},
+	})
+	if !strings.Contains(strings.Join(strings.Fields(got), " "), "Ripping 1/3") {
+		t.Fatalf("completed active rip should not be counted twice, got:\n%s", got)
+	}
+}
+
 func TestOverviewSubtitlingHidesUnreportedProgress(t *testing.T) {
 	got := overviewFor(t, spindle.QueueItem{
 		ID:    6,
