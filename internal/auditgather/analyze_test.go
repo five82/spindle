@@ -536,31 +536,26 @@ func TestDetectAnomalies_RecordedBandTopWins(t *testing.T) {
 	}
 }
 
-// The finished encode is ground truth: an untreated title delivered above the
-// treat cutoff recorded at encode time is a gate false negative. A clean
-// untreated title below the line and an off/override verdict (no cutoff
-// recorded) stay silent.
-func TestDetectAnomalies_UntreatedDeliveredAboveCutoff(t *testing.T) {
-	a := &Analysis{GrainTreatments: []GrainTreatmentEntry{
-		{EpisodeKey: "main", DeliveredBPP: 0.0905, GrainTreatment: ripspec.GrainTreatment{
-			TreatmentBPPCutoff: 0.0703,
-		}},
-		{EpisodeKey: "clean", DeliveredBPP: 0.02, GrainTreatment: ripspec.GrainTreatment{
-			TreatmentBPPCutoff: 0.0703,
-		}},
-		{EpisodeKey: "gate-off", DeliveredBPP: 0.5, GrainTreatment: ripspec.GrainTreatment{}},
+// Item 2's pilot was untreated: both middle-sample medians were below the
+// gate's 0.22 cutoff, but its whole-file average exceeded it because the
+// final fifth was expensive. Those statistics are not comparable evidence
+// of a missed treatment; preserve the verdict and size without warning.
+func TestDetectAnomalies_UntreatedHighWholeFileCostIsNotGateFailure(t *testing.T) {
+	stats := []ripspec.EncodeStats{{
+		EpisodeKey: "s01_001", Width: 1920, Height: 1080, Frames: 83592,
+		EncodedSizeBytes: 5937988018,
+		GrainTreatment: &ripspec.GrainTreatment{
+			Mode: "auto", MedianBPP: 0.21308035143572002,
+			Stage2MedianBPP: 0.20380430745137362, TreatmentBPPCutoff: 0.22,
+		},
 	}}
-
-	anomalies := detectAnomalies(&Report{}, a)
-	if len(anomalies) != 1 || anomalies[0].Severity != "warning" || anomalies[0].Category != "encoding" {
-		t.Fatalf("anomalies = %+v, want one encoding warning", anomalies)
+	a := &Analysis{GrainTreatments: computeGrainTreatments(stats)}
+	if len(a.GrainTreatments) != 1 || a.GrainTreatments[0].EncodedSizeBytes != stats[0].EncodedSizeBytes ||
+		a.GrainTreatments[0].Stage2MedianBPP != stats[0].GrainTreatment.Stage2MedianBPP {
+		t.Fatalf("lost pilot grain evidence: %+v", a.GrainTreatments)
 	}
-	if !strings.Contains(anomalies[0].Message, "gate false negative") ||
-		!strings.Contains(anomalies[0].Message, "main: delivered 0.0905 bpp vs treat cutoff 0.0703") {
-		t.Fatalf("unexpected anomaly message: %s", anomalies[0].Message)
-	}
-	if strings.Contains(anomalies[0].Message, "clean") || strings.Contains(anomalies[0].Message, "gate-off") {
-		t.Fatalf("anomaly should name only the missed title: %s", anomalies[0].Message)
+	if anomalies := detectAnomalies(&Report{}, a); len(anomalies) != 0 {
+		t.Fatalf("whole-file average must not override a middle-sample gate verdict: %+v", anomalies)
 	}
 }
 

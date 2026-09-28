@@ -391,10 +391,6 @@ type CropAnalysis struct {
 // the JSON stays flat.
 type GrainTreatmentEntry struct {
 	EpisodeKey string `json:"episode_key,omitempty"`
-	// DeliveredBPP is the finished encode's whole-file bits per pixel per
-	// frame, so the gate's prediction can be checked against what was
-	// actually delivered. Slightly inflated by audio bytes.
-	DeliveredBPP float64 `json:"delivered_bpp,omitempty"`
 	// Per-episode size outcome, lifted alongside the verdict so multi-episode
 	// discs show each episode's result (the encoding snapshot section only
 	// shows the last episode).
