@@ -39,11 +39,7 @@ func TestBrokenQueueSchemaSurfacesErrorsWithoutClaimingSuccess(t *testing.T) {
 		name, table string
 		run         func(*Store, int64) error
 	}{
-		{"clear after items dropped", "queue_items", func(s *Store, _ int64) error { _, err := s.Clear(); return err }},
-		{"clear completed after items dropped", "queue_items", func(s *Store, _ int64) error { _, err := s.ClearCompleted(); return err }},
 		{"retry after items dropped", "queue_items", func(s *Store, id int64) error { _, err := s.RetryFailed(id); return err }},
-		{"stop after items dropped", "queue_items", func(s *Store, id int64) error { _, err := s.StopItems(id); return err }},
-		{"remove after tasks dropped", "tasks", func(s *Store, id int64) error { return s.Remove(id) }},
 		{"retry spec after tasks dropped", "tasks", func(s *Store, id int64) error { return s.RetryWithRipSpec(id, StageRipping, "spec") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

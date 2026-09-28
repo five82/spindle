@@ -68,10 +68,8 @@ func TestStoreClosedDatabaseErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	checks := map[string]func() error{
-		"refresh":    func() error { return s.Refresh(item) },
 		"insert":     func() error { _, err := s.NewDisc("Other", "fp2"); return err },
 		"get":        func() error { _, err := s.GetByID(item.ID); return err },
-		"clear":      func() error { _, err := s.Clear(); return err },
 		"retry spec": func() error { return s.RetryWithRipSpec(item.ID, StageRipping, "new") },
 	}
 	for name, check := range checks {

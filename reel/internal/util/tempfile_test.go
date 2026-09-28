@@ -185,20 +185,6 @@ func TestGetAvailableSpace(t *testing.T) {
 	}
 }
 
-func TestCheckDiskSpace(t *testing.T) {
-	// Test with a valid path - should not panic and return a result
-	_ = CheckDiskSpace("/tmp", nil)
-
-	// Test with logger
-	logger := func(format string, args ...any) {
-		// Just verify the logger is called without panicking
-		_ = format
-		_ = args
-	}
-	// This should work without panicking
-	CheckDiskSpace("/tmp", logger)
-}
-
 func TestGenerateRandomString(t *testing.T) {
 	s1, err := generateRandomString(8)
 	if err != nil {

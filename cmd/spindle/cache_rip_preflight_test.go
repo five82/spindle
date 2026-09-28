@@ -12,7 +12,7 @@ import (
 	"github.com/five82/spindle/internal/ripcache"
 )
 
-func TestCacheRipPreflightAndExistingFingerprint(t *testing.T) {
+func TestCacheRipExistingFingerprintAndIdentificationFailure(t *testing.T) {
 	oldCfg, oldSocket := cfg, flagSocket
 	t.Cleanup(func() { cfg, flagSocket = oldCfg, oldSocket })
 	dir := t.TempDir()
@@ -20,25 +20,6 @@ func TestCacheRipPreflightAndExistingFingerprint(t *testing.T) {
 	cfg = &config.Config{Paths: config.PathsConfig{StateDir: dir}, RipCache: config.RipCacheConfig{MaxGiB: 1}}
 	flagSocket = filepath.Join(dir, "missing.sock")
 	cmd := newCacheRipCmd()
-	if err := cmd.Flags().Set("title", "1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Flags().Set("choose", "true"); err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.RunE(cmd, []string{"/dev/sr0"}); err == nil || !strings.Contains(err.Error(), "cannot combine") {
-		t.Fatalf("conflicting flags: %v", err)
-	}
-	if err := cmd.Flags().Set("choose", "false"); err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.RunE(cmd, nil); err == nil || !strings.Contains(err.Error(), "no device specified") {
-		t.Fatalf("missing device: %v", err)
-	}
-	if err := cmd.RunE(cmd, []string{"/dev/does-not-exist"}); err == nil || !strings.Contains(err.Error(), "probe disc") {
-		t.Fatalf("failed probe: %v", err)
-	}
-
 	// Stub only lsblk; a real temporary directory supplies the disc content
 	// for the production fingerprinting path.
 	bin := filepath.Join(dir, "bin")

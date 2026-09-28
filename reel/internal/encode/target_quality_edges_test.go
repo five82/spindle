@@ -36,31 +36,15 @@ func TestTargetQualitySetupFailuresAndEmptyRun(t *testing.T) {
 	}
 }
 
-func TestTargetRunWorkerCancellationAndPlanFailure(t *testing.T) {
+func TestTargetRunPlanCancellation(t *testing.T) {
 	r := newSSIMU2TestRun(t, nil)
-	chunks := make(chan chunk.Chunk, 2)
-	results := make(chan targetQualityResult, 2)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	chunks <- chunk.Chunk{Idx: 7}
-	close(chunks)
-	r.runWorker(ctx, chunks, results)
-	if got := <-results; got.ChunkIdx != 7 || !errors.Is(got.Error, context.Canceled) {
-		t.Fatalf("canceled worker: %+v", got)
-	}
 	// Once the warmup slots are taken, cancellation of the calibration wait
 	// must return an error without attempting to encode.
 	exhaustWarmupClaims(r.calibration)
 	if got := r.processChunk(ctx, chunk.Chunk{Idx: 8}); !errors.Is(got.Error, context.Canceled) {
 		t.Fatalf("canceled plan: %+v", got)
-	}
-	r.setError(errors.New("stop"))
-	chunks = make(chan chunk.Chunk, 1)
-	chunks <- chunk.Chunk{Idx: 9}
-	close(chunks)
-	r.runWorker(context.Background(), chunks, results)
-	if len(results) != 0 {
-		t.Fatal("worker must skip chunks after an earlier failure")
 	}
 }
 

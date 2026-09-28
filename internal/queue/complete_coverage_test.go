@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestCompleteStageUpdatesLiveItemAndPreservesStoppedItem(t *testing.T) {
+func TestCompleteStageUpdatesLiveItem(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "queue.db"))
 	if err != nil {
 		t.Fatal(err)

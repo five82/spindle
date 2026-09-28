@@ -2,6 +2,7 @@ package encode
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,9 @@ func TestGrainGateWithoutEncodeSamples(t *testing.T) {
 	in.InputPath = filepath.Join(dir, "missing.y4m")
 	if _, err := runGrainGate(context.Background(), cfg, in); err == nil || !strings.Contains(err.Error(), "open source") {
 		t.Fatalf("missing source: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "gate")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("gate measurements not cleaned up: %v", err)
 	}
 	if _, err := measureChunkBPP(context.Background(), cfg, in, in.Chunks[0], filepath.Join(dir, "test.ivf"), 1920, 1080); err == nil {
 		t.Fatal("missing source must fail")

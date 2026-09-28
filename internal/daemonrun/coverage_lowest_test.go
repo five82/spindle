@@ -198,7 +198,7 @@ func TestRunTogglesLogLevelOnSIGUSR1(t *testing.T) {
 	}
 }
 
-func TestRunWithOptionalServicesAndQueuedItem(t *testing.T) {
+func TestRunOpensOptionalServicesWithExistingQueue(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", dir)
 	old := slog.Default()

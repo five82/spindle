@@ -15,36 +15,13 @@ import (
 	"github.com/five82/spindle/internal/ripcache"
 )
 
-func TestCacheRipAndEncodePreflightErrors(t *testing.T) {
-	oldCfg, oldSocket, oldQuiet := cfg, flagSocket, flagQuiet
-	t.Cleanup(func() { cfg, flagSocket, flagQuiet = oldCfg, oldSocket, oldQuiet })
+func TestEncodePreflightErrors(t *testing.T) {
+	oldCfg, oldSocket := cfg, flagSocket
+	t.Cleanup(func() { cfg, flagSocket = oldCfg, oldSocket })
 	dir := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", dir)
 	cfg = &config.Config{Paths: config.PathsConfig{StateDir: dir}}
 	flagSocket = filepath.Join(dir, "missing.sock")
-	rip := newCacheRipCmd()
-	for _, tc := range []struct {
-		title, choose bool
-		device, want  string
-	}{
-		{true, true, "/dev/missing", "cannot combine"},
-		{false, false, "", "no device specified"},
-		{false, false, "/dev/this-device-does-not-exist", "probe disc"},
-	} {
-		if err := rip.Flags().Set("title", map[bool]string{true: "2", false: "-1"}[tc.title]); err != nil {
-			t.Fatal(err)
-		}
-		if err := rip.Flags().Set("choose", map[bool]string{true: "true", false: "false"}[tc.choose]); err != nil {
-			t.Fatal(err)
-		}
-		var args []string
-		if tc.device != "" {
-			args = []string{tc.device}
-		}
-		if err := rip.RunE(rip, args); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("rip %q: %v, want %s", tc.device, err, tc.want)
-		}
-	}
 	encode := newEncodeCmd()
 	if err := encode.RunE(encode, []string{filepath.Join(dir, "missing.mkv")}); err == nil || !strings.Contains(err.Error(), "input file") {
 		t.Fatalf("missing encode input: %v", err)

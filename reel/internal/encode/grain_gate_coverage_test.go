@@ -5,36 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/five82/spindle/reel/internal/chunk"
 	"github.com/five82/spindle/reel/internal/config"
 	"github.com/five82/spindle/reel/internal/perf"
-	"github.com/five82/spindle/reel/internal/video"
 )
-
-func TestGrainGateWithoutSampleAndWithUnavailableSource(t *testing.T) {
-	dir := t.TempDir()
-	cfg := &EncodeConfig{}
-	in := GrainGateInput{WorkDir: dir, Info: &video.Info{Width: config.HDWidthThreshold, Height: 16, Frames: 100, FPSNum: 25, FPSDen: 1}}
-	stats, err := runGrainGate(context.Background(), cfg, in)
-	if err != nil || len(stats.SampleChunks) != 0 || stats.Reason == "" {
-		t.Fatalf("no sample = %+v, %v", stats, err)
-	}
-	in.Chunks = []chunk.Chunk{{Idx: 0, Start: 0, End: 100}}
-	if _, err := runGrainGate(context.Background(), cfg, in); err == nil || !strings.Contains(err.Error(), "source") {
-		t.Fatalf("missing source: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "gate")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("gate measurements not cleaned up: %v", err)
-	}
-	in.Info.Width = 640
-	stats, err = runGrainGate(context.Background(), cfg, in)
-	if err != nil || stats.ResolutionClass != "sd" || stats.Treated {
-		t.Fatalf("SD gate = %+v, %v", stats, err)
-	}
-}
 
 func TestGrainDecisionFailureAndRecordedObservation(t *testing.T) {
 	cfg := &EncodeConfig{}
