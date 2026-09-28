@@ -703,9 +703,8 @@ func buildProfileSummary(p MediaFileProbe) ProfileSummary {
 				Language:      s.Tags["language"],
 				IsDefault:     s.Disposition["default"] == 1,
 			}
-			if strings.Contains(strings.ToLower(s.Tags["title"]), "commentary") {
-				ap.IsCommentary = true
-			}
+			ap.IsCommentary = s.Disposition["comment"] == 1 && s.Disposition["default"] != 1 &&
+				strings.Contains(strings.ToLower(s.Tags["title"]), "commentary")
 			ps.AudioStreams = append(ps.AudioStreams, ap)
 		case "subtitle":
 			ps.SubtitleStreams = append(ps.SubtitleStreams, SubtitleProfile{
@@ -1266,13 +1265,33 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 		checkStage("transcript", a.AssetHealth.Transcript)
 	}
 
-	// Cross-episode deviations.
+	// Keep commentary-only differences in the profile summary, but warn only
+	// when the program streams differ. Commentary is episode-specific on many
+	// discs; the apply stage independently validates its labels and flags.
 	if a.EpisodeConsistency != nil && len(a.EpisodeConsistency.Deviations) > 0 {
-		anomalies = append(anomalies, Anomaly{
-			Severity: "warning",
-			Category: "consistency",
-			Message:  fmt.Sprintf("%d episode(s) deviate from majority media profile", len(a.EpisodeConsistency.Deviations)),
-		})
+		program := a.EpisodeConsistency.MajorityProfile
+		program.AudioStreams = slices.DeleteFunc(slices.Clone(program.AudioStreams), func(audio AudioProfile) bool { return audio.IsCommentary })
+		unexpected := len(a.EpisodeConsistency.Deviations)
+		for _, d := range a.EpisodeConsistency.Deviations {
+			for _, p := range r.Media {
+				if p.EpisodeKey != d.EpisodeKey || p.Error != "" || p.Probe == nil {
+					continue
+				}
+				actual := buildProfileSummary(p)
+				actual.AudioStreams = slices.DeleteFunc(actual.AudioStreams, func(audio AudioProfile) bool { return audio.IsCommentary })
+				if profilesEqual(program, actual) {
+					unexpected--
+				}
+				break
+			}
+		}
+		if unexpected > 0 {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "warning",
+				Category: "consistency",
+				Message:  fmt.Sprintf("%d episode(s) deviate from majority media profile", unexpected),
+			})
+		}
 	}
 
 	// Media probe failures.

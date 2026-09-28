@@ -73,7 +73,7 @@ The `analysis` object (always present; sub-fields omitted when empty) contains p
 | `audio_summary` | Audio evidence exists | Primary track, output/excluded/commentary counts, and commentary decisions. Whether the labels are correct comes from `final_validation`. |
 | `subtitle_summary` | Subtitle evidence exists | Subtitle pipeline metadata: per-title source (`opensubtitles`/`none`), validation counts, skipped count, and output subtitle count. Stream layout and label correctness come from `final_validation`. It is not evidence for auditing subtitle text. |
 | `routing_summary` | Final assets exist | Display-only classification of each final output's destination and its expected-vs-actual route. The organizer enforces routing itself and fails the stage on a mismatch, so this table is context, not the check. |
-| `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_streams with codec/language/is_forced), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. |
+| `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_streams with codec/language/is_forced), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. Commentary-only deviations remain visible but do not trigger a consistency warning. |
 | `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`. |
 | `grain_treatments` | Reel reported a grain-gate verdict | Per-encode `episode_key`, `mode` (auto/off/override), `treated`, `tier` (light/med), `resolution_class`, `denoise`, `grain_table`, `reason`, `gate_crf`, `sample_chunks`/`sample_bpp`, `median_bpp` against `light_bpp_cutoff`/`med_bpp_cutoff`, `gate_seconds`/`ceiling_seconds`, and `denoise_ceiling_jod_mean`/`denoise_ceiling_jod_min`. Lifted from `envelope.attributes.encode_stats[].grain_treatment`. |
 | `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `placeholder_only`, `confidence_min/max/mean`, `below_070/080/090` (cumulative), `sequence_contiguous`, `episode_range`. |
@@ -288,7 +288,7 @@ Analyze the `media` array from the audit output. Each entry contains full ffprob
    - Verify encoded asset count matches episode count
 
 8. **Cross-episode consistency** (TV only):
-   - Use `analysis.episode_consistency` for the overview: `majority_profile` gives the common (video_codec, width, height, audio_streams, subtitle_streams), `majority_count`/`total_episodes` show how many match, and `deviations[]` lists episodes with human-readable differences
+   - Use `analysis.episode_consistency` for the overview: `majority_profile` gives the common (video_codec, width, height, audio_streams, subtitle_streams), `majority_count`/`total_episodes` show how many match, and `deviations[]` lists episodes with human-readable differences. A verified commentary track on only some episodes is context, not a warning; check whether the program streams differ after excluding it.
    - Use `analysis.media_stats` for duration range (`duration_min_sec/max_sec`) and size range (`size_min_bytes/max_bytes`)
    - Inspect the representative probe for stream-level checks (items 2-6); omitted probes are confirmed equivalent by the consistency analysis
 
@@ -389,7 +389,7 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 5. **Verify in media probes**: Count audio streams with `disposition.comment=1` in `media[].probe.streams`
 
 6. **Cross-episode commentary consistency** (TV only):
-   - All episodes from the same disc should have same number of audio streams
+   - Compare program-audio profiles across episodes; commentary tracks may legitimately appear on only some episodes. Check their labels/dispositions against `final_validation` rather than treating differing total audio counts as a defect.
 
 ## Problem Pattern Catalog
 
@@ -637,7 +637,7 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 ### Post-Audio-Analysis (phase_commentary)
 - [ ] Reviewed commentary decisions from `analysis.decision_groups`, interpreting Jev probabilities with the 0.65 rule rather than an LLM/episode confidence gate
 - [ ] Checked conservative error fallbacks and verified that similarity did not exclude a track classified or preserved as commentary
-- [ ] If TV: verified cross-episode audio stream count consistency
+- [ ] If TV: verified cross-episode program-audio consistency; allowed episode-specific commentary tracks with valid labels/dispositions
 
 ### Post-Subtitling (phase_subtitles)
 - [ ] Read the apply stage's subtitle layout verdict (adopted titles only; `source=none` skips legitimately have no stream)

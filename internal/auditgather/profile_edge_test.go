@@ -26,7 +26,7 @@ func TestProfileDifferenceIncludesAudioSubtitleAndResolution(t *testing.T) {
 
 func TestEpisodeConsistencyMajorityWithProbeErrors(t *testing.T) {
 	probe := func(key, codec string) MediaFileProbe {
-		return MediaFileProbe{EpisodeKey: key, Probe: &ffprobe.Result{Streams: []ffprobe.Stream{{CodecType: "video", CodecName: codec, Width: 1920, Height: 1080}, {CodecType: "audio", CodecName: "aac", Channels: 2, Tags: map[string]string{"language": "eng", "title": "Director Commentary"}}, {CodecType: "subtitle", CodecName: "subrip", Tags: map[string]string{"language": "en"}, Disposition: map[string]int{"forced": 1}}}}}
+		return MediaFileProbe{EpisodeKey: key, Probe: &ffprobe.Result{Streams: []ffprobe.Stream{{CodecType: "video", CodecName: codec, Width: 1920, Height: 1080}, {CodecType: "audio", CodecName: "aac", Channels: 2, Tags: map[string]string{"language": "eng", "title": "Director Commentary"}, Disposition: map[string]int{"comment": 1}}, {CodecType: "subtitle", CodecName: "subrip", Tags: map[string]string{"language": "en"}, Disposition: map[string]int{"forced": 1}}}}}
 	}
 	probes := []MediaFileProbe{probe("e1", "h264"), probe("e2", "hevc"), probe("e3", "h264"), {EpisodeKey: "e4", Error: "probe failed"}}
 	consistency := computeEpisodeConsistency(probes)
@@ -42,6 +42,59 @@ func TestEpisodeConsistencyMajorityWithProbeErrors(t *testing.T) {
 	}
 	if computeEpisodeConsistency(probes[:1]) != nil {
 		t.Fatal("one probe should have no consistency")
+	}
+}
+
+func TestEpisodeConsistencyCommentaryOnlyDeviationIsNotAWarning(t *testing.T) {
+	probe := func(key string, commentary bool) MediaFileProbe {
+		streams := []ffprobe.Stream{
+			{CodecType: "video", CodecName: "av1", Width: 1920, Height: 1080},
+			{CodecType: "audio", CodecName: "opus", Channels: 6, ChannelLayout: "5.1", Tags: map[string]string{"language": "eng"}, Disposition: map[string]int{"default": 1}},
+			{CodecType: "subtitle", CodecName: "subrip", Tags: map[string]string{"language": "eng"}},
+		}
+		if commentary {
+			streams = append(streams, ffprobe.Stream{CodecType: "audio", CodecName: "opus", Channels: 2, Tags: map[string]string{"language": "eng", "title": "Stereo (Commentary)"}, Disposition: map[string]int{"comment": 1}})
+		}
+		return MediaFileProbe{EpisodeKey: key, Probe: &ffprobe.Result{Streams: streams}}
+	}
+
+	// Breaking Bad disc 1: only the pilot has commentary. The raw profile
+	// difference must remain visible, but it is not a consistency warning.
+	pilot := probe("s01_001", true)
+	plain := probe("s01_002", false)
+	extraProgram := probe("s01_004", false)
+	extraProgram.Probe.Streams = append(extraProgram.Probe.Streams, ffprobe.Stream{CodecType: "audio", CodecName: "opus", Channels: 2, Tags: map[string]string{"language": "eng"}})
+	differentVideo := probe("s01_004", true)
+	differentVideo.Probe.Streams[0].Width = 1280
+	unflagged := probe("s01_004", true)
+	unflagged.Probe.Streams[3].Disposition["comment"] = 0
+	for _, tc := range []struct {
+		name         string
+		media        []MediaFileProbe
+		wantWarnings int
+	}{
+		{"pilot commentary", []MediaFileProbe{pilot, plain, probe("s01_003", false), probe("s01_004", false)}, 0},
+		{"majority commentary", []MediaFileProbe{pilot, probe("s01_002", true), probe("s01_003", true), probe("s01_004", false)}, 0},
+		{"extra program audio", []MediaFileProbe{plain, probe("s01_003", false), extraProgram}, 1},
+		{"different video and commentary", []MediaFileProbe{plain, probe("s01_003", false), differentVideo}, 1},
+		{"unflagged commentary label", []MediaFileProbe{plain, probe("s01_003", false), unflagged}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &Report{Media: tc.media}
+			a := computeAnalysis(r)
+			if a.EpisodeConsistency == nil || len(a.EpisodeConsistency.Deviations) != 1 {
+				t.Fatalf("lost raw profile deviation: %+v", a.EpisodeConsistency)
+			}
+			var warnings int
+			for _, anomaly := range a.Anomalies {
+				if anomaly.Category == "consistency" {
+					warnings++
+				}
+			}
+			if warnings != tc.wantWarnings {
+				t.Fatalf("consistency warnings = %d, want %d: %+v", warnings, tc.wantWarnings, a.Anomalies)
+			}
+		})
 	}
 }
 
