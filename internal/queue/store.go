@@ -41,23 +41,18 @@ type Store struct {
 }
 
 // Open opens a read-write SQLite database at path with WAL, foreign keys,
-// and busy timeout pragmas. Creates the queue table if it does not exist.
+// and a busy timeout. Creates the queue table if it does not exist.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	// These PRAGMAs are connection-local; the DSN applies them to every pooled
+	// connection, including those opened later by concurrent stage workers.
+	db, err := sql.Open("sqlite", path+"?_busy_timeout=5000&_foreign_keys=1")
 	if err != nil {
 		return nil, fmt.Errorf("open queue db: %w", err)
 	}
 
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=5000",
-	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("set pragma %q: %w", p, err)
-		}
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set WAL journal mode: %w", err)
 	}
 
 	if _, err := db.Exec(createTableSQL); err != nil {

@@ -1,12 +1,14 @@
 package queue
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestIsBusyErrorRealBusy provokes a real SQLITE_BUSY through two
@@ -64,6 +66,75 @@ func TestIsBusyErrorRealBusy(t *testing.T) {
 	attempts = 0
 	if err := retryOnBusy(func() error { attempts++; return busyErr }); err == nil || !strings.Contains(err.Error(), "database busy after 5 attempts") || attempts != 5 {
 		t.Fatalf("exhausted retries: %d attempts, %v", attempts, err)
+	}
+}
+
+// The daemon runs concurrent stage workers through one sql.DB. A PRAGMA
+// executed once in Open does not configure connections opened by the pool later.
+func TestOpenConfiguresEveryConnection(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	first, err := store.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := store.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	for i, conn := range []*sql.Conn{first, second} {
+		var timeout, foreignKeys int
+		if err := conn.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&timeout); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
+			t.Fatal(err)
+		}
+		if timeout != 5000 || foreignKeys != 1 {
+			t.Fatalf("connection %d: timeout=%d, foreign_keys=%d; want 5000, 1", i+1, timeout, foreignKeys)
+		}
+	}
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := first.ExecContext(ctx, "INSERT INTO queue_items (stage) VALUES ('ripping')")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := first.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE queue_items SET disc_title = 'locked' WHERE id = ?", id); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	// Longer than retryOnBusy's 150ms total backoff: the second connection
+	// must wait for SQLite's busy timeout rather than exhaust those retries.
+	done := make(chan error, 1)
+	go func() {
+		time.Sleep(350 * time.Millisecond)
+		done <- tx.Commit()
+	}()
+	err = store.RecordEvent(Event{ItemID: id, Type: "test", Stage: StageRipping})
+	commitErr := <-done
+	if commitErr != nil {
+		t.Fatal(commitErr)
+	}
+	if err != nil {
+		t.Fatalf("write under brief contention: %v", err)
 	}
 }
 
