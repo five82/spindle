@@ -298,7 +298,7 @@ func WithEncodingDetails(json string) ProgressOption {
 // transitions; repeated counters update the snapshot only. Concurrent branches
 // such as transcription/reference fetching share the session's progress lock.
 func (s *Session) Activity(a queue.Activity) {
-	s.Progress(0, a.Message, WithActivity(a))
+	s.progress(nil, a.Message, WithActivity(a))
 }
 
 // WithActivity persists an operation together with its encoding counters.
@@ -311,6 +311,10 @@ func WithActivity(a queue.Activity) ProgressOption {
 // task (ID 0) keeps progress in memory only. Persistence failures are
 // non-fatal: progress is display state, so they are logged and swallowed.
 func (s *Session) Progress(percent float64, message string, opts ...ProgressOption) {
+	s.progress(&percent, message, opts...)
+}
+
+func (s *Session) progress(percent *float64, message string, opts ...ProgressOption) {
 	if s == nil || s.Store == nil || s.Item == nil || s.Task == nil {
 		return
 	}
@@ -321,7 +325,9 @@ func (s *Session) Progress(percent float64, message string, opts ...ProgressOpti
 		opt(&update)
 	}
 
-	s.Task.ProgressPercent = percent
+	if percent != nil {
+		s.Task.ProgressPercent = *percent
+	}
 	s.Task.ProgressMessage = message
 	if update.activeEpisode != nil {
 		if s.Task.ActiveAssetKey != *update.activeEpisode {

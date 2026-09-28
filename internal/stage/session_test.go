@@ -102,6 +102,30 @@ func TestSessionProgressPersistsTask(t *testing.T) {
 	}
 }
 
+func TestActivityPreservesCopyProgress(t *testing.T) {
+	store, item, s := newTestSessionWithTask(t)
+	s.Progress(100, "Phase 1/1 - Copying to library (s01_001)", WithProgressBytes(1000, 1000))
+	s.Activity(queue.Activity{Operation: "finalizing", AssetKey: "s01_001", Message: "Finalizing verified copy to library"})
+	s.Activity(queue.Activity{Operation: "published", AssetKey: "s01_001", State: "done", Message: "Published to library"})
+
+	tasks, err := store.TasksForItem(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range []*queue.Task{s.Task, tasks[0]} {
+		if task.ProgressPercent != 100 || task.ProgressBytesCopied != 1000 || task.ProgressTotalBytes != 1000 {
+			t.Fatalf("activity reset copy progress: %+v", task)
+		}
+		if task.ProgressMessage != "Published to library" {
+			t.Fatalf("activity did not update message: %q", task.ProgressMessage)
+		}
+	}
+	s.Progress(0, "Phase 1/1 - Starting next transfer")
+	if s.Task.ProgressPercent != 0 {
+		t.Fatalf("explicit progress reset ignored: %v", s.Task.ProgressPercent)
+	}
+}
+
 func TestSessionProgressDetachedTaskStaysInMemory(t *testing.T) {
 	store, item, s := newTestSession(t)
 
