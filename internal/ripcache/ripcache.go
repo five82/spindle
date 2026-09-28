@@ -313,7 +313,7 @@ func copyFileWithProgress(src, dst string, baseOffset, totalBytes int64, progres
 	var wrapped fileutil.ProgressFunc
 	if progress != nil {
 		wrapped = func(p fileutil.CopyProgress) {
-			progress(CopyProgress{BytesCopied: baseOffset + p.BytesCopied, TotalBytes: totalBytes})
+			progress(CopyProgress{Phase: p.Phase, BytesCopied: baseOffset + p.BytesCopied, TotalBytes: totalBytes})
 		}
 	}
 

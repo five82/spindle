@@ -16,6 +16,7 @@ import (
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/makemkv"
 	"github.com/five82/spindle/internal/notify"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
@@ -320,7 +321,7 @@ func (h *Handler) ripTitles(ctx context.Context, sess *stage.Session, rippedDir 
 						"title_id", title.ID,
 						"episode_key", key,
 					)
-					sess.Progress(overallRipPercent(i+1, len(targets), 0), fmt.Sprintf("Phase %d/%d - Ripped title %d", i+1, len(targets), title.ID))
+					sess.Progress(0, fmt.Sprintf("Phase %d/%d - Ripped title %d", i+1, len(targets), title.ID))
 					continue
 				}
 			}
@@ -339,7 +340,7 @@ func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir s
 		"event_type", "rip_title_start",
 	)
 
-	sess.Progress(overallRipPercent(index, total, 0), fmt.Sprintf("Phase %d/%d - Ripping title %d", index+1, total, title.ID), stage.WithActiveEpisode(episodeKey))
+	sess.Progress(0, fmt.Sprintf("Phase %d/%d - Ripping title %d", index+1, total, title.ID), stage.WithActiveEpisode(episodeKey), stage.WithActivity(queue.Activity{Operation: "optical_read", AssetKey: episodeKey, Message: fmt.Sprintf("Reading title %d", title.ID)}))
 
 	before := listMKVFiles(rippedDir)
 	var lastRipLog time.Time
@@ -348,7 +349,8 @@ func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir s
 		h.cfg.MakeMKV.MinTitleLength,
 		func(p makemkv.RipProgress) {
 			message := sess.Task.ProgressMessage
-			sess.Progress(overallRipPercent(index, total, p.Percent), message)
+			sess.Progress(p.Percent, message, stage.WithActivity(queue.Activity{Operation: "optical_read", AssetKey: episodeKey,
+				Message: fmt.Sprintf("Reading title %d", title.ID), Completed: int64(p.Current), Total: int64(p.Total), Unit: "MakeMKV units"}))
 
 			now := time.Now()
 			if lastRipLog.IsZero() || now.Sub(lastRipLog) >= ripProgressLogInterval {
@@ -383,7 +385,7 @@ func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir s
 		}
 	}
 
-	sess.Progress(overallRipPercent(index+1, total, 0), fmt.Sprintf("Phase %d/%d - Ripped title %d", index+1, total, title.ID))
+	sess.Activity(queue.Activity{Operation: "optical_read", AssetKey: episodeKey, State: "done", Message: fmt.Sprintf("Ripped title %d", title.ID)})
 	return nil
 }
 
@@ -870,14 +872,18 @@ func persistRipResults(sess *stage.Session) error {
 // cacheProgressFunc returns a throttled progress callback for cache operations.
 func (h *Handler) cacheProgressFunc(sess *stage.Session, message string) ripcache.ProgressFunc {
 	var lastPush time.Time
+	var lastPhase string
 	return func(p ripcache.CopyProgress) {
 		now := time.Now()
-		if now.Sub(lastPush) < 2*time.Second {
+		if p.Phase == lastPhase && now.Sub(lastPush) < 2*time.Second {
 			return
 		}
-		lastPush = now
-		percent := float64(p.BytesCopied) / float64(p.TotalBytes) * 100
-		sess.Progress(percent, message, stage.WithProgressBytes(p.BytesCopied, p.TotalBytes))
+		lastPush, lastPhase = now, p.Phase
+		a := queue.Activity{Operation: "cache_" + p.Phase, Message: message, Completed: p.BytesCopied, Total: p.TotalBytes, Unit: "bytes"}
+		if p.Phase != "copying" {
+			a.Message, a.Total, a.Unit = "Finalizing "+message, 0, ""
+		}
+		sess.Progress(0, a.Message, stage.WithProgressBytes(p.BytesCopied, p.TotalBytes), stage.WithActivity(a))
 	}
 }
 
@@ -904,8 +910,4 @@ func findNewFile(before, after map[string]bool) string {
 		}
 	}
 	return ""
-}
-
-func overallRipPercent(completedTitles, totalTitles int, currentTitlePercent float64) float64 {
-	return stage.OverallPercent(completedTitles, totalTitles, currentTitlePercent)
 }

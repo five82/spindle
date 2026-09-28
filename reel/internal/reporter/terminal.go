@@ -86,6 +86,11 @@ func (r *TerminalReporter) Initialization(summary InitializationSummary) {
 }
 
 func (r *TerminalReporter) StageProgress(update StageProgress) {
+	// Structured operation observations feed embedded monitors. Keep the CLI's
+	// coarse messages and verbose timings rather than flashing every phase.
+	if update.Lane == "work" || update.Lane == "audio" || update.Lane == "video" && update.State != "" {
+		return
+	}
 	r.mu.Lock()
 	if r.lastStage != update.Stage {
 		r.mu.Unlock()

@@ -29,16 +29,13 @@ func TestQueueFilteringRenderingAndSelectionEdges(t *testing.T) {
 			}
 		}
 	}
-	if got := runningTaskPercent(m.snapshot.Queue[0]); got != 42 {
-		t.Fatalf("runningTaskPercent = %v", got)
+	if got := queueFileCount(m.snapshot.Queue[0]); got != "" {
+		t.Fatalf("synthetic percentage leaked: %s", got)
 	}
-	if got := runningTaskPercent(m.snapshot.Queue[1]); got != 0 {
-		t.Fatalf("failed percent = %v", got)
-	}
-	if got := m.queueProgressCell(m.snapshot.Queue[0], computeQueueColumns(m.snapshot.Queue, 60), styles.Text, styles, false); !strings.Contains(stripANSI(got), "42%") {
+	if got := m.queueProgressCell(m.snapshot.Queue[0], computeQueueColumns(m.snapshot.Queue, 60), styles.Text, styles, false); strings.Contains(stripANSI(got), "42%") {
 		t.Fatalf("compact progress: %q", got)
 	}
-	if got := m.queueProgressCell(m.snapshot.Queue[3], computeQueueColumns(m.snapshot.Queue, 120), styles.Text, styles, true); got != "-35%" {
+	if got := m.queueProgressCell(m.snapshot.Queue[3], computeQueueColumns(m.snapshot.Queue, 120), styles.Text, styles, true); got != "" {
 		t.Fatalf("reduction: %q", got)
 	}
 	m.queueFilterActive = true
@@ -164,10 +161,11 @@ func TestAppNavigationContextAndTickPaths(t *testing.T) {
 func TestNowBandHolderFiguresAndFallback(t *testing.T) {
 	m := newAppTestModel(t)
 	item := spindle.QueueItem{ID: 42, Stage: "encoding", Tasks: []spindle.Task{{Type: "encoding", State: "running", ActiveAssetKey: "movie", Progress: spindle.TaskProgress{Percent: 51}}}, Encoding: &spindle.EncodingStatus{FPS: 78, ETASeconds: 125}}
+	item.Tasks[0].Activities = []spindle.Activity{{Operation: "video", State: "running", AssetKey: "movie", StartedAt: time.Now().Add(-time.Minute).Format(time.RFC3339), Completed: 51, Total: 100, Unit: "frames"}}
 	m.snapshot.Queue = []spindle.QueueItem{item}
 	h := spindle.ResourceHolder{ItemID: 42, Task: "encoding"}
 	extras := strings.Join(m.holderExtras(h), " ")
-	for _, want := range []string{"51%", "78 fps", "ETA 2m 5s"} {
+	for _, want := range []string{"movie video 51%"} {
 		if !strings.Contains(extras, want) {
 			t.Fatalf("extras = %q, missing %q", extras, want)
 		}
@@ -180,7 +178,7 @@ func TestNowBandHolderFiguresAndFallback(t *testing.T) {
 	}
 	m.snapshot.Status.Scheduler = &spindle.SchedulerStatus{Resources: map[string]spindle.ResourceStatus{"encoder": {Used: 1, Holders: []spindle.ResourceHolder{h}}}}
 	m.width = 120
-	if got := stripANSI(m.nowBandContent(m.theme.BandStyles())); !strings.Contains(got, "51%") || !strings.Contains(got, "78 fps") {
+	if got := stripANSI(m.nowBandContent(m.theme.BandStyles())); !strings.Contains(got, "movie video 51%") || strings.Contains(got, "78 fps") {
 		t.Fatalf("wide band: %q", got)
 	}
 	m.width = 70

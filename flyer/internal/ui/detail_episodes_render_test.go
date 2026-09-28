@@ -1,77 +1,44 @@
 package ui
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
-func TestRenderEpisodeListStates(t *testing.T) {
+func TestMovieFileDetailsIncludeDeliveredAndIntermediateFacts(t *testing.T) {
 	m := New(Options{ThemeName: "slate", PrefsPath: t.TempDir() + "/prefs.json"})
-	styles := m.theme.Styles()
-	base := spindle.QueueItem{ID: 42, Episodes: []spindle.EpisodeStatus{
-		{Key: "a", Season: 1, Episode: 1, Title: "Pilot", RippedPath: "/rip", EncodedPath: "/enc", SubtitledPath: "/sub", FinalPath: "/final"},
-		{Key: "b", Season: 1, Episode: 2, Title: "Second", Status: "failed", ErrorMessage: strings.Repeat("x", 90)},
-	}}
-	tests := []struct {
-		name      string
-		item      spindle.QueueItem
-		collapsed bool
-		want      []string
-		absent    []string
-	}{
-		{"empty", spindle.QueueItem{ID: 42}, false, nil, []string{"planned"}},
-		{"expanded failures and assets", base, false, []string{"2 planned", "1 failed", "S01E01", "Pilot", "R✓", "S01E02", "Second", "failed", strings.Repeat("x", 77) + "...", "Press t to collapse"}, nil},
-		{"collapsed", base, true, []string{"2 planned", "Press t to expand"}, []string{"Pilot", "Press t to collapse"}},
+	m.width = 80
+	var final spindle.FinalValidation
+	if err := json.Unmarshal([]byte(`{"passed":true,"resolution":"1920x1048","video_codec":"av1","audio":["en opus 8ch"],"av_sync":{"passed":true}}`), &final); err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			m.detailState.episodeCollapsed[42] = tc.collapsed
-			var b strings.Builder
-			_, totals := tc.item.EpisodeSnapshot()
-			m.renderEpisodeList(&b, tc.item, styles, totals)
-			got := stripANSI(b.String())
-			for _, want := range tc.want {
-				if !strings.Contains(got, want) {
-					t.Errorf("renderEpisodeList() = %q, missing %q", got, want)
-				}
-			}
-			for _, absent := range tc.absent {
-				if strings.Contains(got, absent) {
-					t.Errorf("renderEpisodeList() = %q, unexpectedly contains %q", got, absent)
-				}
-			}
-		})
-	}
-}
-
-func TestRenderEpisodeListUnmatchedWarningAndActiveRow(t *testing.T) {
-	m := New(Options{ThemeName: "slate", PrefsPath: t.TempDir() + "/prefs.json"})
-	item := spindle.QueueItem{ID: 7, Tasks: []spindle.Task{{State: "running", ActiveAssetKey: "B"}}, Episodes: []spindle.EpisodeStatus{
-		{Key: "a", Season: 2, Episode: 1, Title: "Mapped"},
-		{Key: "b", Title: "Unmapped", SourceTitleID: 3, RuntimeSeconds: 3660, SubtitleLanguage: "en", SubtitleSource: "whisperx", NeedsReview: true, ReviewReason: "check subtitle"},
-	}}
+	item := spindle.QueueItem{ID: 1, Metadata: json.RawMessage(`{"media_type":"movie"}`), Episodes: []spindle.EpisodeStatus{{Key: "main", Title: "Air", FinalPath: "/library/Air.mkv", FinalSizeBytes: 1500000000, FinalRoute: "library", FinalValidation: &final, EncodeStats: &spindle.EncodeStats{EncodedSizeBytes: 2000000000, EncodeSeconds: 100, Speed: 2}, SubtitleSource: "opensubtitles", SubtitledPath: "sub"}}}
+	m.detailState.episodeCollapsed[1] = false
 	var b strings.Builder
 	_, totals := item.EpisodeSnapshot()
 	m.renderEpisodeList(&b, item, m.theme.Styles(), totals)
 	got := stripANSI(b.String())
-	for _, want := range []string{"1 matched", "Episode numbers not confirmed", "S??E??", "R◉", "Unmapped", "Title 03", "61m", "EN", "AI", "Unmatched", "check subtitle"} {
+	for _, want := range []string{"File Air", "/library/Air.mkv", "1920x1048", "en opus 8ch", "passed", "intermediate", "to library", "SRT applied"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("renderEpisodeList() = %q, missing %q", got, want)
+			t.Errorf("missing %q: %s", want, got)
 		}
 	}
 }
 
-func TestDescribeEpisodeWithExtrasAndCompactMeta(t *testing.T) {
-	title, extras := describeEpisodeWithExtras(spindle.EpisodeStatus{OutputBasename: "fallback.mkv", RuntimeSeconds: 120, SubtitleLanguage: " fr ", SubtitleSource: "WhisperX"})
-	if title != "fallback.mkv" || !equalStringSlices(extras, []string{"2m", "FR", "AI"}) {
-		t.Fatalf("describeEpisodeWithExtras() = (%q, %v)", title, extras)
+func TestFailedAssetDoesNotInventFailedPipelineColumn(t *testing.T) {
+	m := New(Options{ThemeName: "slate", PrefsPath: t.TempDir() + "/prefs.json"})
+	item := spindle.QueueItem{ID: 1, Episodes: []spindle.EpisodeStatus{{Key: "a", RippedPath: "rip", Status: "failed", ErrorMessage: "subtitles failed"}}}
+	var b strings.Builder
+	_, totals := item.EpisodeSnapshot()
+	m.renderEpisodeList(&b, item, m.theme.Styles(), totals)
+	got := stripANSI(b.String())
+	if !strings.Contains(got, "encode no") || !strings.Contains(got, "subtitles failed") {
+		t.Fatal(got)
 	}
-	if got := compactEpisodeMeta("Title 01", "Mapped", extras); got != "Title 01  ·  Mapped  ·  2m · FR · AI" {
-		t.Errorf("compactEpisodeMeta() = %q", got)
-	}
-	if got := compactEpisodeMeta("", "", nil); got != "" {
-		t.Errorf("compactEpisodeMeta(empty) = %q", got)
+	if strings.Contains(got, "Encode failed") {
+		t.Fatal(got)
 	}
 }

@@ -177,9 +177,10 @@ func EncodeAll(
 		activeFrames[chunkIdx] = frames
 		p := snapshotProgress()
 		limiter.observeProgress(p.FramesComplete)
-		progressMu.Unlock()
-
+		// Serialize observation and delivery: concurrent chunks must not
+		// send an older counter after a newer one or race reporter state.
 		progressCb(p)
+		progressMu.Unlock()
 	}
 
 	// Error handling with atomic pointer for thread-safe access
@@ -235,8 +236,8 @@ func EncodeAll(
 				progressMu.Lock()
 				p := snapshotProgress()
 				limiter.observeProgress(p.FramesComplete)
-				progressMu.Unlock()
 				progressCb(p)
+				progressMu.Unlock()
 			}
 		}
 	}()

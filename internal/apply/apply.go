@@ -11,6 +11,7 @@ import (
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/fileutil"
 	"github.com/five82/spindle/internal/logs"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/srtutil"
 	"github.com/five82/spindle/internal/stage"
@@ -55,11 +56,12 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	// Phase 1: per-file audio refinement and commentary disposition, using
 	// the episode's own commentary indices from the analysis stage.
-	sess.Progress(10, "Phase 1/4 - Audio refinement")
+
 	logger.Info("Phase 1/4 - Audio refinement")
 	var aggregateComms []ripspec.CommentaryTrackRef
 	expectations := make([]finalExpectation, 0, len(inputs))
 	for i, in := range inputs {
+		sess.Activity(queue.Activity{Operation: "audio_refinement", AssetKey: in.Key, Message: "Refining audio", Completed: int64(i), Total: int64(len(inputs)), Unit: "files"})
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -124,7 +126,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	analysisData.CommentaryTracks = aggregateComms
 
 	// Phase 2: capture the video runtime before subtitle muxing.
-	sess.Progress(45, "Phase 2/4 - Pre-mux measurement")
+	sess.Activity(queue.Activity{Operation: "measurement", Message: "Measuring pre-mux video durations"})
 	logger.Info("Phase 2/4 - Pre-mux measurement")
 	var allPaths []string
 	for _, in := range inputs {
@@ -151,13 +153,14 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	// Phase 3: subtitle placement and muxing from the analysis branch's
 	// generated SRTs.
-	sess.Progress(70, "Phase 3/4 - Subtitle muxing")
+	sess.Activity(queue.Activity{Operation: "subtitles", Message: "Applying subtitles"})
 	logger.Info("Phase 3/4 - Subtitle muxing")
 	if h.cfg.Subtitles.Enabled {
 		for _, in := range inputs {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			sess.Activity(queue.Activity{Operation: "subtitles", AssetKey: in.Key, Message: "Applying subtitles"})
 			if err := h.applySubtitles(ctx, sess, in.Key, in.Input.Path); err != nil {
 				return err
 			}
@@ -174,7 +177,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	// only check that sees the file after every rewrite, so it owns the
 	// A/V sync, subtitle layout, commentary label, and audio layout
 	// invariants for the delivered output.
-	sess.Progress(85, "Phase 4/4 - Final validation")
+	sess.Activity(queue.Activity{Operation: "final_validation", Message: "Checking final outputs"})
 	logger.Info("Phase 4/4 - Final validation")
 	verdict, err := verifyFinalOutputs(ctx, sess, expectations, sourceAudioIndex)
 	if err != nil {
@@ -183,7 +186,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 
 	env.Attributes.AudioAnalysis = analysisData
 	env.Attributes.FinalValidation = verdict
-	sess.Progress(95, "Phase 4/4 - Persisting results")
+	sess.Activity(queue.Activity{Operation: "persist", State: "done", Message: "Final validation recorded"})
 	return sess.Save()
 }
 

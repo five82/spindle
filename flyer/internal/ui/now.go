@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
@@ -75,8 +76,7 @@ func (m Model) nowBandContent(styles Styles) string {
 	return label + strings.Join(parts, sep)
 }
 
-// holderExtras returns live figures for a resource holder's running task:
-// percent, and fps/ETA for encodes.
+// holderExtras distinguishes a reservation from work, and scopes measured work.
 func (m Model) holderExtras(h spindle.ResourceHolder) []string {
 	for i := range m.snapshot.Queue {
 		item := &m.snapshot.Queue[i]
@@ -84,22 +84,28 @@ func (m Model) holderExtras(h spindle.ResourceHolder) []string {
 			continue
 		}
 		for _, t := range item.Tasks {
-			if t.Type != h.Task || !t.IsWorking() {
+			if t.Type != h.Task || t.State != "running" {
 				continue
 			}
-			var extras []string
-			if pct := t.Progress.Percent; pct > 0 {
-				extras = append(extras, fmt.Sprintf("%.0f%%", pct))
+			if m.snapshot.LastError != nil {
+				return []string{"stale"}
 			}
-			if t.Type == "encoding" && item.Encoding != nil {
-				if item.Encoding.FPS > 0 {
-					extras = append(extras, fmt.Sprintf("%.0f fps", item.Encoding.FPS))
+			now := time.Now()
+			if m.now != nil {
+				now = m.now()
+			}
+			for _, activity := range t.Activities {
+				if activity.State == "waiting" {
+					return []string{activity.Message}
 				}
-				if eta := item.Encoding.ETADuration(); eta > 0 {
-					extras = append(extras, "ETA "+formatDuration(eta))
+				if activity.State == "running" && !activity.Started().IsZero() && now.Sub(activity.Started()) >= 10*time.Second && activity.Total > 0 && activity.Unit != "" {
+					return []string{fmt.Sprintf("%s %s %.0f%%", activity.AssetKey, activity.Operation, 100*float64(activity.Completed)/float64(activity.Total))}
 				}
 			}
-			return extras
+			if !t.IsWorking() {
+				return []string{"reserved; activity unavailable"}
+			}
+			return nil
 		}
 	}
 	return nil

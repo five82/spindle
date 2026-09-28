@@ -114,7 +114,7 @@ func TestRenderDigestCoreSections(t *testing.T) {
 		"item 7: Example Disc",
 		"FAILED at encoding: encoder exploded",
 		"Review reasons: validation failed",
-		"Task encoding: running 42.5%",
+		"Task encoding: running", "Phase 2/3 - Encoding",
 		"Applicable phases: logs, rip_cache",
 		"Full JSON: /tmp/audit.json",
 		"GATHERING ERRORS",

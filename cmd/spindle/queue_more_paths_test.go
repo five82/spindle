@@ -32,7 +32,17 @@ func TestQueueVerboseDisplaysReviewFailureAndWorkProducts(t *testing.T) {
 	}
 	item.RipSpecData = `{"version":1}`
 	item.MetadataJSON = `{"title":"Disc"}`
-	item.EncodingDetailsJSON = `{"progress":1}`
+	if err := store.EnsureTasks(item, []queue.TaskSpec{{Type: queue.StageEncoding}}); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := store.TasksForItem(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks[0].EncodingDetailsJSON = `{"progress":1}`
+	if err := store.UpdateTaskProgress(tasks[0]); err != nil {
+		t.Fatal(err)
+	}
 	item.AppendReviewReason("check disc")
 	if err := store.UpdateWorkState(item); err != nil {
 		t.Fatal(err)

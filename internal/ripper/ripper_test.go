@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -304,28 +303,31 @@ func TestListMKVFiles(t *testing.T) {
 	}
 }
 
-func TestOverallRipPercent(t *testing.T) {
-	tests := []struct {
-		name       string
-		completed  int
-		total      int
-		currentPct float64
-		want       float64
-	}{
-		{name: "first title half done", completed: 0, total: 12, currentPct: 50, want: 4.166666666666667},
-		{name: "ninth title one third done", completed: 9, total: 12, currentPct: 33.333333333333336, want: 77.77777777777779},
-		{name: "all titles done", completed: 12, total: 12, currentPct: 0, want: 100},
-		{name: "clamps over 100", completed: 11, total: 12, currentPct: 250, want: 100},
-		{name: "invalid total", completed: 1, total: 0, currentPct: 50, want: 0},
+func TestCacheProgressIsMeasuredAndFinalizingIsSeparate(t *testing.T) {
+	store, err := queue.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := overallRipPercent(tt.completed, tt.total, tt.currentPct)
-			if math.Abs(got-tt.want) > 1e-9 {
-				t.Fatalf("overallRipPercent(%d, %d, %f) = %f, want %f", tt.completed, tt.total, tt.currentPct, got, tt.want)
-			}
-		})
+	defer store.Close()
+	item, err := store.NewDisc("Disc", "fp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := stage.NewSession(context.Background(), store, item, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{}
+	progress := h.cacheProgressFunc(sess, "Restoring cache")
+	progress(ripcache.CopyProgress{Phase: "copying", BytesCopied: 0, TotalBytes: 100})
+	a := sess.Task.Activities[0]
+	if a.Unit != "bytes" || a.Total != 100 || a.Completed != 0 {
+		t.Fatalf("measured zero: %+v", a)
+	}
+	progress(ripcache.CopyProgress{Phase: "finalizing", BytesCopied: 100, TotalBytes: 100})
+	a = sess.Task.Activities[0]
+	if a.Operation != "cache_finalizing" || a.Total != 0 || a.Unit != "" {
+		t.Fatalf("phase change throttled or claimed complete: %+v", a)
 	}
 }
 

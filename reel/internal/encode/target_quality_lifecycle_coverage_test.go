@@ -8,7 +8,6 @@ import (
 
 	"github.com/five82/spindle/reel/internal/chunk"
 	"github.com/five82/spindle/reel/internal/quality"
-	"github.com/five82/spindle/reel/internal/worker"
 )
 
 func TestTargetRunClosesBothScorerPoolsOnce(t *testing.T) {
@@ -97,5 +96,5 @@ func TestTargetRunWithSlotReleasedPreservesCallbackError(t *testing.T) {
 	}
 	r.limiter.release()
 	// Keep the progress type checked even with a nil callback.
-	r.emitProgress(worker.Progress{})
+	r.emitProgress()
 }

@@ -18,8 +18,9 @@ var inspectSubtitleMedia = ffprobe.Inspect
 
 // adoptContext carries the per-job inputs candidate adoption needs.
 type adoptContext struct {
-	ReferenceSRTPath string
-	ReferenceCues    []srtutil.Cue
+	candidateProgress func(int, int, string)
+	ReferenceSRTPath  string
+	ReferenceCues     []srtutil.Cue
 	// ReferenceWords is the transcript's aligned word timestamps for the
 	// word-snap pass; nil (audio.json unavailable) skips the pass.
 	ReferenceWords []transcription.Word
@@ -164,7 +165,10 @@ type adoption struct {
 // rejected); errors are hard failures that abort the caller.
 func (h *Handler) adoptFirstCandidate(ctx context.Context, logger *slog.Logger, candidates []subtitleCandidate, adopt adoptContext, videoPath string) (*adoption, []string, error) {
 	var rejected []string
-	for _, candidate := range candidates {
+	for i, candidate := range candidates {
+		if adopt.candidateProgress != nil {
+			adopt.candidateProgress(i+1, len(candidates), candidate.label())
+		}
 		eval, err := h.evaluateCandidate(ctx, candidate, adopt)
 		if err != nil {
 			return nil, rejected, err

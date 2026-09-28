@@ -14,9 +14,12 @@ import (
 // itemEventState follows one item's durable transition journal independently
 // of the log buffer and its filters/cursor.
 type itemEventState struct {
-	itemID int64
-	cursor int64
-	events []spindle.ItemEvent
+	itemID     int64
+	cursor     int64
+	events     []spindle.ItemEvent
+	loaded     bool
+	partial    bool
+	fetchError error
 }
 
 type itemEventBatchMsg struct {
@@ -24,7 +27,10 @@ type itemEventBatchMsg struct {
 	batch  spindle.ItemEventBatch
 }
 
-type itemEventErrorMsg struct{ err error }
+type itemEventErrorMsg struct {
+	err    error
+	itemID int64
+}
 
 func (m *Model) fetchItemEvents(item *spindle.QueueItem) tea.Cmd {
 	if item == nil || m.client == nil {
@@ -39,7 +45,7 @@ func (m *Model) fetchItemEvents(item *spindle.QueueItem) tea.Cmd {
 		defer cancel()
 		batch, err := m.client.FetchItemEvents(ctx, itemID, cursor)
 		if err != nil {
-			return itemEventErrorMsg{err: err}
+			return itemEventErrorMsg{err: err, itemID: itemID}
 		}
 		return itemEventBatchMsg{itemID: itemID, batch: batch}
 	}
@@ -49,8 +55,9 @@ func (m *Model) handleItemEventBatch(msg itemEventBatchMsg) {
 	if !m.inspecting || m.inspectorTab != tabEvents || msg.itemID != m.inspectedID || msg.itemID != m.itemEvents.itemID {
 		return
 	}
-	follow := m.inspectorViewport.AtBottom()
-	changed := false
+	m.itemEvents.loaded, m.itemEvents.fetchError = true, nil
+	m.itemEvents.partial = m.itemEvents.partial || len(msg.batch.Events) >= 500
+	changed := true
 	for _, event := range msg.batch.Events {
 		if event.ID <= m.itemEvents.cursor {
 			continue // A previous poll may have delivered this page already.
@@ -63,26 +70,24 @@ func (m *Model) handleItemEventBatch(msg itemEventBatchMsg) {
 		m.itemEvents.cursor = msg.batch.Next
 	}
 	if changed {
+		m.itemEvents.partial = m.itemEvents.partial || len(m.itemEvents.events) > logBufferLimit
 		m.itemEvents.events = trimLogBuffer(m.itemEvents.events, logBufferLimit)
 		m.updateInspectorViewport()
-		if follow {
-			m.inspectorViewport.GotoBottom()
-		}
 	}
 }
 
 func (m *Model) renderItemEvents() string {
 	styles := m.theme.Styles()
-	if len(m.itemEvents.events) == 0 {
-		return styles.MutedText.Render("No stage events yet")
-	}
 	var b strings.Builder
+	if m.itemEvents.fetchError != nil {
+		fmt.Fprintln(&b, styles.WarningText.Render("Events fetch failed: "+m.itemEvents.fetchError.Error()+"; retained history may be stale"))
+	} else if !m.itemEvents.loaded {
+		fmt.Fprintln(&b, styles.MutedText.Render("Loading task history"))
+	}
+	if m.itemEvents.partial {
+		fmt.Fprintln(&b, styles.MutedText.Render("Partial history: bounded buffer/page; additional records may be available"))
+	}
 	for _, event := range m.itemEvents.events {
-		// The encoding worker starts before a rip is available and may only be
-		// waiting. Its first substage is the first evidence of encode work.
-		if event.Type == "stage_start" && event.Stage == "encoding" {
-			continue
-		}
 		if b.Len() > 0 {
 			b.WriteByte('\n')
 		}
@@ -94,6 +99,9 @@ func (m *Model) renderItemEvents() string {
 		switch event.Type {
 		case "stage_start":
 			label = "started"
+			if event.Stage == "encoding" {
+				label = "worker reserved (may wait for input)"
+			}
 		case "stage_complete":
 			label = "completed"
 		case "encoding_substage":
@@ -101,6 +109,12 @@ func (m *Model) renderItemEvents() string {
 		}
 		fmt.Fprintf(&b, "%s %s %s", styles.FaintText.Render(ts),
 			styles.AccentText.Render(event.Stage), styles.Text.Render(label))
+		if event.TaskID != 0 {
+			fmt.Fprintf(&b, " [task %d/run %d]", event.TaskID, event.Attempt)
+		}
+		if strings.HasPrefix(event.Type, "activity_") {
+			fmt.Fprintf(&b, " %s", event.Substage)
+		}
 		if event.EpisodeKey != "" {
 			fmt.Fprintf(&b, " %s", styles.MutedText.Render("("+event.EpisodeKey+")"))
 		}

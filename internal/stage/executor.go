@@ -63,9 +63,14 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 	if opts.Store == nil {
 		return res, fmt.Errorf("stage execution: nil queue store")
 	}
+	var taskID int64
+	var attempt int
+	if opts.Task != nil {
+		taskID, attempt = opts.Task.ID, opts.Task.Attempts
+	}
 	// A run has one start and one terminal event, including cancelled and
 	// one-shot runs. The queue journal, not the diagnostic log, owns them.
-	if eventErr := opts.Store.RecordEvent(queue.Event{ItemID: item.ID, Type: "stage_start", Stage: stageName}); eventErr != nil {
+	if eventErr := opts.Store.RecordEvent(queue.Event{ItemID: item.ID, TaskID: taskID, Attempt: attempt, Type: "stage_start", Stage: stageName}); eventErr != nil {
 		return res, &PersistenceError{Op: "persist stage start", Err: eventErr}
 	}
 	defer func() {
@@ -81,14 +86,14 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 			kind = "stage_failed"
 		}
 		eventErr := opts.Store.RecordEvent(queue.Event{
-			ItemID: item.ID, Type: kind, Stage: stageName,
+			ItemID: item.ID, TaskID: taskID, Attempt: attempt, Type: kind, Stage: stageName,
 			DurationSeconds: time.Since(start).Seconds(),
 		})
 		if eventErr != nil {
 			err = errors.Join(err, &PersistenceError{Op: "persist stage outcome", Err: eventErr})
 		}
 	}()
-	runLogger := logger.With("item_id", item.ID)
+	runLogger := logger.With("item_id", item.ID, "task_id", taskID, "attempt", attempt)
 	sess, err := NewSession(ctx, opts.Store, item, opts.Task)
 	if err == nil {
 		sess.Logger = runLogger

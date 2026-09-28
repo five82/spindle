@@ -20,6 +20,7 @@ import (
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/opensubtitles"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/srtutil"
 	"github.com/five82/spindle/internal/stage"
@@ -148,6 +149,7 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 	key := job.Key
 
 	startSubtitleJob(sess, job)
+	defer sess.ClearActiveEpisode()
 
 	candidates, skipReason := h.listSubtitleCandidates(ctx, sess, key, job.Input.Path)
 	if len(candidates) == 0 {
@@ -174,7 +176,10 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 		return subtitleOutcomeFailed, nil
 	}
 
-	sess.Progress(job.Percent(92), job.PhaseMessage("Syncing subtitles ("+key+")"))
+	sess.Activity(queue.Activity{Operation: "sync", AssetKey: key, Message: "Synchronizing and verifying subtitle candidates"})
+	adopt.candidateProgress = func(index, total int, label string) {
+		sess.Activity(queue.Activity{Operation: fmt.Sprintf("candidate_%d", index), AssetKey: key, Message: fmt.Sprintf("Verifying candidate %d/%d: %s", index, total, label)})
+	}
 	adopted, _, err := h.adoptFirstCandidate(ctx, jobLogger, candidates, adopt, filepath.Join(subtitleDir, key+".mkv"))
 	if err != nil {
 		return subtitleOutcomeFailed, err
@@ -213,6 +218,7 @@ func (h *Handler) processSubtitleJob(ctx context.Context, sess *stage.Session, j
 		"subtitle_path", adopted.DisplayPath,
 		"segments", adopted.Segments,
 	)
+	sess.Activity(queue.Activity{Operation: "subtitle", AssetKey: key, State: "done", Message: "English SRT adopted from OpenSubtitles; waiting for Apply"})
 	return subtitleOutcomeAdopted, nil
 }
 
@@ -232,10 +238,12 @@ func recordSubtitleSkip(sess *stage.Session, key, reason string) error {
 		"decision_reason", reason,
 		"episode_key", key,
 	)
+	sess.Activity(queue.Activity{Operation: "subtitle", AssetKey: key, State: "done", Message: "No subtitles: " + reason})
 	return sess.MergeSave(func(env *ripspec.Envelope) error {
 		upsertSubtitleGenRecord(&env.Attributes.SubtitleGenerationResults, ripspec.SubtitleGenRecord{
 			EpisodeKey:       key,
 			Source:           "none",
+			SkipReason:       reason,
 			ValidationResult: "skipped",
 		})
 		return nil
@@ -256,7 +264,8 @@ func startSubtitleJob(sess *stage.Session, job stage.AssetJob) {
 	logger.Info(job.PhaseMessage("Preparing subtitles ("+key+")"),
 		"event_type", "subtitle_start",
 	)
-	sess.Progress(job.Percent(5), job.PhaseMessage("Preparing subtitles ("+key+")"))
+	sess.SetActiveEpisode(key)
+	sess.Activity(queue.Activity{Operation: "search", AssetKey: key, Message: "Finding subtitle candidates"})
 }
 
 // ensureSyncReference returns the episode's canonical WhisperX transcript,
@@ -286,19 +295,8 @@ func (h *Handler) ensureSyncReference(ctx context.Context, sess *stage.Session, 
 		ItemID:     sess.Item.ID,
 		EpisodeKey: job.Key,
 		Purpose:    "subtitle_sync_reference",
-	}, func(phase transcription.Phase, elapsed time.Duration) {
-		message := sess.Task.ProgressMessage
-		switch phase {
-		case transcription.PhaseExtract:
-			if elapsed == 0 {
-				message = job.PhaseMessage("Extracting audio (" + job.Key + ")")
-			}
-		case transcription.PhaseTranscribe:
-			if elapsed == 0 {
-				message = job.PhaseMessage("Transcribing audio (" + job.Key + ")")
-			}
-		}
-		sess.Progress(job.Percent(subtitlePhasePercent(phase, elapsed)), message)
+	}, func(phase transcription.Phase, _ time.Duration) {
+		sess.Activity(queue.Activity{Operation: string(phase), AssetKey: job.Key, Message: string(phase) + " subtitle alignment reference"})
 	})
 	if err != nil {
 		return nil, err
@@ -421,23 +419,6 @@ func persistReviewReason(logger *slog.Logger, sess *stage.Session, key, envReaso
 			"event_type", "subtitle_failure_persist_failed",
 			"error", mergeErr,
 		)
-	}
-}
-
-func subtitlePhasePercent(phase transcription.Phase, elapsed time.Duration) float64 {
-	switch phase {
-	case transcription.PhaseExtract:
-		if elapsed > 0 {
-			return 25
-		}
-		return 10
-	case transcription.PhaseTranscribe:
-		if elapsed > 0 {
-			return 90
-		}
-		return 35
-	default:
-		return 0
 	}
 }
 

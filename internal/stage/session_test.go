@@ -97,12 +97,8 @@ func TestSessionProgressPersistsTask(t *testing.T) {
 		t.Fatalf("bytes = %d/%d, want 10/20", got.ProgressBytesCopied, got.ProgressTotalBytes)
 	}
 
-	gotItem, err := store.GetByID(item.ID)
-	if err != nil {
-		t.Fatalf("get item: %v", err)
-	}
-	if gotItem.EncodingDetailsJSON != `{"substage":"encoding"}` {
-		t.Fatalf("EncodingDetailsJSON = %q", gotItem.EncodingDetailsJSON)
+	if got.EncodingDetailsJSON != `{"substage":"encoding"}` {
+		t.Fatalf("task encoding = %q", got.EncodingDetailsJSON)
 	}
 }
 

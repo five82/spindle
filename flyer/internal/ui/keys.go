@@ -119,7 +119,7 @@ func DefaultKeyMap() keyMap {
 		),
 		Tab2: key.NewBinding(
 			key.WithKeys("2"),
-			key.WithHelp("2", "Episodes"),
+			key.WithHelp("2", "Episodes / File"),
 		),
 		Tab3: key.NewBinding(
 			key.WithKeys("3"),
@@ -146,7 +146,7 @@ func DefaultKeyMap() keyMap {
 		// "t" only: "T" cycles the theme (documented case exception).
 		ToggleEpisodes: key.NewBinding(
 			key.WithKeys("t"),
-			key.WithHelp("t", "Toggle episodes"),
+			key.WithHelp("t", "Toggle file details"),
 		),
 
 		// Navigation

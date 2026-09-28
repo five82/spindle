@@ -17,7 +17,18 @@ import (
 
 // An encoding task can reserve its slot before a completed rip is available.
 func taskIsWorking(t httpapi.TaskResponse) bool {
-	return t.State == string(queue.TaskRunning) && (t.Type != string(queue.StageEncoding) || t.ActiveAssetKey != "")
+	if t.State != string(queue.TaskRunning) {
+		return false
+	}
+	if len(t.Activities) > 0 {
+		for _, a := range t.Activities {
+			if a.State == "running" {
+				return true
+			}
+		}
+		return false
+	}
+	return t.Type != string(queue.StageEncoding) || t.ActiveAssetKey != ""
 }
 
 // Live tasks, not the scheduler's coarse item stage, describe current work.
@@ -41,14 +52,37 @@ func queueDisplayStage(item queueaccess.Item) string {
 func printTaskLines(indent string, tasks []httpapi.TaskResponse, verbose bool) {
 	for _, t := range tasks {
 		switch queue.TaskState(t.State) {
-		case queue.TaskRunning:
-			if !taskIsWorking(t) {
-				fmt.Printf("%s%s waiting for a ripped asset\n", indent, labelStyle(fmt.Sprintf("Waiting (%s):", t.Type)))
-				continue
-			}
-			fmt.Printf("%s%s %s (%.0f%%)\n", indent, labelStyle(fmt.Sprintf("Progress (%s):", t.Type)), t.Progress.Message, t.Progress.Percent)
-			if verbose && t.Progress.TotalBytes > 0 {
-				fmt.Printf("%s  %s %s / %s\n", indent, labelStyle("Bytes:"), formatBytes(t.Progress.BytesCopied), formatBytes(t.Progress.TotalBytes))
+		case queue.TaskRunning, queue.TaskPending:
+			if len(t.Activities) > 0 {
+				for _, a := range t.Activities {
+					if t.State == string(queue.TaskPending) && a.State != "waiting" {
+						continue
+					}
+					label := "Progress"
+					if a.State == "waiting" {
+						label = "Waiting"
+					} else if a.State != "running" {
+						continue
+					}
+					message := a.Message
+					if a.AssetKey != "" {
+						message = a.AssetKey + ": " + message
+					}
+					if a.Total > 0 && a.Unit != "" {
+						message += fmt.Sprintf(" (%d/%d %s)", a.Completed, a.Total, a.Unit)
+					}
+					fmt.Printf("%s%s %s\n", indent, labelStyle(fmt.Sprintf("%s (%s):", label, t.Type)), message)
+				}
+			} else if t.State == string(queue.TaskRunning) {
+				if !taskIsWorking(t) {
+					fmt.Printf("%s%s activity not reported\n", indent, labelStyle(fmt.Sprintf("Reserved (%s):", t.Type)))
+					continue
+				}
+				message := t.Progress.Message
+				if message == "" {
+					message = "Activity not reported"
+				}
+				fmt.Printf("%s%s %s\n", indent, labelStyle(fmt.Sprintf("Progress (%s):", t.Type)), message)
 			}
 			if verbose && t.ActiveAssetKey != "" {
 				fmt.Printf("%s  %s %s\n", indent, labelStyle("Asset:"), t.ActiveAssetKey)

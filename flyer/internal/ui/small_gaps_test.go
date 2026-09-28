@@ -12,7 +12,7 @@ func TestSourceSummaryVariations(t *testing.T) {
 		want string
 	}{
 		{nil, ""},
-		{&spindle.SourceTitle{}, ""},
+		{&spindle.SourceTitle{}, "Title 00"},
 		{&spindle.SourceTitle{TitleID: 2}, "Title 02"},
 		{&spindle.SourceTitle{Name: " Main Feature ", TitleID: 2, DurationSeconds: 7200}, "Main Feature (120m)"},
 	} {

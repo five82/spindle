@@ -644,11 +644,39 @@ func (m *Manager) noteTaskBlocked(task *queue.Task, claims map[string]int) {
 	if !seen {
 		m.blocked[task.ID] = time.Now()
 	}
+	since := m.blocked[task.ID]
 	m.blockedMu.Unlock()
+	var reasons []string
+	for resource, occupancy := range m.SchedulerSnapshot() {
+		if claims[resource] == 0 || occupancy.Used+claims[resource] <= occupancy.Capacity {
+			continue
+		}
+		reason := resource
+		for _, holder := range occupancy.Holders {
+			reason += fmt.Sprintf(" held by #%d/%s", holder.ItemID, holder.Task)
+		}
+		reasons = append(reasons, reason)
+	}
+	sort.Strings(reasons)
+	message := "Waiting for " + strings.Join(reasons, "; ")
+	if len(reasons) == 0 {
+		message = "Waiting for scheduler grant"
+	}
+	if !seen || len(task.Activities) == 0 || task.Activities[0].Message != message {
+		task.Activities = []queue.Activity{{ID: "work", Operation: "resources", State: "waiting", Message: message,
+			StartedAt: since.UTC().Format(time.RFC3339Nano), UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
+		if err := m.store.UpdateTaskProgress(task); err != nil {
+			m.pipeline.logger.Warn("resource wait persistence failed", "event_type", "progress_persist_error", "error_hint", err.Error(), "impact", "wait display may be stale")
+		}
+	}
 	if seen {
 		return
 	}
+	if err := m.store.RecordEvent(queue.Event{ItemID: task.ItemID, TaskID: task.ID, Attempt: task.Attempts + 1, Type: "resource_wait", Stage: task.Type, Message: message}); err != nil {
+		m.pipeline.logger.Warn("resource wait journal failed", "event_type", "progress_persist_error", "error_hint", err.Error(), "impact", "wait history incomplete")
+	}
 	m.pipeline.logger.Info("task waiting for resources",
+		"task_id", task.ID, "attempt", task.Attempts+1,
 		"decision_type", logs.DecisionStageExecution,
 		"decision_result", "blocked",
 		"decision_reason", "resource claims exceed available budget",
@@ -676,7 +704,11 @@ func (m *Manager) noteTaskGranted(task *queue.Task, claims map[string]int) {
 	if !ok {
 		return
 	}
+	if err := m.store.RecordEvent(queue.Event{ItemID: task.ItemID, TaskID: task.ID, Attempt: task.Attempts + 1, Type: "resource_granted", Stage: task.Type, DurationSeconds: time.Since(since).Seconds()}); err != nil {
+		m.pipeline.logger.Warn("resource grant journal failed", "event_type", "progress_persist_error", "error_hint", err.Error(), "impact", "wait history incomplete")
+	}
 	m.pipeline.logger.Info("task resources granted",
+		"task_id", task.ID, "attempt", task.Attempts+1,
 		"decision_type", logs.DecisionStageExecution,
 		"decision_result", "unblocked",
 		"decision_reason", "resource claims now fit budget",

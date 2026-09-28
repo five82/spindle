@@ -91,6 +91,10 @@ func (c *Client) FetchQueue(ctx context.Context) ([]QueueItem, error) {
 
 // LogQuery configures /api/logs requests.
 type LogQuery struct {
+	Stage      string
+	Asset      string
+	TaskID     string
+	Attempt    string
 	Since      uint64
 	Limit      int
 	Tail       bool
@@ -108,6 +112,11 @@ func (c *Client) FetchLogs(ctx context.Context, query LogQuery) (LogBatch, error
 		return LogBatch{}, fmt.Errorf("client is nil")
 	}
 	values := url.Values{}
+	for key, value := range map[string]string{"stage": query.Stage, "asset": query.Asset, "task": query.TaskID, "attempt": query.Attempt} {
+		if value != "" {
+			values.Set(key, value)
+		}
+	}
 	if query.Since > 0 {
 		values.Set("since", strconv.FormatUint(query.Since, 10))
 	}

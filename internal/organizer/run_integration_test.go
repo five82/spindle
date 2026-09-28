@@ -104,10 +104,18 @@ func TestRunRoutesCompletedAssets(t *testing.T) {
 				}
 			}
 			if tc.media == "movie" && !tc.review {
-				// An existing complete delivery is retained when overwrite is disabled.
+				// Equal size cannot transfer Apply's verdict to an existing destination.
+				sess.Env.Attributes.FinalValidation = &ripspec.FinalValidation{Passed: true, Entries: []ripspec.FinalValidationEntry{{EpisodeKey: keys[0], Passed: true, Resolution: "1920x1080"}}}
+				if err := sess.Save(); err != nil {
+					t.Fatal(err)
+				}
 				meta := mediameta.FromJSON(item.MetadataJSON, item.DiscTitle)
 				if _, copied, err := New(cfg, nil, nil).copyAssetsToDir(context.Background(), logger, sess, &meta, filepath.Dir(sess.Env.Assets.Final[0].Path), keys, "library"); err != nil || copied != 0 {
 					t.Fatalf("existing destination: copied=%d err=%v", copied, err)
+				}
+				v := sess.Env.Attributes.FinalValidation
+				if v.Passed || len(v.Entries) != 1 || v.Entries[0].Error == "" || v.Entries[0].Resolution != "" {
+					t.Fatalf("reused output inherited unrelated checks: %+v", v)
 				}
 			}
 		})

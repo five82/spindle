@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"testing"
-	"time"
 
 	"github.com/five82/spindle/internal/media/ffprobe"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
-	"github.com/five82/spindle/internal/transcription"
 )
 
 func TestStartSubtitleJobLogsRippedInput(t *testing.T) {
@@ -36,18 +34,17 @@ func TestStartSubtitleJobLogsRippedInput(t *testing.T) {
 	}
 }
 
-func TestSubtitlePhasePercent(t *testing.T) {
-	if got := subtitlePhasePercent(transcription.PhaseExtract, 0); got != 10 {
-		t.Fatalf("extract start = %f, want 10", got)
+func TestSubtitleOutcomeRetainsSkipReason(t *testing.T) {
+	sess := newSubtitleTestSession(t, &ripspec.Envelope{})
+	if err := recordSubtitleSkip(sess, "main", "no verified download"); err != nil {
+		t.Fatal(err)
 	}
-	if got := subtitlePhasePercent(transcription.PhaseExtract, time.Second); got != 25 {
-		t.Fatalf("extract done = %f, want 25", got)
+	rec := findGenRecord(sess.Env, "main")
+	if rec == nil || rec.SkipReason != "no verified download" || rec.Source != "none" {
+		t.Fatalf("record: %+v", rec)
 	}
-	if got := subtitlePhasePercent(transcription.PhaseTranscribe, 0); got != 35 {
-		t.Fatalf("transcribe start = %f, want 35", got)
-	}
-	if got := subtitlePhasePercent(transcription.PhaseTranscribe, time.Second); got != 90 {
-		t.Fatalf("transcribe done = %f, want 90", got)
+	if sess.Task.ProgressPercent != 0 {
+		t.Fatal("skip created a synthetic percentage")
 	}
 }
 

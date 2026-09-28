@@ -53,16 +53,17 @@ type ItemSummary struct {
 }
 
 // TaskSummary is a compact per-task status entry sourced from the item's
-// task rows. Progress fields are populated only while the task is running or
-// once it has run; pending tasks show zero values.
+// task rows, including explicit waits and task-owned operation observations.
 type TaskSummary struct {
-	Type            string  `json:"type"`
-	State           string  `json:"state"`
-	Attempts        int     `json:"attempts,omitempty"`
-	Error           string  `json:"error,omitempty"`
-	ProgressPercent float64 `json:"progress_percent,omitempty"`
-	ProgressMessage string  `json:"progress_message,omitempty"`
-	ActiveAssetKey  string  `json:"active_asset_key,omitempty"`
+	ID              int64            `json:"id,omitempty"`
+	Activities      []queue.Activity `json:"activities,omitempty"`
+	Type            string           `json:"type"`
+	State           string           `json:"state"`
+	Attempts        int              `json:"attempts,omitempty"`
+	Error           string           `json:"error,omitempty"`
+	ProgressPercent float64          `json:"progress_percent,omitempty"`
+	ProgressMessage string           `json:"progress_message,omitempty"`
+	ActiveAssetKey  string           `json:"active_asset_key,omitempty"`
 }
 
 // StageGate determines which audit phases are applicable.

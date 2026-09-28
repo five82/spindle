@@ -13,7 +13,8 @@ type Snapshot struct {
 	Status              spindle.StatusResponse
 	HasStatus           bool
 	Queue               []spindle.QueueItem
-	LastUpdated         time.Time
+	LastUpdated         time.Time // Last successful fetch, not last attempt.
+	LastAttempt         time.Time
 	LastError           error
 	ConsecutiveFailures int // Number of consecutive poll failures
 }
@@ -35,9 +36,9 @@ func (s *Store) Update(status *spindle.StatusResponse, queue []spindle.QueueItem
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.snapshot.LastAttempt = time.Now()
 	if err != nil {
 		s.snapshot.LastError = err
-		s.snapshot.LastUpdated = time.Now()
 		s.snapshot.ConsecutiveFailures++
 		return
 	}

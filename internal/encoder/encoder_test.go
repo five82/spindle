@@ -105,11 +105,7 @@ func TestPlanJobs_EmptyRippedAssets(t *testing.T) {
 }
 
 func TestProgressThrottle_SuppressesWithinInterval(t *testing.T) {
-	item := &queue.Item{ID: 1}
-	reporter := &spindleReporter{
-		item: item,
-		now:  time.Now,
-	}
+	reporter := &spindleReporter{now: time.Now}
 
 	baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	callCount := 0
@@ -161,8 +157,7 @@ func TestProgressThrottle_SuppressesWithinInterval(t *testing.T) {
 
 func TestProgressThrottle_FirstCallAlwaysProceeds(t *testing.T) {
 	reporter := &spindleReporter{
-		item: &queue.Item{ID: 1},
-		now:  func() time.Time { return time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC) },
+		now: func() time.Time { return time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC) },
 	}
 
 	// lastPush is zero value, so any time should exceed the throttle.

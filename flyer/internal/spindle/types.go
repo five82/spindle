@@ -9,6 +9,7 @@ import (
 // StatusResponse mirrors the payload returned by /api/status.
 type StatusResponse struct {
 	Running      bool               `json:"running"`
+	Draining     bool               `json:"draining"`
 	PID          int                `json:"pid"`
 	QueueDBPath  string             `json:"queueDbPath"`
 	LockFilePath string             `json:"lockFilePath"`
@@ -103,16 +104,37 @@ type QueueItem struct {
 
 // Task is one scheduler task of an item, in pipeline order.
 type Task struct {
-	Type           string       `json:"type"`
-	State          string       `json:"state"` // pending, running, done, failed
-	Attempts       int          `json:"attempts"`
-	Error          string       `json:"error"`
-	DependsOn      []string     `json:"dependsOn"`
-	StartedAt      string       `json:"startedAt"`
-	FinishedAt     string       `json:"finishedAt"`
-	Progress       TaskProgress `json:"progress"`
-	ActiveAssetKey string       `json:"activeAssetKey"`
+	ID             int64           `json:"id"`
+	Activities     []Activity      `json:"activities"`
+	Encoding       *EncodingStatus `json:"encoding"`
+	Type           string          `json:"type"`
+	State          string          `json:"state"` // pending, running, done, failed
+	Attempts       int             `json:"attempts"`
+	Error          string          `json:"error"`
+	DependsOn      []string        `json:"dependsOn"`
+	StartedAt      string          `json:"startedAt"`
+	FinishedAt     string          `json:"finishedAt"`
+	Progress       TaskProgress    `json:"progress"`
+	ActiveAssetKey string          `json:"activeAssetKey"`
 }
+
+// Activity describes a measured operation in a bounded task lane.
+type Activity struct {
+	ID         string `json:"id"`
+	Operation  string `json:"operation"`
+	AssetKey   string `json:"assetKey"`
+	State      string `json:"state"`
+	Message    string `json:"message"`
+	StartedAt  string `json:"startedAt"`
+	UpdatedAt  string `json:"updatedAt"`
+	AdvancedAt string `json:"advancedAt"`
+	Completed  int64  `json:"completed"`
+	Total      int64  `json:"total"`
+	Unit       string `json:"unit"`
+}
+
+func (a Activity) Started() time.Time { return parseTime(a.StartedAt) }
+func (a Activity) Updated() time.Time { return parseTime(a.UpdatedAt) }
 
 // TaskProgress is the running task's own progress slot.
 type TaskProgress struct {
@@ -125,7 +147,18 @@ type TaskProgress struct {
 // IsWorking distinguishes an active encode from its reserved, idle worker.
 // Other stages begin work when their scheduler task starts.
 func (t Task) IsWorking() bool {
-	return t.State == "running" && (t.Type != "encoding" || t.ActiveAssetKey != "")
+	if t.State != "running" {
+		return false
+	}
+	if len(t.Activities) == 0 {
+		return t.Type != "encoding" || t.ActiveAssetKey != ""
+	}
+	for _, a := range t.Activities {
+		if a.State == "running" {
+			return true
+		}
+	}
+	return false
 }
 func (t Task) IsDone() bool   { return t.State == "done" }
 func (t Task) IsFailed() bool { return t.State == "failed" }
@@ -185,8 +218,16 @@ func (q QueueItem) FailedTask() *Task {
 func (q QueueItem) ActiveAssetKeys() map[string]bool {
 	keys := make(map[string]bool)
 	for _, t := range q.Tasks {
-		if t.IsWorking() && t.ActiveAssetKey != "" {
+		if t.State != "running" || q.UserStopped || q.Stage == "completed" {
+			continue
+		}
+		if t.ActiveAssetKey != "" {
 			keys[strings.ToLower(t.ActiveAssetKey)] = true
+		}
+		for _, a := range t.Activities {
+			if a.State == "running" && a.AssetKey != "" {
+				keys[strings.ToLower(a.AssetKey)] = true
+			}
 		}
 	}
 	return keys
@@ -227,6 +268,12 @@ type SourceTitle struct {
 
 // EncodingStatus matches spindle's encodingstate.Snapshot (flat, snake_case JSON).
 type EncodingStatus struct {
+	Calibrating           bool                `json:"calibrating"`
+	RecentSpeed           float64             `json:"recent_speed"`
+	MaxWorkers            int                 `json:"max_workers"`
+	InFlight              int                 `json:"in_flight"`
+	EncodeSlotWaitSeconds float64             `json:"encode_slot_wait_seconds"`
+	AssetKey              string              `json:"asset_key"`
 	Percent               float64             `json:"percent,omitempty"`
 	ETASeconds            float64             `json:"eta_seconds,omitempty"`
 	FPS                   float64             `json:"fps,omitempty"`
@@ -236,6 +283,14 @@ type EncodingStatus struct {
 	EstimatedTotalBytes   int64               `json:"estimated_total_bytes,omitempty"`
 	Substage              string              `json:"substage,omitempty"`
 	InputFile             string              `json:"input_file,omitempty"`
+	OutputResolution      string              `json:"output_resolution"`
+	ChunksComplete        int                 `json:"chunks_complete"`
+	ChunksTotal           int                 `json:"chunks_total"`
+	ActiveWorkers         int                 `json:"active_workers"`
+	TargetWorkers         int                 `json:"target_workers"`
+	Probing               int                 `json:"probing"`
+	Scoring               int                 `json:"scoring"`
+	Finishing             int                 `json:"finishing"`
 	Resolution            string              `json:"resolution,omitempty"`
 	DynamicRange          string              `json:"dynamic_range,omitempty"`
 	Encoder               string              `json:"encoder,omitempty"`
@@ -285,35 +340,97 @@ func (e *EncodingStatus) ETADuration() time.Duration {
 // EpisodeStatus is spindle's per-episode projection. Stage reflects asset
 // completion (planned/ripped/encoded/subtitled/final), not the pipeline.
 type EpisodeStatus struct {
-	Key                  string   `json:"key"`
-	Season               int      `json:"season"`
-	Episode              int      `json:"episode"`
-	EpisodeEnd           int      `json:"episodeEnd"`
-	Title                string   `json:"title"`
-	Stage                string   `json:"stage"`
-	Status               string   `json:"status,omitempty"`       // pending, completed, failed
-	ErrorMessage         string   `json:"errorMessage,omitempty"` // per-episode error
-	Active               bool     `json:"active,omitempty"`
-	RuntimeSeconds       int      `json:"runtimeSeconds"`
-	SourceTitleID        int      `json:"sourceTitleId"`
-	SourceTitle          string   `json:"sourceTitle"`
-	OutputBasename       string   `json:"outputBasename"`
-	RippedPath           string   `json:"rippedPath"`
-	EncodedPath          string   `json:"encodedPath"`
-	SubtitledPath        string   `json:"subtitledPath,omitempty"`
-	FinalPath            string   `json:"finalPath"`
-	SubtitleSource       string   `json:"subtitleSource"`
-	SubtitleLanguage     string   `json:"subtitleLanguage"`
-	SubtitleValidation   string   `json:"subtitleValidation"`
-	SubtitleReviewIssues []string `json:"subtitleReviewIssues"`
-	SubtitleSevereIssues []string `json:"subtitleSevereIssues"`
-	CommentaryTracks     int      `json:"commentaryTracks"`
-	ExcludedTracks       int      `json:"excludedTracks"`
-	MatchScore           float64  `json:"matchScore"`
-	MatchConfidence      float64  `json:"matchConfidence"`
-	MatchedEpisode       int      `json:"matchedEpisode"`
-	NeedsReview          bool     `json:"needsReview"`
-	ReviewReason         string   `json:"reviewReason"`
+	Key                  string           `json:"key"`
+	Season               int              `json:"season"`
+	Episode              int              `json:"episode"`
+	EpisodeEnd           int              `json:"episodeEnd"`
+	Title                string           `json:"title"`
+	Stage                string           `json:"stage"`
+	Status               string           `json:"status,omitempty"`       // pending, completed, failed
+	ErrorMessage         string           `json:"errorMessage,omitempty"` // per-episode error
+	Active               bool             `json:"active,omitempty"`
+	RuntimeSeconds       int              `json:"runtimeSeconds"`
+	SourceTitleID        int              `json:"sourceTitleId"`
+	SourceTitle          string           `json:"sourceTitle"`
+	OutputBasename       string           `json:"outputBasename"`
+	RippedPath           string           `json:"rippedPath"`
+	EncodedPath          string           `json:"encodedPath"`
+	SubtitledPath        string           `json:"subtitledPath,omitempty"`
+	FinalPath            string           `json:"finalPath"`
+	FinalSizeBytes       int64            `json:"finalSizeBytes"`
+	FinalRoute           string           `json:"finalRoute"`
+	FinalValidation      *FinalValidation `json:"finalValidation"`
+	EncodeStats          *EncodeStats     `json:"encodeStats"`
+	AudioAnalysis        *AudioAnalysis   `json:"audioAnalysis"`
+	SubtitleSkipReason   string           `json:"subtitleSkipReason"`
+	SubtitleSource       string           `json:"subtitleSource"`
+	SubtitleLanguage     string           `json:"subtitleLanguage"`
+	SubtitleValidation   string           `json:"subtitleValidation"`
+	SubtitleReviewIssues []string         `json:"subtitleReviewIssues"`
+	SubtitleSevereIssues []string         `json:"subtitleSevereIssues"`
+	CommentaryTracks     int              `json:"commentaryTracks"`
+	ExcludedTracks       int              `json:"excludedTracks"`
+	MatchScore           float64          `json:"matchScore"`
+	MatchConfidence      float64          `json:"matchConfidence"`
+	MatchedEpisode       int              `json:"matchedEpisode"`
+	NeedsReview          bool             `json:"needsReview"`
+	ReviewReason         string           `json:"reviewReason"`
+}
+
+type AudioAnalysis struct {
+	CommentaryTracks []struct {
+		Index      int     `json:"index"`
+		Confidence float64 `json:"confidence"`
+		Reason     string  `json:"reason"`
+	} `json:"commentary_tracks"`
+	ExcludedTracks []struct {
+		Index      int     `json:"index"`
+		Similarity float64 `json:"similarity"`
+		Reason     string  `json:"reason"`
+	} `json:"excluded_tracks"`
+}
+
+type EncodeStats struct {
+	Validation        *EncodingValidation `json:"validation"`
+	Width             int                 `json:"width"`
+	Height            int                 `json:"height"`
+	TargetQuality     json.RawMessage     `json:"target_quality"`
+	GrainTreatment    json.RawMessage     `json:"grain_treatment"`
+	EncodeSeconds     float64             `json:"encode_seconds"`
+	Speed             float64             `json:"speed"`
+	EncodedSizeBytes  int64               `json:"encoded_size_bytes"`
+	OriginalSizeBytes int64               `json:"original_size_bytes"`
+}
+
+type FinalValidation struct {
+	Passed       bool     `json:"passed"`
+	Error        string   `json:"error"`
+	FailedChecks []string `json:"failed_checks"`
+	Resolution   string   `json:"resolution"`
+	VideoCodec   string   `json:"video_codec"`
+	Audio        []string `json:"audio"`
+	AVSync       *struct {
+		Error             string  `json:"error"`
+		Passed            bool    `json:"passed"`
+		DriftMilliseconds float64 `json:"drift_milliseconds"`
+	} `json:"av_sync"`
+}
+
+// Verdict deliberately checks availability before trusting the aggregate boolean.
+func (v *FinalValidation) Verdict() string {
+	if v == nil {
+		return "not run"
+	}
+	if len(v.FailedChecks) > 0 || (v.AVSync != nil && v.AVSync.Error == "" && !v.AVSync.Passed) {
+		return "failed"
+	}
+	if v.Error != "" || v.AVSync == nil || v.AVSync.Error != "" {
+		return "unavailable"
+	}
+	if !v.Passed {
+		return "failed"
+	}
+	return "passed"
 }
 
 // IsFailed returns true if the episode has a failed status.
@@ -354,6 +471,8 @@ func (q QueueItem) EpisodeSnapshot() ([]EpisodeStatus, EpisodeTotals) {
 
 // ItemEvent is a queue-backed stage or encoding-substage transition.
 type ItemEvent struct {
+	TaskID          int64   `json:"taskId"`
+	Attempt         int     `json:"attempt"`
 	ID              int64   `json:"id"`
 	ItemID          int64   `json:"itemId"`
 	Time            string  `json:"time"`

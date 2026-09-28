@@ -112,7 +112,7 @@ func TestCommandBarEpisodeHintFollowsEpisodicItems(t *testing.T) {
 		Metadata: json.RawMessage(`{"media_type":"movie"}`),
 	})
 	movie.inspecting = true
-	if got := stripANSI(movie.renderCommandBar()); strings.Contains(got, "Episodes") {
+	if got := stripANSI(movie.renderCommandBar()); !strings.Contains(got, "Details") {
 		t.Fatalf("movie inspector must not advertise the episode toggle, got %q", got)
 	}
 
@@ -122,7 +122,7 @@ func TestCommandBarEpisodeHintFollowsEpisodicItems(t *testing.T) {
 		Metadata: json.RawMessage(`{"media_type":"tv"}`),
 	})
 	tv.inspecting = true
-	if got := stripANSI(tv.renderCommandBar()); !strings.Contains(got, "Episodes") {
+	if got := stripANSI(tv.renderCommandBar()); !strings.Contains(got, "Details") {
 		t.Fatalf("TV inspector must advertise the episode toggle, got %q", got)
 	}
 }

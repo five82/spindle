@@ -3,13 +3,13 @@ package encoder
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/five82/spindle/reel"
@@ -53,7 +53,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	// ripping. A movie is a single title that does not exist until its rip
 	// finishes, so the loop below just waits. Say which one this is rather
 	// than claiming per-asset streaming on an item that cannot stream.
-	planResult, planReason := "streaming", "encode each episode as its rip lands; ripping owns item progress while active"
+	planResult, planReason := "streaming", "encode each episode as its rip lands; each task reports its own activity"
 	if env.Metadata.MediaType != "tv" {
 		planResult, planReason = "deferred", "single title; nothing to encode until the rip completes"
 	}
@@ -95,6 +95,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			if !ripping {
 				break
 			}
+			sess.Activity(queue.Activity{Operation: "input", State: "waiting", Message: "Waiting for completed rip; encoder slot reserved"})
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -216,26 +217,22 @@ func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encodedDir
 		"event_type", "encode_start",
 		"episode_key", job.Key,
 	)
-	sess.Progress(job.Percent(0), message, stage.WithActiveEpisode(job.Key))
+	sess.Progress(0, message, stage.WithActiveEpisode(job.Key))
+	sess.Activity(queue.Activity{Operation: "preparation", AssetKey: job.Key, Message: "Preparing " + filepath.Base(job.Input.Path)})
 	defer sess.ClearActiveEpisode() // The worker can stay scheduled between ripped assets.
 
 	// Reset encoding snapshot and force-persist.
 	snap := h.initialEncodingSnapshot(ctx, logger, job)
-	item.EncodingDetailsJSON = snap.Marshal()
-	sess.Progress(sess.Task.ProgressPercent, sess.Task.ProgressMessage,
-		stage.WithEncodingDetails(item.EncodingDetailsJSON))
+	sess.Progress(0, message, stage.WithEncodingDetails(snap.Marshal()))
 	if err := sess.Store.RecordEvent(queue.Event{
-		ItemID: item.ID, Type: "encoding_substage", Stage: queue.StageEncoding,
+		ItemID: item.ID, TaskID: sess.Task.ID, Attempt: sess.Task.Attempts, Type: "encoding_substage", Stage: queue.StageEncoding,
 		EpisodeKey: job.Key, Substage: snap.Substage,
 	}); err != nil {
 		return encodeJobResult{}, fmt.Errorf("persist initial encoding substage: %w", err)
 	}
 
-	reporter := newSpindleReporter(sess, logger, job.Key, job.ProgressIndex, job.ProgressTotal)
+	reporter := newSpindleReporter(sess, logger, job.Key)
 	result, encErr := runWorkerProcess(ctx, logger, job.Input.Path, encodedDir, reporter)
-	if reporter.eventErr != nil {
-		encErr = errors.Join(encErr, reporter.eventErr)
-	}
 	if encErr != nil {
 		// A drain cancels this context and resumes the same asset after restart.
 		// Only a real encode failure may leave a failed asset or ERROR log.
@@ -250,6 +247,7 @@ func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encodedDir
 
 func (h *Handler) initialEncodingSnapshot(ctx context.Context, logger *slog.Logger, job stage.AssetJob) encodingstate.Snapshot {
 	snap := encodingstate.Snapshot{
+		AssetKey:  job.Key,
 		InputFile: filepath.Base(job.Input.Path),
 		Substage:  "initializing",
 	}
@@ -297,21 +295,17 @@ func (h *Handler) handleEncodeFailure(logger *slog.Logger, sess *stage.Session, 
 		"episode_key", job.Key,
 	)
 
-	item := sess.Item
-	snap, _ := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+	snap, _ := encodingstate.Unmarshal(sess.Task.EncodingDetailsJSON)
 	snap.Error = &encodingstate.Issue{
 		Title:   "Encoding failed",
 		Message: encErr.Error(),
 	}
-	item.EncodingDetailsJSON = snap.Marshal()
-	sess.Progress(job.CompletionPercent(), sess.Task.ProgressMessage,
-		stage.WithEncodingDetails(item.EncodingDetailsJSON))
+	sess.Progress(0, sess.Task.ProgressMessage, stage.WithEncodingDetails(snap.Marshal()))
 	return sess.SaveAssetFailure(ripspec.AssetKindEncoded, job.Key, encErr.Error())
 }
 
 func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, job stage.AssetJob, result *reel.Result) (encodeJobResult, error) {
-	item := sess.Item
-	snap, _ := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+	snap, _ := encodingstate.Unmarshal(sess.Task.EncodingDetailsJSON)
 	snap.Substage = "complete"
 	snap.Percent = 100
 	snap.EncodedSize = int64(result.EncodedSize)
@@ -319,9 +313,8 @@ func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, 
 	snap.SizeReductionPercent = result.SizeReductionPercent
 	snap.AverageSpeed = float64(result.EncodingSpeed)
 
-	item.EncodingDetailsJSON = snap.Marshal()
-	sess.Progress(job.CompletionPercent(), sess.Task.ProgressMessage,
-		stage.WithEncodingDetails(item.EncodingDetailsJSON))
+	sess.Progress(0, "Encoded "+job.Key, stage.WithEncodingDetails(snap.Marshal()))
+	sess.Activity(queue.Activity{Operation: "encode", AssetKey: job.Key, State: "done", Message: "Encoded " + job.Key})
 
 	if err := sess.SaveAssetSuccess(ripspec.AssetKindEncoded, ripspec.Asset{
 		EpisodeKey: job.Key,
@@ -331,6 +324,7 @@ func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, 
 	}
 
 	if stats := encodeStatsFromResult(job.Key, result); stats != nil {
+		stats.Validation = snap.Validation
 		if err := sess.MergeSave(func(env *ripspec.Envelope) error {
 			env.Attributes.SetEncodeStats(*stats)
 			return nil
@@ -480,75 +474,93 @@ func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
 type spindleReporter struct {
 	reel.NullReporter
-	sess          *stage.Session
-	item          *queue.Item
-	logger        *slog.Logger
-	episodeKey    string
-	completedJobs int
-	totalJobs     int
-	lastPush      time.Time
-	lastLog       time.Time
-	eventErr      error
-	now           func() time.Time // injectable clock for testing
+	sess       *stage.Session
+	mu         sync.Mutex
+	logger     *slog.Logger
+	episodeKey string
+	lastPush   time.Time
+	lastLog    time.Time
+	now        func() time.Time // injectable clock for testing
 }
 
-func newSpindleReporter(sess *stage.Session, logger *slog.Logger, episodeKey string, completedJobs int, totalJobs int) *spindleReporter {
+func newSpindleReporter(sess *stage.Session, logger *slog.Logger, episodeKey string) *spindleReporter {
 	return &spindleReporter{
-		sess:          sess,
-		item:          sess.Item,
-		logger:        logger,
-		episodeKey:    episodeKey,
-		completedJobs: completedJobs,
-		totalJobs:     totalJobs,
-		now:           time.Now,
+		sess:       sess,
+		logger:     logger,
+		episodeKey: episodeKey,
+		now:        time.Now,
 	}
 }
 
 // updateSnapshot mutates the encoding snapshot and persists it; persistence
 // failures are logged by Session.Progress.
 func (r *spindleReporter) updateSnapshot(mutate func(*encodingstate.Snapshot), detail ...reel.StageProgress) {
-	snap, err := encodingstate.Unmarshal(r.item.EncodingDetailsJSON)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.updateSnapshotLocked(mutate, detail...)
+}
+
+func (r *spindleReporter) updateSnapshotLocked(mutate func(*encodingstate.Snapshot), detail ...reel.StageProgress) {
+	snap, err := encodingstate.Unmarshal(r.sess.Task.EncodingDetailsJSON)
 	if err != nil {
 		snap = encodingstate.Snapshot{}
 	}
+	snap.AssetKey = r.episodeKey
 	previous := snap.Substage
 	mutate(&snap)
-	r.item.EncodingDetailsJSON = snap.Marshal()
-	r.sess.Progress(r.sess.Task.ProgressPercent, r.sess.Task.ProgressMessage, stage.WithEncodingDetails(r.item.EncodingDetailsJSON))
-	if snap.Substage != previous || len(detail) > 0 {
-		event := queue.Event{
-			ItemID: r.item.ID, Type: "encoding_substage", Stage: queue.StageEncoding,
-			EpisodeKey: r.episodeKey, Substage: snap.Substage,
+	if snap.Substage != previous && snap.Substage != "encoding" {
+		snap.ETASeconds, snap.FPS, snap.RecentSpeed = 0, 0, 0
+		snap.Calibrating = false
+		if snap.Substage != "complete" {
+			snap.AverageSpeed = 0
 		}
-		if len(detail) > 0 {
-			event.Substage = detail[0].Stage
-			event.Message = detail[0].Message
-			event.Percent = float64(detail[0].Percent)
-		}
-		if err := r.sess.Store.RecordEvent(event); err != nil {
-			r.eventErr = errors.Join(r.eventErr, err)
-		}
+		snap.InFlight, snap.MaxWorkers = 0, 0
+		snap.EncodeSlotWaitSeconds = 0
+		snap.CurrentFrame, snap.TotalFrames = 0, 0
+		snap.ActiveWorkers, snap.TargetWorkers = 0, 0
+		snap.Probing, snap.Scoring, snap.Finishing = 0, 0, 0
+		snap.Percent = 0
 	}
+	opts := []stage.ProgressOption{stage.WithEncodingDetails(snap.Marshal())}
+	if len(detail) > 0 {
+		d := detail[0]
+		opts = append(opts, stage.WithActivity(queue.Activity{ID: d.Lane, Operation: d.Stage, AssetKey: r.episodeKey,
+			State: d.State, Message: d.Message, Completed: d.Completed, Total: d.Total, Unit: d.Unit}))
+	} else if snap.Substage != previous {
+		opts = append(opts, stage.WithActivity(queue.Activity{Operation: snap.Substage, AssetKey: r.episodeKey, Message: snap.Substage}))
+	}
+	r.sess.Progress(0, r.sess.Task.ProgressMessage, opts...)
 }
 
 func (r *spindleReporter) EncodingProgress(p reel.ProgressSnapshot) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	now := r.now()
 	if now.Sub(r.lastPush) < throttleInterval {
 		return
 	}
 	r.lastPush = now
-
-	r.updateSnapshot(func(snap *encodingstate.Snapshot) {
+	unit := p.FrameUnit
+	if unit == "" {
+		unit = "frames"
+	}
+	r.updateSnapshotLocked(func(snap *encodingstate.Snapshot) {
 		snap.Substage = "encoding"
 		snap.Percent = float64(p.Percent)
 		snap.FPS = float64(p.FPS)
 		snap.AverageSpeed = float64(p.Speed)
+		snap.RecentSpeed = float64(p.RecentSpeed)
+		snap.Calibrating = p.Calibrating
+		snap.MaxWorkers, snap.InFlight = p.MaxWorkers, p.InFlight
+		snap.EncodeSlotWaitSeconds = p.EncodeSlotWaitSeconds
 		snap.ETASeconds = p.ETA.Seconds()
 		snap.CurrentFrame = int64(p.CurrentFrame)
 		snap.TotalFrames = int64(p.TotalFrames)
-		r.sess.Task.ProgressPercent = stage.OverallPercent(r.completedJobs, r.totalJobs, float64(p.Percent))
-	})
-
+		snap.ChunksComplete, snap.ChunksTotal = p.ChunksComplete, p.ChunksTotal
+		snap.ActiveWorkers, snap.TargetWorkers = p.ActiveWorkers, p.TargetWorkers
+		snap.Probing, snap.Scoring, snap.Finishing = p.Probing, p.Scoring, p.Finishing
+	}, reel.StageProgress{Lane: "video", Stage: "encoding", Message: "Video frame progress",
+		Completed: int64(p.CurrentFrame), Total: int64(p.TotalFrames), Unit: unit})
 	if r.lastLog.IsZero() || now.Sub(r.lastLog) >= encodingProgressLogInterval || p.Percent >= 100 {
 		r.lastLog = now
 		r.logger.Info("encoding progress",
@@ -572,7 +584,7 @@ func (r *spindleReporter) EncodingStarted(totalFrames uint64) {
 	r.updateSnapshot(func(snap *encodingstate.Snapshot) {
 		snap.Substage = "encoding"
 		snap.TotalFrames = int64(totalFrames)
-	})
+	}, reel.StageProgress{Lane: "video", Stage: "encoding", Message: "Starting video encode", Total: int64(totalFrames), Unit: "frames"})
 }
 
 func (r *spindleReporter) Initialization(s reel.InitializationSummary) {
@@ -596,7 +608,12 @@ func (r *spindleReporter) Initialization(s reel.InitializationSummary) {
 
 func (r *spindleReporter) StageProgress(s reel.StageProgress) {
 	r.updateSnapshot(func(snap *encodingstate.Snapshot) {
-		snap.Substage = strings.ToLower(strings.TrimSpace(s.Stage))
+		if s.Lane != "audio" {
+			snap.Substage = strings.ToLower(strings.TrimSpace(s.Stage))
+			if s.State == "ended" || s.State == "done" {
+				snap.Substage += " ended"
+			}
+		}
 	}, s)
 }
 
@@ -641,7 +658,7 @@ func (r *spindleReporter) CropResult(s reel.CropSummary) {
 		snap.Substage = "crop_detection"
 		if s.Required {
 			if w, h, parseErr := encodingstate.ParseCropFilter(s.Crop); parseErr == nil {
-				snap.Resolution = fmt.Sprintf("%dx%d", w, h)
+				snap.OutputResolution = fmt.Sprintf("%dx%d", w, h)
 			}
 		}
 	})
@@ -715,7 +732,7 @@ func (r *spindleReporter) EncodingComplete(s reel.EncodingOutcome) {
 		snap.OriginalSize = int64(s.OriginalSize)
 		snap.AverageSpeed = float64(s.AverageSpeed)
 		snap.EncodeDurationSeconds = s.TotalTime.Seconds()
-	})
+	}, reel.StageProgress{Stage: "complete", State: "done", Message: "Encoded file"})
 
 	r.logger.Info("encode result",
 		"event_type", "encode_result",

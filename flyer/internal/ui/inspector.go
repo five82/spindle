@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
@@ -152,7 +153,7 @@ func (m Model) handleInspectorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// toggleInspectedEpisodes flips the episode list collapse state for the
+// toggleInspectedEpisodes toggles secondary file evidence for the
 // inspected item, starting from its effective (auto-expand) default.
 func (m *Model) toggleInspectedEpisodes() {
 	item := m.getInspectedItem()
@@ -199,15 +200,32 @@ func (m *Model) updateInspectorViewport() {
 		return
 	}
 
+	anchor := ""
+	if m.inspectorViewport.YOffset() > 0 {
+		anchor = strings.TrimSpace(ansi.Strip(strings.Split(m.inspectorViewport.View(), "\n")[0]))
+	}
+	var content string
 	switch m.inspectorTab {
 	case tabEpisodes:
-		m.inspectorViewport.SetContent(m.renderEpisodesTab(*item))
+		content = m.renderEpisodesTab(*item)
 	case tabProblems:
-		m.inspectorViewport.SetContent(m.renderItemProblems(item))
+		content = m.renderItemProblems(item)
 	case tabEvents:
-		m.inspectorViewport.SetContent(m.renderItemEvents())
+		content = m.renderItemEvents()
 	default:
-		m.inspectorViewport.SetContent(m.renderDetailContent(*item, inner))
+		content = m.renderDetailContent(*item, inner)
+	}
+	if m.snapshot.LastError != nil {
+		content = "Stale queue snapshot; last successful fetch " + m.snapshot.LastUpdated.Format(time.RFC3339) + "\n" + content
+	}
+	m.inspectorViewport.SetContent(content)
+	if anchor != "" {
+		for i, line := range strings.Split(content, "\n") {
+			if strings.TrimSpace(ansi.Strip(line)) == anchor {
+				m.inspectorViewport.SetYOffset(i)
+				break
+			}
+		}
 	}
 }
 
@@ -224,6 +242,9 @@ func (m Model) renderInspector() string {
 	b.WriteString("\n")
 
 	title := inspectorTabLabels[m.inspectorTab]
+	if item := m.getInspectedItem(); m.inspectorTab == tabEpisodes && item != nil && !isEpisodicItem(*item) {
+		title = "File"
+	}
 	if m.inspectorTab == tabLogs {
 		b.WriteString(renderPanel(title, m.logViewport.View(), "", m.width, styles))
 		b.WriteString("\n")
@@ -275,8 +296,8 @@ func (m Model) renderInspectorItemLine(styles Styles) string {
 		parts = append(parts, headerPart{styles.MutedText.Render(runtime), 5})
 	}
 	parts = append(parts, headerPart{m.renderStatusChips(*item, styles), 1})
-	if updated := parseTimestamp(item.UpdatedAt); !updated.IsZero() {
-		parts = append(parts, headerPart{styles.FaintText.Render(humanizeDuration(time.Since(updated))), 3})
+	if updated := m.snapshot.LastUpdated; !updated.IsZero() {
+		parts = append(parts, headerPart{styles.FaintText.Render("fetched " + humanizeDuration(time.Since(updated))), 3})
 	}
 	return joinHeaderParts(parts, m.width, styles.Band)
 }
@@ -293,13 +314,13 @@ func (m Model) renderInspectorTabBar(styles Styles) string {
 	segments := make([]string, 0, tabCount)
 	for i, label := range inspectorTabLabels {
 		num := fmt.Sprintf("%d", i+1)
+		if inspectorTab(i) == tabEpisodes && item != nil && !isEpisodicItem(*item) {
+			label = "File"
+		}
 		text := num + " " + label
-		deadEpisodesTab := inspectorTab(i) == tabEpisodes && item != nil && !isEpisodicItem(*item)
 		switch {
 		case inspectorTab(i) == m.inspectorTab:
 			text = styles.AccentText.Bold(true).Render(text)
-		case deadEpisodesTab:
-			text = styles.FaintText.Faint(true).Render(text)
 		default:
 			text = styles.FaintText.Render(text)
 		}
@@ -316,7 +337,7 @@ func (m *Model) renderEpisodesTab(item spindle.QueueItem) string {
 	styles := m.theme.Styles()
 	episodes, totals := item.EpisodeSnapshot()
 	if len(episodes) == 0 {
-		return styles.MutedText.Render("No episodes for this item")
+		return styles.MutedText.Render("No selected files recorded yet")
 	}
 
 	var b strings.Builder

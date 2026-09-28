@@ -26,7 +26,7 @@ func TestTargetRunProgressAndFirstError(t *testing.T) {
 	if snapshot.InFlight != 2 || snapshot.TargetWorkers != 2 || snapshot.MaxWorkers != 3 || snapshot.FramesComplete != 42 {
 		t.Fatalf("snapshot: %+v", snapshot)
 	}
-	r.emitProgress(snapshot)
+	r.emitProgress()
 	if len(events) != 1 || events[0] != snapshot {
 		t.Fatalf("events: %+v", events)
 	}
@@ -41,7 +41,26 @@ func TestTargetRunProgressAndFirstError(t *testing.T) {
 		t.Fatal("chunk not released")
 	}
 	r.progressCb = nil
-	r.emitProgress(snapshot)
+	r.emitProgress()
+}
+
+func TestConcurrentProgressDeliveryNeverRegresses(t *testing.T) {
+	r := &targetQualityRun{limiter: newAdaptiveLimiter(3, 2, 3, 0, nil, nil)}
+	last, reports := 0, 0
+	r.progressCb = func(p worker.Progress) {
+		if p.FramesComplete < last {
+			t.Errorf("counter regressed: %d -> %d", last, p.FramesComplete)
+		}
+		last, reports = p.FramesComplete, reports+1
+	}
+	var wg sync.WaitGroup
+	for range 100 {
+		wg.Go(func() { r.progressMu.Lock(); r.progress.FramesComplete++; r.progressMu.Unlock(); r.emitProgress() })
+	}
+	wg.Wait()
+	if last != 100 || reports != 100 {
+		t.Fatalf("last=%d reports=%d", last, reports)
+	}
 }
 
 func TestTargetRunDispatchAndCollect(t *testing.T) {

@@ -54,6 +54,9 @@ type SourceResponse struct {
 // TaskResponse is one scheduler task of an item. DependsOn names task types,
 // not row IDs. An item briefly has no tasks while a retry recompiles them.
 type TaskResponse struct {
+	ID             int64            `json:"id"`
+	Activities     []queue.Activity `json:"activities,omitempty"`
+	Encoding       json.RawMessage  `json:"encoding,omitempty"`
 	Type           string           `json:"type"`
 	State          string           `json:"state"`
 	Attempts       int              `json:"attempts,omitempty"`
@@ -75,36 +78,42 @@ type ProgressResponse struct {
 
 // EpisodeResponse represents an episode in the API response.
 type EpisodeResponse struct {
-	Key                  string   `json:"key"`
-	Season               int      `json:"season"`
-	Episode              int      `json:"episode"`
-	EpisodeEnd           int      `json:"episodeEnd,omitempty"`
-	Title                string   `json:"title,omitempty"`
-	Stage                string   `json:"stage"`
-	Status               string   `json:"status,omitempty"`
-	ErrorMessage         string   `json:"errorMessage,omitempty"`
-	Active               bool     `json:"active,omitempty"`
-	RuntimeSeconds       int      `json:"runtimeSeconds,omitempty"`
-	SourceTitleID        int      `json:"sourceTitleId,omitempty"`
-	SourceTitle          string   `json:"sourceTitle,omitempty"`
-	OutputBasename       string   `json:"outputBasename,omitempty"`
-	RippedPath           string   `json:"rippedPath,omitempty"`
-	EncodedPath          string   `json:"encodedPath,omitempty"`
-	SubtitledPath        string   `json:"subtitledPath,omitempty"`
-	FinalPath            string   `json:"finalPath,omitempty"`
-	SubtitleSource       string   `json:"subtitleSource,omitempty"`
-	SubtitleLanguage     string   `json:"subtitleLanguage,omitempty"`
-	SubtitleValidation   string   `json:"subtitleValidation,omitempty"`
-	SubtitleReviewIssues []string `json:"subtitleReviewIssues,omitempty"`
-	SubtitleSevereIssues []string `json:"subtitleSevereIssues,omitempty"`
-	CommentaryTracks     int      `json:"commentaryTracks,omitempty"`
-	ExcludedTracks       int      `json:"excludedTracks,omitempty"`
-	MatchScore           float64  `json:"matchScore,omitempty"`
-	MatchConfidence      float64  `json:"matchConfidence,omitempty"`
-	MatchedEpisode       int      `json:"matchedEpisode,omitempty"`
-	MatchedEpisodeEnd    int      `json:"matchedEpisodeEnd,omitempty"`
-	NeedsReview          bool     `json:"needsReview,omitempty"`
-	ReviewReason         string   `json:"reviewReason,omitempty"`
+	Key                  string                        `json:"key"`
+	Season               int                           `json:"season"`
+	Episode              int                           `json:"episode"`
+	EpisodeEnd           int                           `json:"episodeEnd,omitempty"`
+	Title                string                        `json:"title,omitempty"`
+	Stage                string                        `json:"stage"`
+	Status               string                        `json:"status,omitempty"`
+	ErrorMessage         string                        `json:"errorMessage,omitempty"`
+	Active               bool                          `json:"active,omitempty"`
+	RuntimeSeconds       int                           `json:"runtimeSeconds,omitempty"`
+	SourceTitleID        int                           `json:"sourceTitleId,omitempty"`
+	SourceTitle          string                        `json:"sourceTitle,omitempty"`
+	OutputBasename       string                        `json:"outputBasename,omitempty"`
+	RippedPath           string                        `json:"rippedPath,omitempty"`
+	EncodedPath          string                        `json:"encodedPath,omitempty"`
+	SubtitledPath        string                        `json:"subtitledPath,omitempty"`
+	FinalPath            string                        `json:"finalPath,omitempty"`
+	FinalSizeBytes       int64                         `json:"finalSizeBytes,omitempty"`
+	FinalRoute           string                        `json:"finalRoute,omitempty"`
+	FinalValidation      *ripspec.FinalValidationEntry `json:"finalValidation,omitempty"`
+	EncodeStats          *ripspec.EncodeStats          `json:"encodeStats,omitempty"`
+	AudioAnalysis        *ripspec.EpisodeAudioAnalysis `json:"audioAnalysis,omitempty"`
+	SubtitleSkipReason   string                        `json:"subtitleSkipReason,omitempty"`
+	SubtitleSource       string                        `json:"subtitleSource,omitempty"`
+	SubtitleLanguage     string                        `json:"subtitleLanguage,omitempty"`
+	SubtitleValidation   string                        `json:"subtitleValidation,omitempty"`
+	SubtitleReviewIssues []string                      `json:"subtitleReviewIssues,omitempty"`
+	SubtitleSevereIssues []string                      `json:"subtitleSevereIssues,omitempty"`
+	CommentaryTracks     int                           `json:"commentaryTracks,omitempty"`
+	ExcludedTracks       int                           `json:"excludedTracks,omitempty"`
+	MatchScore           float64                       `json:"matchScore,omitempty"`
+	MatchConfidence      float64                       `json:"matchConfidence,omitempty"`
+	MatchedEpisode       int                           `json:"matchedEpisode,omitempty"`
+	MatchedEpisodeEnd    int                           `json:"matchedEpisodeEnd,omitempty"`
+	NeedsReview          bool                          `json:"needsReview,omitempty"`
+	ReviewReason         string                        `json:"reviewReason,omitempty"`
 }
 
 // TotalsResponse holds per-stage completion counts.
@@ -286,9 +295,10 @@ func ToItemResponse(item *queue.Item, tasks []*queue.Task, includeRipSpec bool) 
 		resp.Metadata = json.RawMessage(item.MetadataJSON)
 	}
 
-	// EncodingDetailsJSON -> json.RawMessage (pass through as snapshot JSON)
-	if item.EncodingDetailsJSON != "" {
-		resp.Encoding = json.RawMessage(item.EncodingDetailsJSON)
+	for _, task := range tasks {
+		if task.Type == queue.StageEncoding && task.EncodingDetailsJSON != "" {
+			resp.Encoding = json.RawMessage(task.EncodingDetailsJSON)
+		}
 	}
 
 	// Parse RipSpec to compute derived fields.
@@ -299,7 +309,11 @@ func ToItemResponse(item *queue.Item, tasks []*queue.Task, includeRipSpec bool) 
 		env, err := ripspec.Parse(item.RipSpecData)
 		if err == nil {
 			resp.DiscNumber = env.Metadata.DiscNumber
-			populateRipSpecDerived(&resp, &env, activeAssetKeys(tasks))
+			active := activeAssetKeys(tasks)
+			if item.UserStopped() || item.Stage == queue.StageCompleted {
+				active = nil
+			}
+			populateRipSpecDerived(&resp, &env, active)
 		}
 	}
 
@@ -319,6 +333,7 @@ func toTaskResponses(tasks []*queue.Task) []TaskResponse {
 	out := make([]TaskResponse, 0, len(tasks))
 	for _, t := range tasks {
 		tr := TaskResponse{
+			ID: t.ID, Activities: t.Activities, Encoding: json.RawMessage(t.EncodingDetailsJSON),
 			Type:       string(t.Type),
 			State:      string(t.State),
 			Attempts:   t.Attempts,
@@ -347,8 +362,16 @@ func toTaskResponses(tasks []*queue.Task) []TaskResponse {
 func activeAssetKeys(tasks []*queue.Task) map[string]bool {
 	keys := make(map[string]bool)
 	for _, t := range tasks {
-		if t.State == queue.TaskRunning && t.ActiveAssetKey != "" {
+		if t.State != queue.TaskRunning {
+			continue
+		}
+		if t.ActiveAssetKey != "" {
 			keys[strings.ToLower(t.ActiveAssetKey)] = true
+		}
+		for _, a := range t.Activities {
+			if a.State == "running" && a.AssetKey != "" {
+				keys[strings.ToLower(a.AssetKey)] = true
+			}
 		}
 	}
 	return keys
@@ -393,14 +416,10 @@ func populateRipSpecDerived(resp *ItemResponse, env *ripspec.Envelope, activeKey
 		resp.CommentaryCount = len(aa.CommentaryTracks)
 	}
 
-	// Primary source title (movie main title)
-	if len(env.Titles) > 0 {
-		t := env.Titles[0]
-		resp.Source = &SourceResponse{
-			TitleID:         t.ID,
-			Name:            t.Name,
-			DurationSeconds: t.Duration,
-		}
+	// Only a selected source is primary, never the first scanned disc title.
+	if len(resp.Episodes) == 1 {
+		ep := resp.Episodes[0]
+		resp.Source = &SourceResponse{TitleID: ep.SourceTitleID, Name: ep.SourceTitle, DurationSeconds: ep.RuntimeSeconds}
 	}
 
 	// Episode identification provenance
@@ -424,10 +443,18 @@ func populateRipSpecDerived(resp *ItemResponse, env *ripspec.Envelope, activeKey
 // buildEpisodes constructs EpisodeResponse slice from envelope data.
 // activeKeys marks episodes a running task is currently working on.
 func buildEpisodes(env *ripspec.Envelope, activeKeys map[string]bool) []EpisodeResponse {
-	if len(env.Episodes) == 0 {
-		return nil
+	manifest := env.Episodes
+	if len(manifest) == 0 && env.Metadata.MediaType != "tv" {
+		for _, key := range env.AssetKeys() {
+			if asset, ok := env.Assets.FindAsset(ripspec.AssetKindRipped, key); ok {
+				manifest = append(manifest, ripspec.Episode{Key: key, TitleID: asset.TitleID, EpisodeTitle: env.Metadata.Title})
+			}
+		}
 	}
 
+	if len(manifest) == 0 {
+		return nil
+	}
 	titleByID := make(map[int]ripspec.Title, len(env.Titles))
 	for _, t := range env.Titles {
 		titleByID[t.ID] = t
@@ -439,8 +466,8 @@ func buildEpisodes(env *ripspec.Envelope, activeKeys map[string]bool) []EpisodeR
 		subtitleByKey[strings.ToLower(rec.EpisodeKey)] = rec
 	}
 
-	episodes := make([]EpisodeResponse, 0, len(env.Episodes))
-	for _, ep := range env.Episodes {
+	episodes := make([]EpisodeResponse, 0, len(manifest))
+	for _, ep := range manifest {
 		resp := EpisodeResponse{
 			Key:             ep.Key,
 			Season:          ep.Season,
@@ -502,6 +529,7 @@ func buildEpisodes(env *ripspec.Envelope, activeKeys map[string]bool) []EpisodeR
 		if a, ok := env.Assets.FindAsset(ripspec.AssetKindFinal, ep.Key); ok {
 			if a.IsCompleted() {
 				resp.FinalPath = a.Path
+				resp.FinalSizeBytes, resp.FinalRoute = a.SizeBytes, a.Route
 				resp.Stage = "final"
 			} else if a.IsFailed() {
 				resp.Status = "failed"
@@ -517,6 +545,7 @@ func buildEpisodes(env *ripspec.Envelope, activeKeys map[string]bool) []EpisodeR
 		// Subtitle generation info and QC per episode
 		if rec, ok := subtitleByKey[strings.ToLower(ep.Key)]; ok {
 			resp.SubtitleSource = rec.Source
+			resp.SubtitleSkipReason = rec.SkipReason
 			resp.SubtitleLanguage = rec.Language
 			resp.SubtitleValidation = rec.ValidationResult
 			resp.SubtitleReviewIssues = rec.ReviewIssues
@@ -529,6 +558,21 @@ func buildEpisodes(env *ripspec.Envelope, activeKeys map[string]bool) []EpisodeR
 			resp.ExcludedTracks = len(epAA.ExcludedTracks)
 		}
 
+		resp.AudioAnalysis = env.Attributes.AudioAnalysis.EpisodeAnalysis(ep.Key)
+		if validation := env.Attributes.FinalValidation; validation != nil {
+			for i := range validation.Entries {
+				if strings.EqualFold(validation.Entries[i].EpisodeKey, ep.Key) {
+					resp.FinalValidation = &validation.Entries[i]
+					break
+				}
+			}
+		}
+		for i := range env.Attributes.EncodeStats {
+			if strings.EqualFold(env.Attributes.EncodeStats[i].EpisodeKey, ep.Key) {
+				resp.EncodeStats = &env.Attributes.EncodeStats[i]
+				break
+			}
+		}
 		episodes = append(episodes, resp)
 	}
 

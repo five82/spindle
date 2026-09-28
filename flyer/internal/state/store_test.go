@@ -57,8 +57,8 @@ func TestStore_UpdateErrorKeepsPreviousData(t *testing.T) {
 	if len(snap.Queue) != 1 || snap.Queue[0].ID != 1 {
 		t.Fatalf("queue changed on error: got %#v want %#v", snap.Queue, prev.Queue)
 	}
-	if snap.LastUpdated.Before(before) {
-		t.Fatalf("LastUpdated = %v, want >= %v", snap.LastUpdated, before)
+	if snap.LastUpdated != prev.LastUpdated || snap.LastAttempt.Before(before) {
+		t.Fatalf("failure changed successful-fetch timestamp: %+v", snap)
 	}
 	if snap.LastError == nil || snap.LastError.Error() != "boom" {
 		t.Fatalf("LastError = %v, want boom", snap.LastError)

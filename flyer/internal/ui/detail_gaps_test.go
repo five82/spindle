@@ -45,8 +45,12 @@ func TestAttentionIncludesRecoveryDetails(t *testing.T) {
 		Error:   &spindle.EncodingIssue{Title: "Disk full", Context: "output drive", Suggestion: "free space"},
 		Warning: "fallback encoder", Validation: &spindle.EncodingValidation{Steps: []spindle.EncodingValidationStep{{Name: "checksum", Passed: true}, {Details: "mismatch", Passed: false}}},
 	}}
-	got := stripANSI(m.renderDetailContent(item, 100))
-	for _, want := range []string{"Attention", "Needs operator review", "Disk full", "output drive", "free space", "fallback encoder", "checksum", "Check", "mismatch", "Failed"} {
+	overview := stripANSI(m.renderDetailContent(item, 100))
+	if !strings.Contains(overview, "see 3 Problems") {
+		t.Fatal(overview)
+	}
+	got := stripANSI(m.renderItemProblems(&item))
+	for _, want := range []string{"Needs operator review", "Disk full", "output drive", "free space", "fallback encoder", "mismatch", "failed"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("attention missing %q in %q", want, got)
 		}
@@ -62,8 +66,8 @@ func TestValidationAndIdentificationOutput(t *testing.T) {
 	}{
 		{"empty", nil, ""},
 		{"no steps", &spindle.EncodingValidation{Passed: true}, ""},
-		{"failed", &spindle.EncodingValidation{Steps: []spindle.EncodingValidationStep{{Name: "checksum"}}}, "Failed"},
-		{"passed", &spindle.EncodingValidation{Passed: true, Steps: []spindle.EncodingValidationStep{{Name: "checksum", Passed: true, Details: "verified"}, {Name: "", Passed: true}, {Name: "codec", Passed: false}}}, "verified"},
+		{"failed", &spindle.EncodingValidation{Steps: []spindle.EncodingValidationStep{{Name: "checksum"}}}, "Final checks not run"},
+		{"passed", &spindle.EncodingValidation{Passed: true, Steps: []spindle.EncodingValidationStep{{Name: "checksum", Passed: true, Details: "verified"}, {Name: "", Passed: true}, {Name: "codec", Passed: false}}}, "Final checks not run"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var b strings.Builder

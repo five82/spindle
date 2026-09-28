@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     progress_bytes_copied INTEGER NOT NULL DEFAULT 0,
     progress_total_bytes INTEGER NOT NULL DEFAULT 0,
     active_asset_key TEXT NOT NULL DEFAULT '',
+    activities TEXT NOT NULL DEFAULT '[]',
+    encoding_details_json TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     started_at TIMESTAMP,
     finished_at TIMESTAMP
@@ -69,8 +71,27 @@ type Task struct {
 	ProgressBytesCopied int64
 	ProgressTotalBytes  int64
 	ActiveAssetKey      string
+	Activities          []Activity
+	EncodingDetailsJSON string
 	StartedAt           string
 	FinishedAt          string
+}
+
+// Activity is one current operation, not a percentage of a task. IDs name
+// bounded lanes (work, video, audio, references), replaced when their scope
+// changes. A positive total identifies a measured denominator; zero is unknown.
+type Activity struct {
+	ID         string `json:"id"`
+	Operation  string `json:"operation"`
+	AssetKey   string `json:"assetKey,omitempty"`
+	State      string `json:"state"`
+	Message    string `json:"message,omitempty"`
+	StartedAt  string `json:"startedAt"`
+	UpdatedAt  string `json:"updatedAt"`
+	AdvancedAt string `json:"advancedAt,omitempty"`
+	Completed  int64  `json:"completed,omitempty"`
+	Total      int64  `json:"total,omitempty"`
+	Unit       string `json:"unit,omitempty"`
 }
 
 // Duration derives the task's wall time from its start/finish timestamps;
@@ -236,20 +257,23 @@ func (s *Store) taskStates() (map[int64]TaskState, error) {
 // taskColumns is the column list scanTask expects, in order.
 const taskColumns = `id, item_id, type, asset_key, state, attempts, error_message, deps,
     progress_percent, progress_message, progress_bytes_copied, progress_total_bytes,
-    active_asset_key, started_at, finished_at`
+    active_asset_key, activities, encoding_details_json, started_at, finished_at`
 
 const taskColumnsPrefixed = `t.id, t.item_id, t.type, t.asset_key, t.state, t.attempts, t.error_message, t.deps,
     t.progress_percent, t.progress_message, t.progress_bytes_copied, t.progress_total_bytes,
-    t.active_asset_key, t.started_at, t.finished_at`
+    t.active_asset_key, t.activities, t.encoding_details_json, t.started_at, t.finished_at`
 
 func scanTask(rows *sql.Rows) (*Task, error) {
 	t := &Task{}
-	var typ, state, deps string
+	var typ, state, deps, activities string
 	var startedAt, finishedAt sql.NullString
 	if err := rows.Scan(&t.ID, &t.ItemID, &typ, &t.AssetKey, &state, &t.Attempts, &t.ErrorMsg, &deps,
 		&t.ProgressPercent, &t.ProgressMessage, &t.ProgressBytesCopied, &t.ProgressTotalBytes,
-		&t.ActiveAssetKey, &startedAt, &finishedAt); err != nil {
+		&t.ActiveAssetKey, &activities, &t.EncodingDetailsJSON, &startedAt, &finishedAt); err != nil {
 		return nil, fmt.Errorf("scan task: %w", err)
+	}
+	if err := json.Unmarshal([]byte(activities), &t.Activities); err != nil {
+		return nil, fmt.Errorf("parse task activities: %w", err)
 	}
 	t.Type = Stage(typ)
 	t.State = TaskState(state)
@@ -265,7 +289,7 @@ func scanTask(rows *sql.Rows) (*Task, error) {
 func (s *Store) StartTask(t *Task) error {
 	err := retryOnBusy(func() error {
 		_, err := s.db.Exec(
-			`UPDATE tasks SET state = ?, attempts = attempts + 1, started_at = CURRENT_TIMESTAMP, active_asset_key = '' WHERE id = ?`,
+			`UPDATE tasks SET state = ?, attempts = attempts + 1, started_at = CURRENT_TIMESTAMP, finished_at = NULL, error_message = '', active_asset_key = '', activities = '[]', encoding_details_json = '', progress_percent = 0, progress_message = '', progress_bytes_copied = 0, progress_total_bytes = 0 WHERE id = ?`,
 			string(TaskRunning), t.ID)
 		return err
 	})
@@ -274,6 +298,10 @@ func (s *Store) StartTask(t *Task) error {
 	}
 	t.State = TaskRunning
 	t.ActiveAssetKey = ""
+	t.Activities = nil
+	t.EncodingDetailsJSON = ""
+	t.ProgressPercent, t.ProgressMessage = 0, ""
+	t.ProgressBytesCopied, t.ProgressTotalBytes = 0, 0
 	t.Attempts++
 	return nil
 }
@@ -299,7 +327,7 @@ func (s *Store) FinishTask(t *Task, state TaskState, errMsg string) error {
 // startup and shutdown.
 func (s *Store) ResetRunningTasks() error {
 	return retryOnBusy(func() error {
-		_, err := s.db.Exec(`UPDATE tasks SET state = ?, active_asset_key = '' WHERE state = ?`, string(TaskPending), string(TaskRunning))
+		_, err := s.db.Exec(`UPDATE tasks SET state = ?, active_asset_key = '', activities = '[]', encoding_details_json = '' WHERE state = ?`, string(TaskPending), string(TaskRunning))
 		return err
 	})
 }
@@ -324,16 +352,20 @@ func (s *Store) DeleteTasks(itemIDs ...int64) error {
 // single progress slot for the running handler; a write against a deleted
 // row (a zombie worker after retry recompiled the tasks) affects nothing.
 func (s *Store) UpdateTaskProgress(t *Task) error {
+	activities, err := json.Marshal(t.Activities)
+	if err != nil {
+		return err
+	}
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`
 			UPDATE tasks SET
 				progress_percent = ?, progress_message = ?,
 				progress_bytes_copied = ?, progress_total_bytes = ?,
-				active_asset_key = ?
-			WHERE id = ?`,
+				active_asset_key = ?, activities = ?, encoding_details_json = ?
+			WHERE id = ? AND attempts = ?`,
 			t.ProgressPercent, t.ProgressMessage,
 			t.ProgressBytesCopied, t.ProgressTotalBytes,
-			t.ActiveAssetKey, t.ID)
+			t.ActiveAssetKey, string(activities), t.EncodingDetailsJSON, t.ID, t.Attempts)
 		if err != nil {
 			return fmt.Errorf("update task %d progress: %w", t.ID, err)
 		}

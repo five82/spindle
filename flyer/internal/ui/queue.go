@@ -102,37 +102,42 @@ func queueItemMatches(item spindle.QueueItem, query string) bool {
 	return strings.Contains(fmt.Sprintf("#%d", item.ID), query)
 }
 
-// queueBarWidth is the inline progress bar width in the pct column (wide
-// terminals only).
-const queueBarWidth = 8
-
 // queueColumns holds the computed fixed column widths for the queue table.
 // ago == 0 hides the age column (compact terminals).
 type queueColumns struct {
-	strip int
-	id    int
-	disc  int
-	stage int
-	pct   int
-	ago   int
-	title int
-	bar   bool // pct column includes an inline progress bar
+	strip  int
+	id     int
+	disc   int
+	stage  int
+	work   int
+	ago    int
+	title  int
+	labels bool
 }
 
 // computeQueueColumns derives column widths from the item set and terminal
 // width; the title column absorbs the slack of the panel interior. Below 80
-// terminal columns the age column is dropped; at or above the compact
-// threshold the pct column gains an inline progress bar.
+// terminal columns the age column is dropped; wide terminals name outcomes.
 func computeQueueColumns(items []spindle.QueueItem, width int) queueColumns {
-	cols := queueColumns{strip: 1, id: 2, stage: 12, pct: 4, ago: 8}
+	cols := queueColumns{strip: 1, id: 2, stage: 12, work: 4, ago: 8}
 	if width < 80 {
 		cols.ago = 0
 	}
 	if width >= compactWidthThreshold {
-		cols.bar = true
-		cols.pct = queueBarWidth + 1 + 4 // bar + space + "100%"
+		cols.labels = true
+		cols.work = len("FILES DONE")
 	}
 	for _, item := range items {
+		count := queueFileCount(item)
+		n := len(count)
+		if cols.labels && count != "" {
+			label := "published"
+			if task := item.PrimaryTask(); task != nil {
+				label = stageDisplay(task.Type).doneLabel
+			}
+			n += 1 + len(label)
+		}
+		cols.work = max(cols.work, n)
 		if n := taskStripWidth(item); n > cols.strip {
 			cols.strip = n
 		}
@@ -146,7 +151,7 @@ func computeQueueColumns(items []spindle.QueueItem, width int) queueColumns {
 	}
 
 	// Fixed columns plus 2-space separators between all columns.
-	fixed := cols.strip + cols.id + cols.stage + cols.pct + 8
+	fixed := cols.strip + cols.id + cols.stage + cols.work + 8
 	if cols.disc > 0 {
 		fixed += cols.disc + 2
 	}
@@ -252,9 +257,9 @@ func renderQueueHeaderRow(cols queueColumns, styles Styles) string {
 		}
 		return s
 	}
-	pctLabel := "%"
-	if cols.bar {
-		pctLabel = "PROGRESS"
+	workLabel := "DONE"
+	if cols.labels {
+		workLabel = "FILES DONE"
 	}
 	parts := []string{
 		pad("", cols.strip),
@@ -266,7 +271,7 @@ func renderQueueHeaderRow(cols queueColumns, styles Styles) string {
 	}
 	parts = append(parts,
 		pad("STAGE", cols.stage),
-		pad(pctLabel, cols.pct),
+		pad(workLabel, cols.work),
 	)
 	if cols.ago > 0 {
 		parts = append(parts, "AGE")
@@ -331,7 +336,7 @@ func (m Model) renderQueueRow(item spindle.QueueItem, cols queueColumns, selecte
 		}
 		fields = append(fields,
 			pad(stage, cols.stage),
-			pad(m.queueProgressCell(item, cols, stageStyle, styles, true), cols.pct),
+			pad(m.queueProgressCell(item, cols, stageStyle, styles, true), cols.work),
 		)
 		if cols.ago > 0 {
 			fields = append(fields, ago)
@@ -358,7 +363,7 @@ func (m Model) renderQueueRow(item spindle.QueueItem, cols queueColumns, selecte
 	}
 	parts = append(parts,
 		stageStyle.Render(pad(stage, cols.stage)),
-		pad(m.queueProgressCell(item, cols, stageStyle, styles, false), cols.pct),
+		pad(m.queueProgressCell(item, cols, stageStyle, styles, false), cols.work),
 	)
 	if cols.ago > 0 {
 		parts = append(parts, styles.FaintText.Render(ago))
@@ -366,56 +371,21 @@ func (m Model) renderQueueRow(item spindle.QueueItem, cols queueColumns, selecte
 	return strings.Join(parts, "  ")
 }
 
-// queueProgressCell renders the progress column: an inline bar plus percent
-// on wide terminals, percent only otherwise. Completed items reuse the
-// otherwise-dead column for their size reduction ("-79%"): how much space
-// an encode bought is the one figure worth glancing at after the fact.
-// Plain output (no styling) is used inside the selection bar.
-func (m Model) queueProgressCell(item spindle.QueueItem, cols queueColumns, stageStyle lipgloss.Style, styles Styles, plain bool) string {
-	pct := queuePercentCell(item)
-	if pct == "" {
-		red := completedReductionCell(item)
-		if red == "" || plain {
-			return red
+// queueProgressCell shows completed files, scoped by the adjacent task column.
+// A wide terminal adds the outcome label; percentages live in the inspector.
+func (m Model) queueProgressCell(item spindle.QueueItem, cols queueColumns, _ lipgloss.Style, styles Styles, plain bool) string {
+	text := queueFileCount(item)
+	if cols.labels && text != "" {
+		label := "published"
+		if task := item.PrimaryTask(); task != nil {
+			label = stageDisplay(task.Type).doneLabel
 		}
-		return styles.MutedText.Render(red)
+		text += " " + label
 	}
-	if !cols.bar {
-		if plain {
-			return pct
-		}
-		return styles.AccentText.Render(pct)
+	if plain || text == "" {
+		return text
 	}
-	percent := runningTaskPercent(item)
-	if plain {
-		filled, empty := progressBlocks(percent, queueBarWidth)
-		return filled + empty + " " + pct
-	}
-	return renderProgressBar(percent, queueBarWidth, stageStyle, styles) +
-		" " + styles.AccentText.Render(pct)
-}
-
-// completedReductionCell returns a completed item's size reduction for the
-// progress column ("-79%"), or blank when unknown.
-func completedReductionCell(item spindle.QueueItem) string {
-	if !strings.EqualFold(item.Stage, "completed") {
-		return ""
-	}
-	enc := item.Encoding
-	if enc == nil || enc.EncodedSize <= 0 || enc.SizeReductionPercent <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("-%.0f%%", enc.SizeReductionPercent)
-}
-
-// runningTaskPercent returns the primary running task's percent.
-func runningTaskPercent(item spindle.QueueItem) float64 {
-	for _, t := range item.Tasks {
-		if t.IsWorking() && t.Progress.Percent > 0 {
-			return clampPercent(t.Progress.Percent)
-		}
-	}
-	return 0
+	return styles.MutedText.Render(text)
 }
 
 // queueStageCell returns the stage column text and style for an item.
@@ -439,12 +409,18 @@ func queueStageCell(item spindle.QueueItem, styles Styles) (string, lipgloss.Sty
 	return strings.ToLower(label), style
 }
 
-// queuePercentCell returns the progress column text for an item: the primary
-// running task's percent, or blank.
-func queuePercentCell(item spindle.QueueItem) string {
-	for _, t := range item.Tasks {
-		if t.IsWorking() && t.Progress.Percent > 0 {
-			return fmt.Sprintf("%3.0f%%", clampPercent(t.Progress.Percent))
+// queueFileCount returns completed files, never the current file's position.
+func queueFileCount(item spindle.QueueItem) string {
+	_, totals := item.EpisodeSnapshot()
+	if totals.Planned == 0 {
+		return ""
+	}
+	if item.Stage == "completed" {
+		return fmt.Sprintf("%d/%d", totals.Final, totals.Planned)
+	}
+	if task := item.PrimaryTask(); task != nil {
+		if count, ok := stageThroughput(stageDisplay(task.Type).totals, item, totals); ok {
+			return fmt.Sprintf("%d/%d", count, totals.Planned)
 		}
 	}
 	return ""

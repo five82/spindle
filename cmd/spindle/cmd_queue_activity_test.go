@@ -54,13 +54,16 @@ func TestPrintTaskLinesOverlapAndIdle(t *testing.T) {
 		{Type: "ripping", State: "running", Progress: httpapi.ProgressResponse{Percent: 25, Message: "Ripping second title"}},
 		{Type: "encoding", State: "running", ActiveAssetKey: "s05_001", Progress: httpapi.ProgressResponse{Percent: 60, Message: "Encoding first title"}},
 	}
+	tasks[0].Activities = []queue.Activity{{State: "running", Message: "Ripping second title", Completed: 25, Total: 100, Unit: "MakeMKV units"}}
+	tasks[1].Activities = []queue.Activity{{State: "running", AssetKey: "s05_001", Message: "Encoding first title", Completed: 60, Total: 100, Unit: "frames"}}
 	out := captureStdout(t, func() { printTaskLines("", tasks, false) })
-	for _, want := range []string{"Progress (ripping): Ripping second title (25%)", "Progress (encoding): Encoding first title (60%)"} {
+	for _, want := range []string{"Progress (ripping): Ripping second title (25/100 MakeMKV units)", "Progress (encoding): s05_001: Encoding first title (60/100 frames)"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in %q", want, out)
 		}
 	}
 	tasks[1].ActiveAssetKey = ""
+	tasks[1].Activities = []queue.Activity{{State: "waiting", Operation: "input", Message: "waiting for a ripped asset"}}
 	out = captureStdout(t, func() { printTaskLines("", tasks, false) })
 	if !strings.Contains(out, "Waiting (encoding): waiting for a ripped asset") || strings.Contains(out, "Encoding first title") || strings.Contains(out, "60%") {
 		t.Fatalf("idle encoder showed stale progress: %q", out)

@@ -110,7 +110,7 @@ func TestInspectorRendersTabsAndEpisodeCollapse(t *testing.T) {
 	if len(m.detailState.episodeCollapsed) != 1 {
 		t.Fatal("missing item changed collapse state")
 	}
-	if got := stripANSI(m.renderEpisodesTab(spindle.QueueItem{})); !strings.Contains(got, "No episodes") {
+	if got := stripANSI(m.renderEpisodesTab(spindle.QueueItem{})); !strings.Contains(got, "No selected files") {
 		t.Fatalf("empty episodes tab = %q", got)
 	}
 }

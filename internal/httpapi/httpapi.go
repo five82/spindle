@@ -433,6 +433,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	opts := LogQueryOpts{
+		Stage: q.Get("stage"), Asset: q.Get("asset"), TaskID: q.Get("task"), Attempt: q.Get("attempt"),
 		Component: q.Get("component"),
 		Lane:      q.Get("lane"),
 		Request:   q.Get("request"),

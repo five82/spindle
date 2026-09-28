@@ -71,6 +71,7 @@ type Options struct {
 
 // Model is the root application state for Bubble Tea.
 type Model struct {
+	now func() time.Time // Test clock for producer-age disclosure.
 	// Configuration
 	ctx       context.Context
 	client    *spindle.Client
@@ -131,7 +132,7 @@ type Model struct {
 
 	// Log filters modal state (separate from Modal interface for simplicity)
 	showLogFilters    bool
-	logFilterInputs   [4]textinput.Model // level, component, lane, request
+	logFilterInputs   [8]textinput.Model // level, component, lane, request, stage, asset, task, attempt
 	logFilterFocusIdx int
 
 	// Transient error display
@@ -252,11 +253,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case itemEventErrorMsg:
+		if msg.itemID == m.itemEvents.itemID {
+			m.itemEvents.fetchError = msg.err
+			m.updateInspectorViewport()
+		}
 		m.errorMsg = "Events fetch failed"
 		m.errorExpiry = time.Now().Add(5 * time.Second)
 		return m, nil
 
 	case logErrorMsg:
+		if msg.generation == m.logState.generation && msg.source == m.logState.mode && (msg.source == logSourceDaemon || msg.itemID == m.logState.lastItemID) {
+			m.logState.fetchError = msg.err
+		}
 		m.errorMsg = "Log fetch failed"
 		m.errorExpiry = time.Now().Add(5 * time.Second)
 		return m, nil
@@ -266,6 +274,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case problemsLogErrorMsg:
+		if msg.itemID == m.problemsState.lastItemID {
+			m.problemsState.fetchError = msg.err
+			m.updateInspectorViewport()
+		}
 		m.errorMsg = "Problems fetch failed"
 		m.errorExpiry = time.Now().Add(5 * time.Second)
 		return m, nil

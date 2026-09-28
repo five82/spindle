@@ -1,507 +1,178 @@
 package ui
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
-// sectionOrder asserts that each name appears in got, in the given order.
 func sectionOrder(t *testing.T, got string, names ...string) {
 	t.Helper()
 	last := -1
 	for _, name := range names {
 		idx := strings.Index(got, name)
-		if idx == -1 {
-			t.Fatalf("overview missing section %q, got:\n%s", name, got)
-		}
-		if idx < last {
-			t.Fatalf("section %q out of order, got:\n%s", name, got)
+		if idx < 0 || idx < last {
+			t.Fatalf("section %q missing/out of order:\n%s", name, got)
 		}
 		last = idx
 	}
 }
-
 func overviewFor(t *testing.T, item spindle.QueueItem) string {
 	t.Helper()
-	m := New(Options{ThemeName: "slate"})
+	m := New(Options{ThemeName: "slate", PrefsPath: t.TempDir() + "/prefs.json"})
+	m.width = 100
 	return stripANSI(m.renderDetailContent(item, 100))
 }
 
-func TestOverviewActiveItem_FixedSkeleton(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID:    1,
-		Stage: "encoding",
+func TestOverviewStableSkeletonAndConcurrentWork(t *testing.T) {
+	started := time.Now().Add(-time.Minute).Format(time.RFC3339)
+	item := spindle.QueueItem{ID: 1, Stage: "ripping", Metadata: json.RawMessage(`{"media_type":"tv"}`), CreatedAt: started,
+		Episodes: []spindle.EpisodeStatus{{Key: "a"}, {Key: "b", RippedPath: "rip"}},
+		Encoding: &spindle.EncodingStatus{Resolution: "1920x1080", InputFile: "Title 01"},
 		Tasks: []spindle.Task{
-			{Type: "ripping", State: "done"},
-			{Type: "encoding", State: "running", ActiveAssetKey: "movie", Progress: spindle.TaskProgress{Percent: 42, Message: "pass 1"}},
-		},
-		Encoding: &spindle.EncodingStatus{
-			Percent:             42,
-			Resolution:          "1920x1080",
-			Preset:              "6",
-			Encoder:             "svt-av1",
-			EstimatedTotalBytes: 4 << 30,
-		},
-		PrimaryAudioDescription: "TrueHD 7.1",
-	})
-
-	sectionOrder(t, got, "Pipeline", "Media", "Output")
-	if strings.Contains(got, "Attention") {
-		t.Fatalf("healthy item must not render Attention, got:\n%s", got)
-	}
-	for _, want := range []string{"Encoding", "42%", "1920x1080", "TrueHD 7.1", "svt-av1"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("overview missing %q, got:\n%s", want, got)
-		}
-	}
-}
-
-func TestRipEncodeOverlapUsesIndependentTaskProgress(t *testing.T) {
-	item := spindle.QueueItem{
-		ID: 2, Stage: "ripping",
-		Tasks: []spindle.Task{
-			{Type: "ripping", State: "running", ActiveAssetKey: "s05_002", Progress: spindle.TaskProgress{Percent: 25, Message: "Ripping second title"}},
-			{Type: "encoding", State: "running", ActiveAssetKey: "s05_001", Progress: spindle.TaskProgress{Percent: 60, Message: "Encoding first title"}},
-		},
-	}
+			{Type: "ripping", State: "running", ActiveAssetKey: "a", Activities: []spindle.Activity{{Operation: "optical_read", AssetKey: "a", State: "running", Message: "Reading title 03", StartedAt: started, Completed: 25, Total: 100, Unit: "MakeMKV units"}}},
+			{Type: "encoding", State: "running", ActiveAssetKey: "b", Progress: spindle.TaskProgress{Percent: 49}, Activities: []spindle.Activity{{ID: "video", Operation: "encoding", AssetKey: "b", State: "running", Message: "Accepted video frames", StartedAt: started, Completed: 47, Total: 100, Unit: "frames"}}},
+			{Type: "apply", State: "pending", DependsOn: []string{"encoding", "subtitling"}},
+		}}
 	got := overviewFor(t, item)
-	for _, want := range []string{"◉ Ripping", "25%", "Ripping second title", "◉ Encoding", "60%", "Encoding first title"} {
+	sectionOrder(t, got, "Pipeline", "Media", "Output", "Episodes", "created")
+	for _, want := range []string{"Running Ripping", "1/2 done", "0/2 done", "Reading title 03", "47/100 frames", "Needs Encoding + Subtitling"} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("overlap missing %q:\n%s", want, got)
+			t.Errorf("missing %q: %s", want, got)
 		}
 	}
-	if got := plainTaskStrip(item); got != "◉◉" {
-		t.Fatalf("overlap task indicators = %q", got)
+	if strings.Contains(got, "49%") || strings.Contains(got, "ETA") {
+		t.Fatal("unscoped percentage/ETA", got)
 	}
-	item.Tasks[0].State = "done"
-	item.Stage = "episode_identification" // Item 2's coarse stage lagged encoding.
-	if got := itemDisplayStage(item); got != "encoding" {
-		t.Fatalf("display stage = %q, want encoding", got)
-	}
-	if got := queuePercentCell(item); strings.TrimSpace(got) != "60%" {
-		t.Fatalf("queue progress = %q, want encoder progress", got)
+	if plainTaskStrip(item) != "◉◉○" {
+		t.Fatal(plainTaskStrip(item))
 	}
 }
 
-func TestOverviewIdleEncodingLooksPending(t *testing.T) {
-	item := spindle.QueueItem{
-		ID: 1, Stage: "ripping",
-		Tasks: []spindle.Task{
-			{Type: "ripping", State: "running", Progress: spindle.TaskProgress{Percent: 14}},
-			{Type: "encoding", State: "running"},
-		},
+func TestEncoderInputWaitIsNotResourceWait(t *testing.T) {
+	item := spindle.QueueItem{Tasks: []spindle.Task{{Type: "encoding", State: "running", Activities: []spindle.Activity{{Operation: "input", State: "waiting", Message: "Waiting for first rip; encoder slot reserved"}}}}}
+	got := overviewFor(t, item)
+	if !strings.Contains(got, "Waiting for first rip; encoder slot reserved") || strings.Contains(got, "Running Encoding") {
+		t.Fatal(got)
 	}
-	idle := overviewFor(t, item)
-	item.Tasks[1].State = "pending"
-	if pending := overviewFor(t, item); idle != pending {
-		t.Fatalf("idle encoding differs from pending:\n%s\nwant:\n%s", idle, pending)
-	}
-
-	item.Tasks[1].State = "running"
-	item.Tasks[1].ActiveAssetKey = "movie"
-	item.Tasks[1].Progress.Message = "Phase 1/1 - Encoding movie"
-	active := overviewFor(t, item)
-	if !strings.Contains(active, "◉ Encoding") || strings.Contains(active, "waiting for rip") {
-		t.Fatalf("active encoder not shown as active:\n%s", active)
-	}
-
-	item.Encoding = &spindle.EncodingStatus{Substage: "complete"}
-	item.Tasks[1].ActiveAssetKey = "" // Encode completion clears the active asset.
-	item.Episodes = []spindle.EpisodeStatus{{Key: "ep1", EncodedPath: "/encoded/ep1"}, {Key: "ep2"}}
-	idle = overviewFor(t, item)
-	item.Tasks[1].State = "pending"
-	if pending := overviewFor(t, item); idle != pending {
-		t.Fatalf("encoder between TV rips differs from pending:\n%s\nwant:\n%s", idle, pending)
+	item.Tasks[0].State = "pending"
+	item.Tasks[0].Activities = []spindle.Activity{{Operation: "resources", State: "waiting", Message: "Waiting for encode held by #2/encoding"}}
+	if got := overviewFor(t, item); !strings.Contains(got, "held by #2") {
+		t.Fatal(got)
 	}
 }
 
-func TestOverviewFailedItem_AttentionFirst(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID:           2,
-		Stage:        "failed",
-		ErrorMessage: "ffmpeg exited 1",
-		Tasks: []spindle.Task{
-			{Type: "encoding", State: "failed", Error: "ffmpeg exited 1", Attempts: 3},
-		},
-	})
-
-	sectionOrder(t, got, "Attention", "Pipeline")
-	if !strings.Contains(got, "ffmpeg exited 1") {
-		t.Fatalf("overview missing error message, got:\n%s", got)
-	}
-}
-
-func TestOverviewReviewItem_ShowsReasons(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID:            3,
-		Stage:         "encoding",
-		NeedsReview:   true,
-		ReviewReasons: []string{"subtitle no-match"},
-	})
-
-	sectionOrder(t, got, "Attention", "Pipeline")
-	if !strings.Contains(got, "subtitle no-match") {
-		t.Fatalf("overview missing review reason, got:\n%s", got)
-	}
-}
-
-func TestOverviewEncoderWarning_RendersInAttention(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID:    6,
-		Stage: "encoding",
-		Encoding: &spindle.EncodingStatus{
-			Warning: "bit-depth fallback: encoding at 8-bit",
-		},
-	})
-
-	sectionOrder(t, got, "Attention", "Warning", "Pipeline")
-	if !strings.Contains(got, "bit-depth fallback: encoding at 8-bit") {
-		t.Fatalf("overview missing encoder warning, got:\n%s", got)
-	}
-}
-
-func TestOverviewCompletedItem_OutputResults(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID:        4,
-		Stage:     "completed",
-		CreatedAt: "2026-07-05T10:00:00Z",
-		UpdatedAt: "2026-07-05T12:30:00Z",
-		Tasks: []spindle.Task{
-			{Type: "encoding", State: "done"},
-		},
-		Episodes: []spindle.EpisodeStatus{
-			{Key: "main", Episode: 0, FinalPath: "/library/movies/Avatar (2009)/Avatar (2009).mkv"},
-		},
-		Encoding: &spindle.EncodingStatus{
-			OriginalSize:          20 << 30,
-			EncodedSize:           5 << 30,
-			SizeReductionPercent:  75,
-			AverageSpeed:          3.2,
-			EncodeDurationSeconds: 3600,
-			Validation: &spindle.EncodingValidation{
-				Passed: true,
-				Steps:  []spindle.EncodingValidationStep{{Name: "duration", Passed: true}},
-			},
-		},
-	})
-
-	sectionOrder(t, got, "Pipeline", "Output", "created")
-	for _, want := range []string{
-		"75% reduction", "3.2x avg", "Passed · 1/1",
-		"✓ duration", // passed runs list the named checks
-		"/library/movies/Avatar (2009)/Avatar (2009).mkv",
-		"Elapsed 2h 30m",
+func TestOverviewExceptionsLeadAndDoNotHideHistory(t *testing.T) {
+	for _, item := range []spindle.QueueItem{
+		{Stage: "failed", ErrorMessage: "disk full", Tasks: []spindle.Task{{Type: "encoding", State: "failed", Error: "disk full", Attempts: 3}}},
+		{NeedsReview: true, ReviewReasons: []string{"subtitle no-match"}},
+		{Encoding: &spindle.EncodingStatus{Warning: "bit-depth fallback"}},
+		{Episodes: []spindle.EpisodeStatus{{Key: "main", SubtitleSource: "none", SubtitleSkipReason: "no match"}}},
 	} {
+		got := overviewFor(t, item)
+		sectionOrder(t, got, "Attention", "Pipeline")
+		if !strings.Contains(got, "see 3 Problems") {
+			t.Fatal(got)
+		}
+	}
+}
+
+func TestOverviewCompletedItemUsesDeliveredFacts(t *testing.T) {
+	var v spindle.FinalValidation
+	if err := json.Unmarshal([]byte(`{"passed":true,"av_sync":{"passed":true}}`), &v); err != nil {
+		t.Fatal(err)
+	}
+	item := spindle.QueueItem{Stage: "completed", CreatedAt: "2026-07-05T10:00:00Z", UpdatedAt: "2026-07-05T12:30:00Z",
+		Episodes: []spindle.EpisodeStatus{{Key: "main", FinalPath: "/library/Air.mkv", FinalSizeBytes: 142 << 20, FinalValidation: &v, EncodeStats: &spindle.EncodeStats{EncodedSizeBytes: 190 << 20, EncodeSeconds: 60}, SubtitleSource: "opensubtitles", SubtitledPath: "sub"}},
+		Tasks:    []spindle.Task{{Type: "encoding", State: "done"}}, Encoding: &spindle.EncodingStatus{EncodedSize: 999, Validation: &spindle.EncodingValidation{Passed: true}}}
+	got := overviewFor(t, item)
+	sectionOrder(t, got, "Pipeline", "Output", "created")
+	for _, want := range []string{"142.00 MiB delivered", "190.00 MiB intermediate", "Final post-Apply: 1 passed", "/library/Air.mkv", "Elapsed 2h 30m", "OpenSubtitles SRT"} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("overview missing %q, got:\n%s", want, got)
+			t.Errorf("missing %q: %s", want, got)
 		}
 	}
 	if strings.Contains(got, "Attention") {
-		t.Fatalf("completed healthy item must not render Attention, got:\n%s", got)
+		t.Fatal(got)
 	}
 }
 
-func TestOverviewMediaRows_CuratedFormatting(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID:    7,
-		Stage: "encoding",
-		Encoding: &spindle.EncodingStatus{
-			Resolution:   "3840x2160",
-			DynamicRange: "hdr",
-			CropRequired: true,
-			CropFilter:   "crop=3840:2080:0:40",
-			Encoder:      "SVT-AV1",
-			Preset:       "6",
-			Tune:         "0",
-			Quality:      "CVVDP target 9.15-9.55 JOD (initial CRF 26 with adaptive priors, whole-chunk probes, CRF search 4.25-63.75, metric workers 4)",
-		},
-		PrimaryAudioDescription: "English | opus | 8ch | Surround 7.1",
-	})
-
-	for _, want := range []string{
-		"3840x2160 -> 3840x2080 HDR (cropped)",
-		"SVT-AV1 · Preset 6 · Tune 0",
-		"Quality  CVVDP target 9.15-9.55 JOD",
-		"English · opus · 8ch · Surround 7.1",
-	} {
+func TestOverviewMediaScopeAndQuality(t *testing.T) {
+	got := overviewFor(t, spindle.QueueItem{Encoding: &spindle.EncodingStatus{InputFile: "feature.mkv", Resolution: "3840x2160", OutputResolution: "3840x2080", DynamicRange: "HDR", Encoder: "SVT-AV1", Preset: "6", Tune: "0", Quality: "CVVDP target 9.15-9.55 JOD (initial CRF 26, metric workers 4)"}})
+	for _, want := range []string{"3840x2160 -> 3840x2080 cropped HDR (feature.mkv)", "SVT-AV1 preset 6", "CVVDP target 9.15-9.55 JOD"} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("overview missing %q, got:\n%s", want, got)
+			t.Error(got)
 		}
 	}
-	for _, reject := range []string{"3840:2080:0:40", "initial CRF", "metric workers"} {
-		if strings.Contains(got, reject) {
-			t.Fatalf("overview must not render %q, got:\n%s", reject, got)
-		}
+	if strings.Contains(got, "initial CRF") {
+		t.Fatal(got)
 	}
 }
-
 func TestSummarizeQuality(t *testing.T) {
-	tests := []struct{ in, want string }{
-		{
-			"CVVDP target 9.15-9.55 JOD (initial CRF 26 with adaptive priors, whole-chunk probes, CRF search 4.25-63.75, metric workers 4)",
-			"CVVDP target 9.15-9.55 JOD",
-		},
-		{
-			"SSIMULACRA2 target 82.0-86.0 (auto for SDR <=1080p; initial CRF 26 with adaptive priors, whole-chunk probes, CRF search 4.25-63.75, metric workers 4)",
-			"SSIMULACRA2 target 82.0-86.0",
-		},
-		// Fixed-CRF mode's parenthetical is the resolution tier, not
-		// search machinery: keep it.
-		{"CRF 26 (UHD)", "CRF 26 (UHD)"},
-		{"", ""},
-	}
-	for _, tc := range tests {
+	for _, tc := range []struct{ in, want string }{{"CVVDP target 9.15-9.55 JOD (initial CRF 26)", "CVVDP target 9.15-9.55 JOD"}, {"SSIMULACRA2 target 82-86 (metric workers 4)", "SSIMULACRA2 target 82-86"}, {"CRF 26 (UHD)", "CRF 26 (UHD)"}, {"", ""}} {
 		if got := summarizeQuality(tc.in); got != tc.want {
-			t.Fatalf("summarizeQuality(%q) = %q, want %q", tc.in, got, tc.want)
+			t.Fatalf("%q != %q", got, tc.want)
 		}
 	}
 }
-
-func TestOverviewSubSecondTaskDuration(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID:    8,
-		Stage: "encoding",
-		Tasks: []spindle.Task{{
-			Type:       "identifying",
-			State:      "done",
-			StartedAt:  "2026-07-05T10:00:00Z",
-			FinishedAt: "2026-07-05T10:00:00Z",
-		}},
-	})
-
-	if !strings.Contains(got, "<1s") {
-		t.Fatalf("sub-second done task must show <1s, not a blank cell, got:\n%s", got)
+func TestOverviewTaskDurationsAndOverlap(t *testing.T) {
+	got := overviewFor(t, spindle.QueueItem{Stage: "completed", CreatedAt: "2026-07-05T10:00:00Z", UpdatedAt: "2026-07-05T12:00:00Z", Tasks: []spindle.Task{
+		{Type: "identification", State: "done", StartedAt: "2026-07-05T10:00:00Z", FinishedAt: "2026-07-05T10:00:00Z"},
+		{Type: "ripping", State: "done", StartedAt: "2026-07-05T10:00:00Z", FinishedAt: "2026-07-05T11:30:00Z"},
+		{Type: "encoding", State: "done", StartedAt: "2026-07-05T10:30:00Z", FinishedAt: "2026-07-05T12:00:00Z"},
+	}})
+	if !strings.Contains(got, "<1s") || !strings.Contains(got, "Elapsed 2h 0m (stages overlap)") {
+		t.Fatal(got)
 	}
 }
-
-func TestOverviewElapsedMarksOverlappingStages(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID:        9,
-		Stage:     "completed",
-		CreatedAt: "2026-07-05T10:00:00Z",
-		UpdatedAt: "2026-07-05T12:00:00Z",
-		Tasks: []spindle.Task{
-			{Type: "ripping", State: "done", StartedAt: "2026-07-05T10:00:00Z", FinishedAt: "2026-07-05T11:30:00Z"},
-			{Type: "encoding", State: "done", StartedAt: "2026-07-05T10:30:00Z", FinishedAt: "2026-07-05T12:00:00Z"},
-		},
-	})
-
-	if !strings.Contains(got, "Elapsed 2h 0m (stages overlap)") {
-		t.Fatalf("overlapping task durations must be annotated, got:\n%s", got)
+func TestOverviewTVDiscAndSourceSummary(t *testing.T) {
+	item := spindle.QueueItem{DiscNumber: 2, Metadata: json.RawMessage(`{"media_type":"tv"}`), Episodes: make([]spindle.EpisodeStatus, 4)}
+	got := overviewFor(t, item)
+	sectionOrder(t, got, "Pipeline", "Media", "Output", "Episodes")
+	if !strings.Contains(got, "Disc     2") || !strings.Contains(got, "4 source files") {
+		t.Fatal(got)
+	}
+	item.DiscNumber = 0
+	if strings.Contains(overviewFor(t, item), "Disc     ") {
+		t.Fatal("unset disc shown")
 	}
 }
-
-func TestOverviewTVItem_ShowsDiscNumber(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID:         5,
-		Stage:      "ripping",
-		DiscNumber: 2,
-		Metadata:   []byte(`{"media_type":"tv","season_number":1}`),
-	})
-
-	sectionOrder(t, got, "Pipeline", "Media", "Episodes")
-	if !strings.Contains(got, "Disc     2") {
-		t.Fatalf("overview missing disc number, got:\n%s", got)
+func TestCountsNeverUseManifestPosition(t *testing.T) {
+	for _, key := range []string{"a", "b", "c"} {
+		item := spindle.QueueItem{Episodes: []spindle.EpisodeStatus{{Key: "a"}, {Key: "b", RippedPath: "rip"}, {Key: "c"}}, Tasks: []spindle.Task{{Type: "encoding", State: "running", ActiveAssetKey: key, Progress: spindle.TaskProgress{Percent: 49}}, {Type: "ripping", State: "running", ActiveAssetKey: key}}}
+		got := strings.Join(strings.Fields(overviewFor(t, item)), " ")
+		if !strings.Contains(got, "Encoding 0/3 done") || !strings.Contains(got, "Ripping 1/3 done") {
+			t.Fatal(got)
+		}
 	}
 }
-
-func TestOverviewOmitsUnsetDiscNumber(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID:       6,
-		Stage:    "encoding",
-		Metadata: []byte(`{"media_type":"movie"}`),
-	})
-
-	if strings.Contains(got, "Disc     ") {
-		t.Fatalf("overview unexpectedly shows an unset disc number, got:\n%s", got)
+func TestMilestonePercentNeverGetsBar(t *testing.T) {
+	for _, stage := range []string{"subtitling", "apply", "episode_identification"} {
+		got := overviewFor(t, spindle.QueueItem{Tasks: []spindle.Task{{Type: stage, State: "running", Progress: spindle.TaskProgress{Percent: 35, Message: "Working"}}}})
+		if !strings.Contains(got, "Working") || strings.Contains(got, "35%") || strings.Contains(got, "█") {
+			t.Fatal(got)
+		}
 	}
 }
-
-func TestOverviewTVItem_EpisodeSummary(t *testing.T) {
-	episodes := make([]spindle.EpisodeStatus, 4)
-	for i := range episodes {
-		episodes[i].Key = string(rune('a' + i))
-		episodes[i].Episode = i + 1
-	}
-	got := overviewFor(t, spindle.QueueItem{
-		ID:       5,
-		Stage:    "ripping",
-		Episodes: episodes,
-	})
-
-	sectionOrder(t, got, "Pipeline", "Episodes")
-	if !strings.Contains(got, "4 planned") {
-		t.Fatalf("overview missing episode summary, got:\n%s", got)
+func TestSubtitleCompletedCountsIncludeSkipsNotMux(t *testing.T) {
+	for _, g := range []*spindle.SubtitleGenerationStatus{{OpenSubtitles: 7}, {OpenSubtitles: 4, Skipped: 3}, {Skipped: 7}} {
+		got := overviewFor(t, spindle.QueueItem{Episodes: make([]spindle.EpisodeStatus, 7), SubtitleGeneration: g, Tasks: []spindle.Task{{Type: "subtitling", State: "done"}, {Type: "apply", State: "pending"}}})
+		if !strings.Contains(got, "7/7 done") || strings.Contains(got, "7 applied") {
+			t.Fatal(got)
+		}
 	}
 }
-
-func TestOverviewRunningStageCountUsesActiveEpisodePosition(t *testing.T) {
-	episodes := make([]spindle.EpisodeStatus, 6)
-	for i := range episodes {
-		episodes[i].Key = string(rune('a' + i))
-	}
-	episodes[0].RippedPath = "/ripped/a.mkv"
-
-	got := overviewFor(t, spindle.QueueItem{
-		ID:       6,
-		Stage:    "ripping",
-		Episodes: episodes,
-		Tasks: []spindle.Task{
-			{
-				Type:           "ripping",
-				State:          "running",
-				ActiveAssetKey: "b",
-				Progress: spindle.TaskProgress{
-					Percent: 24,
-					Message: "Phase 2/6 - Ripping title 1",
-				},
-			},
-		},
-	})
-
-	normalized := strings.Join(strings.Fields(got), " ")
-	if !strings.Contains(normalized, "Ripping 2/6") {
-		t.Fatalf("overview running count does not follow active episode, got:\n%s", got)
-	}
-	if !strings.Contains(normalized, "6 planned · 1 ripped") {
-		t.Fatalf("overview completion summary should remain completion-based, got:\n%s", got)
-	}
-}
-
-func TestOverviewRippingCountDoesNotUseEpisodeOrder(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID: 4, Stage: "ripping",
-		Episodes: []spindle.EpisodeStatus{
-			{Key: "s01_001", SourceTitleID: 3},
-			{Key: "s01_002", SourceTitleID: 1},
-			{Key: "s01_003", SourceTitleID: 2},
-		},
-		Tasks: []spindle.Task{{
-			Type: "ripping", State: "running", ActiveAssetKey: "s01_002",
-			Progress: spindle.TaskProgress{Percent: 1, Message: "Phase 1/3 - Ripping title 1"},
-		}},
-	})
-	if !strings.Contains(strings.Join(strings.Fields(got), " "), "Ripping 1/3") {
-		t.Fatalf("first rip should read 1/3 regardless of episode order, got:\n%s", got)
-	}
-}
-
-func TestOverviewRippingCountAfterTitleCompletes(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID: 4, Stage: "ripping",
-		Episodes: []spindle.EpisodeStatus{
-			{Key: "s01_001"},
-			{Key: "s01_002", RippedPath: "/ripped/title1.mkv"},
-			{Key: "s01_003"},
-		},
-		Tasks: []spindle.Task{{
-			Type: "ripping", State: "running", ActiveAssetKey: "s01_002",
-			Progress: spindle.TaskProgress{Percent: 33, Message: "Phase 1/3 - Ripped title 1"},
-		}},
-	})
-	if !strings.Contains(strings.Join(strings.Fields(got), " "), "Ripping 1/3") {
-		t.Fatalf("completed active rip should not be counted twice, got:\n%s", got)
-	}
-}
-
-func TestOverviewSubtitlingHidesUnreportedProgress(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID:    6,
-		Stage: "subtitling",
-		Tasks: []spindle.Task{
-			{
-				Type:  "subtitling",
-				State: "running",
-				Progress: spindle.TaskProgress{
-					Message: "Generating subtitles",
-				},
-			},
-		},
-	})
-
-	if !strings.Contains(got, "Subtitling") || !strings.Contains(got, "Generating subtitles") {
-		t.Fatalf("overview missing running subtitle activity, got:\n%s", got)
-	}
-	if strings.Contains(got, "0%") || strings.Contains(got, strings.Repeat("░", 20)) {
-		t.Fatalf("overview shows a false zero-progress subtitle bar, got:\n%s", got)
-	}
-}
-
-func TestOverviewSubtitlingShowsReportedProgress(t *testing.T) {
-	got := overviewFor(t, spindle.QueueItem{
-		ID:    6,
-		Stage: "subtitling",
-		Tasks: []spindle.Task{
-			{
-				Type:     "subtitling",
-				State:    "running",
-				Progress: spindle.TaskProgress{Percent: 35},
-			},
-		},
-	})
-
-	if !strings.Contains(got, "35%") || !strings.Contains(got, "█") {
-		t.Fatalf("overview missing reported subtitle progress, got:\n%s", got)
-	}
-}
-
-func TestOverviewSubtitlingThroughputUsesStageDecisions(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		generation *spindle.SubtitleGenerationStatus
-		want       string
-		absent     string
-	}{
-		{"all adopted", &spindle.SubtitleGenerationStatus{OpenSubtitles: 7}, "Subtitled 7/7", "skipped"},
-		{"mixed", &spindle.SubtitleGenerationStatus{OpenSubtitles: 4, Skipped: 3}, "Subs checked 7/7 3 skipped", "Subtitled 7/7"},
-		{"all skipped", &spindle.SubtitleGenerationStatus{Skipped: 7}, "Subs checked 7/7 7 skipped", "Subtitled 0/7"},
-		{"no decisions (disabled)", nil, "Subtitled", "Subtitled 0/7"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := overviewFor(t, spindle.QueueItem{
-				ID:                 6,
-				Stage:              "encoding",
-				Episodes:           make([]spindle.EpisodeStatus, 7),
-				SubtitleGeneration: tc.generation,
-				Tasks: []spindle.Task{
-					{Type: "subtitling", State: "done"},
-					{Type: "apply", State: "pending"},
-				},
-			})
-			normalized := strings.Join(strings.Fields(got), " ")
-			if !strings.Contains(normalized, tc.want) || strings.Contains(normalized, tc.absent) {
-				t.Fatalf("overview subtitle throughput = unexpected, got:\n%s", got)
-			}
-		})
-	}
-}
-
 func TestWrapText(t *testing.T) {
-	tests := []struct {
-		name  string
+	for _, tc := range []struct {
 		in    string
 		width int
-		want  []string
-	}{
-		{"short passes through", "hello world", 20, []string{"hello world"}},
-		{"wraps at word boundary", "alpha beta gamma", 11, []string{"alpha beta", "gamma"}},
-		{"hard-splits long words", "abcdefghij", 4, []string{"abcd", "efgh", "ij"}},
-		{"zero width passes through", "hello", 0, []string{"hello"}},
-		{"empty input", "", 10, []string{""}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := wrapText(tc.in, tc.width)
-			if len(got) != len(tc.want) {
-				t.Fatalf("wrapText() = %q, want %q", got, tc.want)
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Fatalf("wrapText() = %q, want %q", got, tc.want)
-				}
-			}
-		})
+		want  string
+	}{{"hello world", 20, "hello world"}, {"alpha beta gamma", 11, "alpha beta|gamma"}, {"abcdefghij", 4, "abcd|efgh|ij"}, {"hello", 0, "hello"}, {"", 10, ""}, {"\u754c\u754c\u754c", 4, "\u754c\u754c|\u754c"}} {
+		if got := strings.Join(wrapText(tc.in, tc.width), "|"); got != tc.want {
+			t.Fatalf("%q != %q", got, tc.want)
+		}
 	}
 }

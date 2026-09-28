@@ -95,9 +95,8 @@ func TestRunWorkerProcess(t *testing.T) {
 			t.Setenv("SPINDLE_TEST_ENCODE_WORKER", tc.mode)
 			sess := encoderSession(t, ripspec.Envelope{})
 			sess.Task = &queue.Task{}
-			item := sess.Item
 			rep := &spindleReporter{
-				sess: sess, item: item,
+				sess:   sess,
 				logger: slog.New(slog.NewTextHandler(io.Discard, nil)), now: time.Now,
 			}
 			result, err := runWorkerProcess(context.Background(), rep.logger, "input.mkv", t.TempDir(), rep)
@@ -108,7 +107,7 @@ func TestRunWorkerProcess(t *testing.T) {
 				t.Fatalf("result=%+v, want result=%v", result, tc.wantResult)
 			}
 			if tc.wantResult {
-				snap, err := encodingstate.Unmarshal(item.EncodingDetailsJSON)
+				snap, err := encodingstate.Unmarshal(sess.Task.EncodingDetailsJSON)
 				if err != nil || snap.TotalFrames != 42 {
 					t.Fatalf("worker event not replayed: %+v %v", snap, err)
 				}

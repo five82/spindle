@@ -65,8 +65,9 @@ naming the view Esc returns to, followed by the prominent item number
 `Problems › ID #1 › Title`).
 
 Breakpoints: below 80 columns the queue drops its AGE column and header
-labels abbreviate; at >= 100 columns the queue's percent column gains an
-inline progress bar. 80x24 MUST stay functional — verify layout changes
+labels abbreviate; at >= 100 columns the queue's completed-file counts gain
+outcome labels. Percentages belong to measurable, named operations in the
+inspector, never the item or a synthetic stage sequence. 80x24 MUST stay functional — verify layout changes
 there.
 
 ## Elevation (guide §6)
@@ -102,7 +103,7 @@ scrim).
 Follows the guide's Tier 1/2 assignments: `q` quits, `?`/`h` help, `/`
 filter, `r` refresh, `Esc` back, `g`/`G` top/bottom, `Ctrl+D`/`Ctrl+U`
 half-page. Single-letter keys bind both cases and display lowercase.
-Documented exceptions: `t` (episodes) vs `T` (theme), and vim's `n`/`N`
+Documented exceptions: `t` (file details) vs `T` (theme), and vim's `n`/`N`
 match cycling. The footer key strip shows the current context's keys with
 drop-priority ranks for narrow terminals; a key not shown in the footer must
 not be required to complete a task.

@@ -41,13 +41,20 @@ func TestRefreshAndRetryWithRipSpec(t *testing.T) {
 	if err != nil || len(tasks) != 0 {
 		t.Fatalf("stale tasks: %+v, %v", tasks, err)
 	}
-	item.EncodingDetailsJSON = `{"progress":42}`
-	if err := s.UpdateEncodingDetails(item); err != nil {
+	if err := s.EnsureTasks(got, []TaskSpec{{Type: StageRipping}}); err != nil {
 		t.Fatal(err)
 	}
-	got, err = s.GetByID(item.ID)
-	if err != nil || got.EncodingDetailsJSON != item.EncodingDetailsJSON || got.RipSpecData != `{"new":true}` {
-		t.Fatalf("telemetry: %+v, %v", got, err)
+	tasks, err = s.TasksForItem(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks[0].EncodingDetailsJSON = `{"progress":42}`
+	if err := s.UpdateTaskProgress(tasks[0]); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.TasksForItem(item.ID)
+	if err != nil || stored[0].EncodingDetailsJSON != tasks[0].EncodingDetailsJSON {
+		t.Fatalf("task telemetry: %+v %v", stored, err)
 	}
 }
 

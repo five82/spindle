@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -8,76 +9,90 @@ import (
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
-func TestTaskBoardStateRowsAndElapsed(t *testing.T) {
-	m := newAppTestModel(t)
-	styles := m.theme.Styles()
-	now := time.Now()
-	started := now.Add(-10 * time.Minute).Format(time.RFC3339)
-	finished := now.Add(-5 * time.Minute).Format(time.RFC3339)
-	for _, tc := range []struct {
-		name string
-		item spindle.QueueItem
-		want []string
-	}{
-		{"pending without tasks", spindle.QueueItem{Stage: "ripping"}, []string{"tasks pending"}},
-		{"failed without tasks", spindle.QueueItem{Stage: "failed"}, []string{"Failed"}},
-		{"completed without tasks", spindle.QueueItem{Stage: "completed"}, []string{"Complete"}},
-		{"concurrent finished tasks", spindle.QueueItem{Stage: "completed", CreatedAt: started, UpdatedAt: finished, Tasks: []spindle.Task{
-			{Type: "ripping", State: "done", StartedAt: started, FinishedAt: finished, Attempts: 2},
-			{Type: "encoding", State: "done", StartedAt: started, FinishedAt: finished},
-		}}, []string{"stages overlap", "attempt 2"}},
-		{"running and failed details", spindle.QueueItem{Stage: "encoding", Tasks: []spindle.Task{
-			{Type: "copy", State: "running", Progress: spindle.TaskProgress{Message: "Copying", TotalBytes: 1024 * 1024, BytesCopied: 512 * 1024}, ActiveAssetKey: "episode-1"},
-			{Type: "ripping", State: "failed", Error: "disc read error"},
-			{Type: "encoding", State: "pending"},
-		}}, []string{"Copying (episode-1)", "disc read error", "0.50 MiB"}},
-		{"subsecond finish", spindle.QueueItem{Tasks: []spindle.Task{{Type: "copy", State: "done", StartedAt: started, FinishedAt: started}}}, []string{"<1s"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+func TestOperationAgeControlsDisclosure(t *testing.T) {
+	now := time.Date(2026, 9, 28, 1, 0, 0, 0, time.UTC)
+	for _, age := range []time.Duration{100 * time.Millisecond, 999 * time.Millisecond, time.Second, 4 * time.Second, 9999 * time.Millisecond, 10 * time.Second, 10 * time.Minute} {
+		t.Run(age.String(), func(t *testing.T) {
+			m := newAppTestModel(t)
+			m.now = func() time.Time { return now }
+			item := spindle.QueueItem{Tasks: []spindle.Task{{Type: "encoding", State: "running", ActiveAssetKey: "main", Activities: []spindle.Activity{{ID: "video", Operation: "encoding", AssetKey: "main", State: "running", Message: "Accepted video", StartedAt: now.Add(-age).Format(time.RFC3339Nano), Completed: 0, Total: 100, Unit: "frames"}}}}}
 			var b strings.Builder
-			m.renderTaskBoard(&b, tc.item, styles, 100)
+			m.renderTaskBoard(&b, item, m.theme.Styles(), 76)
 			got := stripANSI(b.String())
-			for _, want := range tc.want {
-				if !strings.Contains(got, want) {
-					t.Errorf("board %q missing %q", got, want)
-				}
+			if strings.Contains(got, "0/100 frames") != (age >= 10*time.Second) {
+				t.Fatalf("age %s: %s", age, got)
+			}
+			if strings.Contains(got, "Accepted video") != (age >= time.Second) {
+				t.Fatalf("compact disclosure at %s: %s", age, got)
 			}
 		})
 	}
 }
 
-func TestTaskETAAndExtrasFallback(t *testing.T) {
-	now := time.Now().Add(-10 * time.Minute).Format(time.RFC3339)
-	base := spindle.Task{Type: "copy", State: "running", StartedAt: now, Progress: spindle.TaskProgress{Percent: 50}}
-	if got := taskETA(spindle.QueueItem{}, base, spindle.EpisodeTotals{}); !strings.HasPrefix(got, "ETA ") {
-		t.Fatalf("derived ETA = %q", got)
-	}
-	base.StartedAt = time.Now().Add(time.Hour).Format(time.RFC3339)
-	if got := taskETA(spindle.QueueItem{}, base, spindle.EpisodeTotals{}); got != "" {
-		t.Fatalf("future ETA = %q", got)
-	}
-	base.StartedAt = ""
-	if got := taskETA(spindle.QueueItem{}, base, spindle.EpisodeTotals{}); got != "" {
-		t.Fatalf("no start ETA = %q", got)
-	}
-	for _, percent := range []float64{0, 100} {
-		base.Progress.Percent = percent
-		if got := taskETA(spindle.QueueItem{}, base, spindle.EpisodeTotals{}); got != "" {
-			t.Fatalf("percent %v ETA = %q", percent, got)
+func TestUnknownMeasurementAndStaleContactAreNotZeroProgress(t *testing.T) {
+	m := newAppTestModel(t)
+	a := spindle.Activity{Operation: "transcribing", State: "running", Message: "Batch of 3 tracks", StartedAt: time.Now().Add(-5 * time.Minute).Format(time.RFC3339), UpdatedAt: time.Now().Add(-4 * time.Minute).Format(time.RFC3339)}
+	item := spindle.QueueItem{Tasks: []spindle.Task{{Type: "analysis", State: "running", Activities: []spindle.Activity{a}}}}
+	for _, stale := range []bool{false, true} {
+		if stale {
+			m.snapshot.LastError = errors.New("offline")
+		}
+		var b strings.Builder
+		m.renderTaskBoard(&b, item, m.theme.Styles(), 76)
+		got := stripANSI(b.String())
+		if strings.Contains(got, "0%") || strings.Contains(got, "█") || !strings.Contains(got, "No within-operation percentage") {
+			t.Fatal(got)
+		}
+		if stale && !strings.Contains(got, "Stale snapshot") {
+			t.Fatal(got)
 		}
 	}
-	encode := spindle.Task{Type: "encoding", Progress: spindle.TaskProgress{Percent: 50}}
-	item := spindle.QueueItem{Encoding: &spindle.EncodingStatus{ETASeconds: 75, FPS: 60, Substage: " pass 2 "}}
-	if got := strings.Join(taskExtras(item, encode, spindle.EpisodeTotals{Planned: 1}), " "); !strings.Contains(got, "ETA 1m 15s") || !strings.Contains(got, "60 fps") || !strings.Contains(got, "pass 2") {
-		t.Fatalf("encode extras = %q", got)
+}
+
+func TestOnlyScopedFreshProducerETAIsShown(t *testing.T) {
+	task := spindle.Task{Type: "apply", State: "running", StartedAt: time.Now().Add(-10 * time.Minute).Format(time.RFC3339), Progress: spindle.TaskProgress{Percent: 50}}
+	if got := taskETA(task, time.Now()); got != "" {
+		t.Fatal("extrapolated milestone", got)
 	}
-	if got := runningTaskMessage(spindle.Task{ActiveAssetKey: "EP1"}); got != "EP1" {
-		t.Fatalf("key-only message = %q", got)
+	task.Type = "encoding"
+	task.ActiveAssetKey = "main"
+	task.Encoding = &spindle.EncodingStatus{ETASeconds: 75, ChunksComplete: 10, ChunksTotal: 20, Probing: 2}
+	task.Activities = []spindle.Activity{{ID: "video", State: "running", UpdatedAt: time.Now().Format(time.RFC3339)}}
+	if got := taskETA(task, time.Now()); got != "~2m remaining for this file's video" {
+		t.Fatal(got)
 	}
-	if got := runningTaskMessage(spindle.Task{ActiveAssetKey: "EP1", Progress: spindle.TaskProgress{Message: "Processing ep1"}}); got != "Processing ep1" {
-		t.Fatalf("duplicate key message = %q", got)
+	task.Encoding.Calibrating = true
+	if taskETA(task, time.Now()) != "" || !strings.Contains(strings.Join(taskExtras(task, time.Now()), " "), "Calibrating quality") {
+		t.Fatal("warmup exposed ETA or lost its explanation")
 	}
-	if count, ok := stageTaskCount("encoded", spindle.QueueItem{}, spindle.Task{State: "running", ActiveAssetKey: "missing"}, nil, spindle.EpisodeTotals{Planned: 3, Encoded: 1}); !ok || count != 1 {
-		t.Fatalf("missing active count = %d, %v", count, ok)
+	task.Encoding.Calibrating = false
+	if got := strings.Join(taskExtras(task, time.Now()), " "); !strings.Contains(got, "10/20 chunks accepted") || !strings.Contains(got, "2 probing") {
+		t.Fatal(got)
+	}
+	task.Activities[0].UpdatedAt = time.Now().Add(-time.Minute).Format(time.RFC3339)
+	if got := taskETA(task, time.Now()); got != "" {
+		t.Fatal("stale ETA", got)
+	}
+	task.Activities[0].State = "done"
+	if got := taskETA(task, time.Now()); got != "" {
+		t.Fatal("completed video ETA", got)
+	}
+}
+
+func TestTaskDependenciesWaitsAndStoppedState(t *testing.T) {
+	item := spindle.QueueItem{Tasks: []spindle.Task{{Type: "encoding", State: "done"}, {Type: "subtitling", State: "running"}, {Type: "apply", State: "pending", DependsOn: []string{"encoding", "subtitling"}}}}
+	got := overviewFor(t, item)
+	if !strings.Contains(got, "Needs Subtitling") || strings.Contains(got, "Needs Encoding") {
+		t.Fatal(got)
+	}
+	item.UserStopped = true
+	got = overviewFor(t, item)
+	if !strings.Contains(got, "Stopped by operator") || strings.Contains(got, "Running Subtitling") {
+		t.Fatal(got)
+	}
+	item.UserStopped = false
+	item.Tasks[1].Type = "future-stage"
+	if got = overviewFor(t, item); !strings.Contains(got, "future-stage") {
+		t.Fatal(got)
 	}
 }

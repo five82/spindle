@@ -43,6 +43,20 @@ func TestLogsEndpointParsesQueryOptionsAndFiltersOldItemHistory(t *testing.T) {
 	if len(response.Events) != 1 || response.Events[0].Msg != "current item" {
 		t.Fatalf("events: %+v", response.Events)
 	}
+	for _, attempt := range []string{"1", "2"} {
+		buffer.Append(LogEntry{Time: now, ItemID: item.ID, Stage: "encoding", Level: "WARN", Msg: "scoped warning", Fields: map[string]string{"episode_key": "title03", "task_id": "99", "attempt": attempt}})
+	}
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/logs?item=1&stage=encoding&asset=title03&task=99&attempt=2", nil))
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code)
+	}
+	if err = json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Events) != 1 || response.Events[0].Fields["attempt"] != "2" {
+		t.Fatalf("scoped filters leaked another attempt: %+v", response.Events)
+	}
 	w = httptest.NewRecorder()
 	srv.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/logs?item=invalid&limit=bad&since=bad", nil))
 	if w.Code != http.StatusOK {

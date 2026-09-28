@@ -23,11 +23,18 @@ func startVerboseStep(rep reporter.Reporter, name string) func() {
 // so callers without one still get verbose logging.
 func startPhase(c *perf.Collector, rep reporter.Reporter, name string) func() {
 	start := time.Now()
+	update := reporter.StageProgress{Lane: "work", State: "running", Stage: name, Message: name}
+	if name == "Video encoding" {
+		update.Lane, update.Stage = "video", "encoding"
+	}
+	rep.StageProgress(update)
 	rep.Verbose(fmt.Sprintf("%s started at %s", name, start.Format(time.RFC3339)))
 	return func() {
 		stop := time.Now()
 		rep.Verbose(fmt.Sprintf("%s stopped at %s (duration %s)", name, stop.Format(time.RFC3339), stop.Sub(start).Round(time.Millisecond)))
 		c.RecordPhase(name, start, stop)
+		update.State, update.Message = "ended", name+" ended"
+		rep.StageProgress(update)
 	}
 }
 

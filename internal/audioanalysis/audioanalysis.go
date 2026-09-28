@@ -17,6 +17,7 @@ import (
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/audio"
 	"github.com/five82/spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/textutil"
@@ -44,9 +45,8 @@ func New(
 }
 
 // Run executes the analysis stage: per-episode commentary detection from
-// the RIPPED sources. This stage runs concurrently with encoding, so it is
-// progress-silent (encoding owns the item progress columns) and persists
-// envelope changes only through merge operations.
+// the RIPPED sources. Task-owned progress is independent of concurrent encoding;
+// envelope changes persist only through merge operations.
 func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	item := sess.Item
 	logger := sess.Logger
@@ -68,6 +68,8 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			sess.SetActiveEpisode(in.Key)
+			sess.Activity(queue.Activity{Operation: "probe", AssetKey: in.Key, Message: "Inspecting source audio"})
 			result, err := ffprobe.Inspect(ctx, "", in.Input.Path)
 			if err != nil {
 				return fmt.Errorf("ffprobe %s: %w", in.Input.Path, err)
@@ -93,6 +95,8 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		)
 	}
 
+	sess.ClearActiveEpisode()
+	sess.Activity(queue.Activity{Operation: "analysis", State: "done", Message: "Audio decisions recorded"})
 	return sess.MergeSave(func(env *ripspec.Envelope) error {
 		env.Attributes.AudioAnalysis = analysisData
 		return nil
@@ -204,6 +208,7 @@ func (h *Handler) detectCommentary(
 	// Primary fingerprint: reuse the shared transcript artifact when episode
 	// identification already produced one; otherwise transcribe the primary
 	// once and record it as the artifact so subtitle generation can reuse it.
+	sess.Activity(queue.Activity{Operation: "reference", AssetKey: epKey, Message: "Preparing primary-audio reference transcript"})
 	primaryFP := h.primaryFingerprint(ctx, sess, path, primaryAudioIdx, epKey)
 
 	// Transcribe ALL candidates in one WhisperX invocation. Each candidate is
@@ -228,7 +233,9 @@ func (h *Handler) detectCommentary(
 				Purpose:    "commentary_candidate",
 			}
 		}
-		results, err := h.transcriber.TranscribeBatch(ctx, reqs)
+		results, err := h.transcriber.TranscribeBatch(ctx, reqs, func(phase transcription.Phase, _ time.Duration) {
+			sess.Activity(queue.Activity{Operation: string(phase), AssetKey: epKey, Message: fmt.Sprintf("%s: %d candidate audio tracks", phase, len(reqs))})
+		})
 		if err != nil {
 			logger.Warn("candidate transcription batch failed",
 				"event_type", "commentary_detection_failed",
@@ -283,6 +290,7 @@ func (h *Handler) detectCommentary(
 			"candidate_number", candidateNumber,
 			"candidate_count", candidateCount,
 		)
+		sess.Activity(queue.Activity{Operation: "classifying", AssetKey: epKey, Message: fmt.Sprintf("Classifying audio track %d", c.audioIndex), Completed: int64(i), Total: int64(len(candidates)), Unit: "tracks"})
 		ref := h.classifyTrack(ctx, logger, c.audioIndex, c.stream, epKey, text, transcribed)
 		if ref != nil {
 			comms = append(comms, *ref)

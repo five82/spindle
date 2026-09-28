@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/five82/spindle/internal/encodingstate"
 )
 
 // CurrentVersion is the envelope schema version. Parse rejects any version
@@ -88,6 +90,8 @@ type Asset struct {
 	TitleID        int    `json:"title_id"`
 	Path           string `json:"path"`
 	Status         string `json:"status"`
+	SizeBytes      int64  `json:"size_bytes,omitempty"`
+	Route          string `json:"route,omitempty"`
 	SubtitlesMuxed bool   `json:"subtitles_muxed,omitempty"`
 	ErrorMsg       string `json:"error_msg,omitempty"`
 }
@@ -183,6 +187,7 @@ func (d *AudioAnalysisData) EpisodeAnalysis(key string) *EpisodeAudioAnalysis {
 type SubtitleGenRecord struct {
 	EpisodeKey       string   `json:"episode_key"`
 	Source           string   `json:"source"`
+	SkipReason       string   `json:"skip_reason,omitempty"`
 	SubtitlePath     string   `json:"subtitle_path"`
 	Segments         int      `json:"segments"`
 	DurationSec      float64  `json:"duration_sec,omitempty"`
@@ -225,6 +230,9 @@ type FinalValidation struct {
 type FinalValidationEntry struct {
 	EpisodeKey   string       `json:"episode_key,omitempty"`
 	OutputPath   string       `json:"output_path"`
+	Resolution   string       `json:"resolution,omitempty"`
+	VideoCodec   string       `json:"video_codec,omitempty"`
+	Audio        []string     `json:"audio,omitempty"`
 	Passed       bool         `json:"passed"`
 	FailedChecks []string     `json:"failed_checks,omitempty"`
 	Error        string       `json:"error,omitempty"`
@@ -261,26 +269,27 @@ type RipStats struct {
 // TV disc would otherwise lose every episode's stats but the last.
 // TargetQuality is Reel's aggregate CRF-search summary, stored verbatim.
 type EncodeStats struct {
-	EpisodeKey            string             `json:"episode_key"`
-	Width                 int                `json:"width,omitempty"`
-	Height                int                `json:"height,omitempty"`
-	HDR                   bool               `json:"hdr,omitempty"`
-	ResolutionClass       string             `json:"resolution_class,omitempty"`
-	VideoDurationSeconds  float64            `json:"video_duration_seconds,omitempty"`
-	EncodeSeconds         float64            `json:"encode_seconds,omitempty"`
-	Speed                 float64            `json:"speed,omitempty"`
-	Chunks                int                `json:"chunks,omitempty"`
-	Frames                int                `json:"frames,omitempty"`
-	OriginalSizeBytes     int64              `json:"original_size_bytes,omitempty"`
-	EncodedSizeBytes      int64              `json:"encoded_size_bytes,omitempty"`
-	SizeReductionPercent  float64            `json:"size_reduction_percent,omitempty"`
-	PhaseSeconds          map[string]float64 `json:"phase_seconds,omitempty"`
-	WorkerMeanActive      float64            `json:"worker_mean_active,omitempty"`
-	WorkerPeakActive      int                `json:"worker_peak_active,omitempty"`
-	WorkerMax             int                `json:"worker_max,omitempty"`
-	EncodeSlotWaitSeconds float64            `json:"encode_slot_wait_seconds,omitempty"`
-	TargetQuality         json.RawMessage    `json:"target_quality,omitempty"`
-	GrainTreatment        *GrainTreatment    `json:"grain_treatment,omitempty"`
+	Validation            *encodingstate.Validation `json:"validation,omitempty"`
+	EpisodeKey            string                    `json:"episode_key"`
+	Width                 int                       `json:"width,omitempty"`
+	Height                int                       `json:"height,omitempty"`
+	HDR                   bool                      `json:"hdr,omitempty"`
+	ResolutionClass       string                    `json:"resolution_class,omitempty"`
+	VideoDurationSeconds  float64                   `json:"video_duration_seconds,omitempty"`
+	EncodeSeconds         float64                   `json:"encode_seconds,omitempty"`
+	Speed                 float64                   `json:"speed,omitempty"`
+	Chunks                int                       `json:"chunks,omitempty"`
+	Frames                int                       `json:"frames,omitempty"`
+	OriginalSizeBytes     int64                     `json:"original_size_bytes,omitempty"`
+	EncodedSizeBytes      int64                     `json:"encoded_size_bytes,omitempty"`
+	SizeReductionPercent  float64                   `json:"size_reduction_percent,omitempty"`
+	PhaseSeconds          map[string]float64        `json:"phase_seconds,omitempty"`
+	WorkerMeanActive      float64                   `json:"worker_mean_active,omitempty"`
+	WorkerPeakActive      int                       `json:"worker_peak_active,omitempty"`
+	WorkerMax             int                       `json:"worker_max,omitempty"`
+	EncodeSlotWaitSeconds float64                   `json:"encode_slot_wait_seconds,omitempty"`
+	TargetQuality         json.RawMessage           `json:"target_quality,omitempty"`
+	GrainTreatment        *GrainTreatment           `json:"grain_treatment,omitempty"`
 }
 
 // GrainTreatment records Reel's grain-gate verdict for one encode: what the

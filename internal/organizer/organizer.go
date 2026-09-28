@@ -333,7 +333,7 @@ func moveOrCopyWithProgress(src, dst string, progress fileutil.ProgressFunc) err
 	if err := os.Rename(src, dst); err == nil {
 		if progress != nil {
 			if info, statErr := os.Stat(dst); statErr == nil {
-				progress(fileutil.CopyProgress{BytesCopied: info.Size(), TotalBytes: info.Size()})
+				progress(fileutil.CopyProgress{Phase: "done", BytesCopied: info.Size(), TotalBytes: info.Size()})
 			}
 		}
 		return nil
@@ -446,7 +446,29 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 					// The existing file is this key's delivered output, so
 					// record it: the routing check and the audit both read
 					// the final asset as the record of where it landed.
-					if err := sess.SaveAssetSuccess(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath}); err != nil {
+					if err := sess.MergeSave(func(env *ripspec.Envelope) error {
+						env.Assets.AddAsset(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath, SizeBytes: info.Size(), Route: target})
+						// Apply checked the staged file, not an unrelated existing
+						// destination. Equal size does not establish identical content.
+						if srcInfo != nil && os.SameFile(srcInfo, info) {
+							return nil
+						}
+						v := env.Attributes.FinalValidation
+						if v == nil {
+							v = &ripspec.FinalValidation{}
+							env.Attributes.FinalValidation = v
+						}
+						v.Passed = false
+						entry := ripspec.FinalValidationEntry{EpisodeKey: key, OutputPath: destPath, Error: "Existing destination reused without revalidation"}
+						for i := range v.Entries {
+							if strings.EqualFold(v.Entries[i].EpisodeKey, key) {
+								v.Entries[i] = entry
+								return nil
+							}
+						}
+						v.Entries = append(v.Entries, entry)
+						return nil
+					}); err != nil {
 						return "", copied, err
 					}
 					continue
@@ -470,8 +492,10 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 		if target == "review" {
 			transfer = moveOrCopyWithProgress
 		}
+		sess.SetActiveEpisode(key)
 		copyStart := time.Now()
-		var lastCopyLog time.Time
+		var lastCopyLog, lastActivity time.Time
+		lastPhase := ""
 		if err := transfer(asset.Path, destPath, func(p fileutil.CopyProgress) {
 			sess.Task.ProgressBytesCopied = completedBytes + p.BytesCopied
 			sess.Task.ProgressTotalBytes = totalBytes
@@ -479,6 +503,14 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 			pushProgress()
 
 			now := time.Now()
+			if p.Phase != lastPhase || now.Sub(lastActivity) >= 2*time.Second {
+				lastPhase, lastActivity = p.Phase, now
+				a := queue.Activity{Operation: p.Phase, AssetKey: key, Message: "Copying to " + target, Completed: p.BytesCopied, Total: p.TotalBytes, Unit: "bytes"}
+				if p.Phase != "copying" {
+					a.Message, a.Total, a.Unit = "Finalizing verified copy to "+target, 0, ""
+				}
+				sess.Activity(a)
+			}
 			if lastCopyLog.IsZero() || now.Sub(lastCopyLog) >= copyProgressLogInterval || p.BytesCopied >= p.TotalBytes {
 				lastCopyLog = now
 				logger.Info("copy progress",
@@ -514,9 +546,15 @@ func (h *Handler) copyAssetsToDir(ctx context.Context, logger *slog.Logger, sess
 		} else {
 			copySidecarSubtitle(logger, asset.Path, destPath)
 		}
-		if err := sess.SaveAssetSuccess(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath}); err != nil {
+		info, err := os.Stat(destPath)
+		if err != nil {
+			return "", copied, fmt.Errorf("stat delivered output: %w", err)
+		}
+		if err := sess.SaveAssetSuccess(ripspec.AssetKindFinal, ripspec.Asset{EpisodeKey: key, Path: destPath, SizeBytes: info.Size(), Route: target}); err != nil {
 			return "", copied, err
 		}
+		sess.Activity(queue.Activity{Operation: "published", AssetKey: key, State: "done", Message: "Published to " + target})
+		sess.ClearActiveEpisode()
 		lastPath = destPath
 		copied++
 		if info, statErr := os.Stat(asset.Path); statErr == nil {

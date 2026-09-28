@@ -11,6 +11,7 @@ import (
 
 // CopyProgress reports bytes copied during a verified copy.
 type CopyProgress struct {
+	Phase       string // copying, finalizing, done
 	BytesCopied int64
 	TotalBytes  int64
 }
@@ -97,6 +98,9 @@ func CopyFileVerifiedWithProgress(src, dst string, progress ProgressFunc) error 
 		return fmt.Errorf("copy data: %w", err)
 	}
 
+	if progress != nil {
+		progress(CopyProgress{Phase: "finalizing", BytesCopied: written, TotalBytes: srcSize})
+	}
 	if err := dstFile.Close(); err != nil {
 		removeBestEffort(dst)
 		return fmt.Errorf("close destination: %w", err)
@@ -114,6 +118,9 @@ func CopyFileVerifiedWithProgress(src, dst string, progress ProgressFunc) error 
 		return fmt.Errorf("hash mismatch: source %s, destination %s", srcSum, dstSum)
 	}
 
+	if progress != nil {
+		progress(CopyProgress{Phase: "done", BytesCopied: written, TotalBytes: srcSize})
+	}
 	return nil
 }
 
@@ -128,7 +135,7 @@ func LinkOrCopyFileVerified(src, dst string, progress ProgressFunc) error {
 	if err := os.Link(src, dst); err == nil {
 		if progress != nil {
 			if info, statErr := os.Stat(src); statErr == nil {
-				progress(CopyProgress{BytesCopied: info.Size(), TotalBytes: info.Size()})
+				progress(CopyProgress{Phase: "done", BytesCopied: info.Size(), TotalBytes: info.Size()})
 			}
 		}
 		return nil
@@ -150,7 +157,7 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 	if n > 0 {
 		pw.copied += int64(n)
 		if pw.onWrite != nil {
-			pw.onWrite(CopyProgress{BytesCopied: pw.copied, TotalBytes: pw.total})
+			pw.onWrite(CopyProgress{Phase: "copying", BytesCopied: pw.copied, TotalBytes: pw.total})
 		}
 	}
 	return n, err

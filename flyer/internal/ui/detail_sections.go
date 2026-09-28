@@ -9,238 +9,159 @@ import (
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
-// renderEstimatedSize renders the estimated output size during encoding.
-// Only displays when progress >= 10% for estimate accuracy.
 func renderEstimatedSize(w fieldWriter, item spindle.QueueItem) {
-	enc := item.Encoding
-	if enc == nil {
-		return
+	for _, task := range item.Tasks {
+		if e := task.Encoding; task.IsWorking() && e != nil && e.Percent >= 10 && e.EstimatedTotalBytes > 0 && e.EncodedSize == 0 {
+			w.field("File est", "~"+formatBytes(e.EstimatedTotalBytes)+" before Apply", w.styles.AccentText)
+		}
 	}
-	// Only show after 10% progress for accuracy
-	if enc.Percent < 10 {
-		return
-	}
-	if enc.EstimatedTotalBytes <= 0 {
-		return
-	}
-	// Once the final size is known the estimate is stale noise.
-	if enc.EncodedSize > 0 {
-		return
-	}
-
-	value := "~" + formatBytes(enc.EstimatedTotalBytes)
-	if enc.CurrentOutputBytes > 0 {
-		value += fmt.Sprintf(" (%s written)", formatBytes(enc.CurrentOutputBytes))
-	}
-	w.field("Est", value, w.styles.AccentText)
 }
 
-// renderSizeResult renders the file size comparison (input -> output with reduction %).
 func renderSizeResult(w fieldWriter, item spindle.QueueItem) {
-	enc := item.Encoding
-	if enc == nil || enc.OriginalSize <= 0 || enc.EncodedSize <= 0 {
-		return
+	var delivered, intermediate, original int64
+	var published, measured, originals int
+	for _, ep := range item.Episodes {
+		if ep.FinalPath != "" {
+			published++
+			if ep.FinalSizeBytes > 0 {
+				delivered += ep.FinalSizeBytes
+				measured++
+			}
+			if s := ep.EncodeStats; s != nil && s.OriginalSizeBytes > 0 {
+				original += s.OriginalSizeBytes
+				originals++
+			}
+		}
+		if ep.EncodeStats != nil {
+			intermediate += ep.EncodeStats.EncodedSizeBytes
+		}
 	}
-
-	value := formatBytes(enc.OriginalSize) + " -> " + formatBytes(enc.EncodedSize) +
-		fmt.Sprintf(" (%.0f%% reduction)", enc.SizeReductionPercent)
-	w.field("Size", value, w.styles.Text)
+	if published > 0 {
+		value := fmt.Sprintf("%d files published", published)
+		if measured == published {
+			value += "; " + formatBytes(delivered) + " delivered"
+		} else {
+			value += "; total size unavailable"
+		}
+		if strings.EqualFold(item.Stage, "completed") && originals == published && measured == published && original > delivered {
+			value += fmt.Sprintf(" (-%.0f%% vs source)", 100*(1-float64(delivered)/float64(original)))
+		}
+		w.field("Output", value, w.styles.Text)
+	}
+	if intermediate > 0 {
+		w.field("Reel", formatBytes(intermediate)+" intermediate (before Apply)", w.styles.MutedText)
+	}
 }
 
-// renderVideoSpecs renders the video specs line: source resolution, the
-// cropped resolution when a crop was applied, and HDR status. One honest
-// row; the raw crop filter stays in the logs.
 func renderVideoSpecs(w fieldWriter, item spindle.QueueItem) {
 	enc := item.Encoding
 	if enc == nil || enc.Resolution == "" {
 		return
 	}
-
-	res := enc.Resolution
-	cropped := ""
-	if enc.CropRequired && enc.CropFilter != "" {
-		if dims := strings.TrimPrefix(enc.CropFilter, "crop="); dims != enc.CropFilter {
-			if fields := strings.SplitN(dims, ":", 3); len(fields) >= 2 {
-				cropped = fields[0] + "x" + fields[1]
-			}
-		}
-	}
-
-	var parts []string
-	if cropped != "" && cropped != res {
-		parts = append(parts, res+" -> "+cropped)
-	} else {
-		parts = append(parts, res)
+	value := enc.Resolution
+	if enc.OutputResolution != "" && enc.OutputResolution != enc.Resolution {
+		value += " -> " + enc.OutputResolution + " cropped"
 	}
 	if enc.DynamicRange != "" {
-		parts = append(parts, strings.ToUpper(enc.DynamicRange))
+		value += " " + enc.DynamicRange
 	}
-	if cropped != "" && cropped != res {
-		parts = append(parts, "(cropped)")
-	}
-
-	w.field("Video", strings.Join(parts, " "), w.styles.AccentText)
+	w.field("Video", value+" ("+enc.InputFile+")", w.styles.AccentText)
 }
 
-// renderAudioInfo renders the source audio format. The daemon reports it
-// pipe-separated; normalize to the middot the rest of the overview uses.
 func renderAudioInfo(w fieldWriter, item spindle.QueueItem) {
-	desc := strings.ReplaceAll(item.PrimaryAudioDescription, " | ", " · ")
-	desc = strings.ReplaceAll(desc, "|", "·")
-	w.field("Audio", desc, w.styles.Text)
+	// Apply can rewrite audio. Never relabel its final facts as source audio.
+	for _, ep := range item.Episodes {
+		if v := ep.FinalValidation; v != nil && len(v.Audio) > 0 {
+			w.field("Audio out", ep.Key+": "+strings.Join(v.Audio, "; "), w.styles.Text)
+		}
+	}
+	if item.PrimaryAudioDescription != "" {
+		w.field("Primary", strings.ReplaceAll(item.PrimaryAudioDescription, "|", ";"), w.styles.Text)
+	}
 }
 
-// renderEncodingConfig renders the encoding config: a scannable headline row
-// (encoder + preset + tune) with reel's verbose quality string on its own row.
 func renderEncodingConfig(w fieldWriter, item spindle.QueueItem) {
 	enc := item.Encoding
 	if enc == nil || enc.Preset == "" {
 		return
 	}
-	var parts []string
-
-	if enc.Encoder != "" {
-		parts = append(parts, enc.Encoder)
-	}
-	parts = append(parts, fmt.Sprintf("Preset %s", enc.Preset))
-	if enc.Tune != "" {
-		parts = append(parts, fmt.Sprintf("Tune %s", enc.Tune))
-	}
-
-	w.field("Config", strings.Join(parts, " · "), w.styles.AccentText)
-	w.field("Quality", summarizeQuality(enc.Quality), w.styles.AccentText)
+	w.field("Config", fmt.Sprintf("%s preset %s; tune %s (%s)", enc.Encoder, enc.Preset, enc.Tune, enc.InputFile), w.styles.MutedText)
+	w.field("Quality", summarizeQuality(enc.Quality), w.styles.MutedText)
 }
 
-// summarizeQuality trims reel's quality description to what an operator
-// cares about: the metric and its target band, or the fixed CRF and tier.
-// Target-quality mode appends a parenthetical describing the CRF search
-// machinery (initial CRF, adaptive priors, probe strategy, worker count);
-// that is dropped. Parentheticals without search machinery -- fixed-CRF
-// mode's resolution tier in "CRF 26 (UHD)" -- are kept.
 func summarizeQuality(q string) string {
 	q = strings.TrimSpace(q)
 	open := strings.LastIndex(q, "(")
 	if open <= 0 || !strings.HasSuffix(q, ")") {
 		return q
 	}
-	paren := q[open:]
 	for _, marker := range []string{"initial CRF", "CRF search", "metric workers"} {
-		if strings.Contains(paren, marker) {
+		if strings.Contains(q[open:], marker) {
 			return strings.TrimSpace(q[:open])
 		}
 	}
 	return q
 }
 
-// renderContentID renders the episode identification summary: method and
-// match counts, the reference corpus, and sequence problems a completed
-// identification left behind.
 func renderContentID(w fieldWriter, item spindle.QueueItem) {
-	cid := item.ContentID
-	if cid == nil || strings.TrimSpace(cid.Method) == "" {
+	c := item.ContentID
+	if c == nil || strings.TrimSpace(c.Method) == "" {
 		return
 	}
-	value := cid.Method
-	if cid.TranscribedEpisodes > 0 || cid.MatchedEpisodes > 0 {
-		value += fmt.Sprintf(" · %d matched · %d unresolved · %d low confidence",
-			cid.MatchedEpisodes, cid.UnresolvedEpisodes, cid.LowConfidenceCount)
+	w.field("ID", fmt.Sprintf("%s; %d matched; %d unresolved; %d low confidence", c.Method, c.MatchedEpisodes, c.UnresolvedEpisodes, c.LowConfidenceCount), w.styles.Text)
+	w.field("Ref", fmt.Sprintf("%s; %d reference episodes", c.ReferenceSource, c.ReferenceEpisodes), w.styles.Text)
+	if c.Completed && !c.SequenceContiguous {
+		w.field("Sequence", "Episode sequence not contiguous", w.styles.WarningText)
 	}
-	w.field("ID", value, w.styles.Text)
-
-	if src := strings.TrimSpace(cid.ReferenceSource); src != "" {
-		ref := src
-		if cid.ReferenceEpisodes > 0 {
-			ref += fmt.Sprintf(" · %d reference episodes", cid.ReferenceEpisodes)
-		}
-		w.field("Ref", ref, w.styles.Text)
-	}
-
-	// The flags only mean something once identification has finished.
-	if cid.Completed {
-		if !cid.SequenceContiguous {
-			w.fieldStyled("", w.styles.MutedText, "⚠ Episode sequence not contiguous", w.styles.WarningText)
-		}
-		if !cid.EpisodesSynchronized {
-			w.fieldStyled("", w.styles.MutedText, "⚠ Episodes not synchronized", w.styles.WarningText)
-		}
+	if c.Completed && !c.EpisodesSynchronized {
+		w.field("Identity", "Episodes not synchronized", w.styles.WarningText)
 	}
 }
 
-// renderEncodeStats renders duration and average speed (for completed).
 func renderEncodeStats(w fieldWriter, item spindle.QueueItem) {
-	enc := item.Encoding
-	if enc == nil || (enc.EncodeDurationSeconds <= 0 && enc.AverageSpeed <= 0) {
-		return
+	var seconds float64
+	var count int
+	for _, ep := range item.Episodes {
+		if s := ep.EncodeStats; s != nil && s.EncodeSeconds > 0 {
+			seconds += s.EncodeSeconds
+			count++
+		}
 	}
-
-	var parts []string
-	if enc.EncodeDurationSeconds > 0 {
-		dur := time.Duration(enc.EncodeDurationSeconds * float64(time.Second))
-		parts = append(parts, humanizeDurationLong(dur))
+	if count > 0 {
+		w.field("Encode", fmt.Sprintf("%d files; %s file wall time (excludes queue waits)", count, formatDuration(time.Duration(seconds*float64(time.Second)))), w.styles.Text)
 	}
-	if enc.AverageSpeed > 0 {
-		parts = append(parts, fmt.Sprintf("%.1fx avg", enc.AverageSpeed))
-	}
-
-	w.field("Encode", strings.Join(parts, " @ "), w.styles.Text)
 }
 
-// renderValidationSummary renders the validation result. Passed runs also
-// list the named checks -- "what was actually verified" without a tab
-// switch; failing runs get their step list in the Attention section, so
-// only the summary row renders here.
 func renderValidationSummary(w fieldWriter, item spindle.QueueItem) {
-	if item.Encoding == nil || item.Encoding.Validation == nil {
+	counts := make(map[string]int)
+	for _, ep := range item.Episodes {
+		counts[ep.FinalValidation.Verdict()]++
+	}
+	if len(item.Episodes) == 0 {
+		w.field("Checks", "Final checks not run", w.styles.MutedText)
 		return
 	}
-	v := item.Encoding.Validation
-	total := len(v.Steps)
-	if total == 0 {
-		return
-	}
-
-	passed := 0
-	for _, step := range v.Steps {
-		if step.Passed {
-			passed++
+	var parts []string
+	for _, state := range []string{"failed", "unavailable", "not run", "passed"} {
+		if n := counts[state]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, state))
 		}
 	}
-
-	value := fmt.Sprintf("%d/%d", passed, total)
-	if !v.Passed {
-		w.field("Checks", "Failed · "+value, w.styles.DangerText)
-		return
+	style := w.styles.SuccessText
+	if counts["unavailable"]+counts["not run"] > 0 {
+		style = w.styles.MutedText
 	}
-	w.field("Checks", "Passed · "+value, w.styles.SuccessText)
-	for _, step := range v.Steps {
-		name := strings.TrimSpace(step.Name)
-		if name == "" {
-			continue
-		}
-		icon, iconStyle := "✓", w.styles.SuccessText
-		if !step.Passed {
-			icon, iconStyle = "✗", w.styles.DangerText
-		}
-		w.b.WriteString(strings.Repeat(" ", detailFieldLabelWidth))
-		w.b.WriteString(iconStyle.Render(icon))
-		w.b.WriteString(" ")
-		w.b.WriteString(w.styles.MutedText.Render(name))
-		if details := strings.TrimSpace(step.Details); details != "" {
-			w.b.WriteString(" ")
-			w.b.WriteString(w.styles.FaintText.Render(details))
-		}
-		w.b.WriteString("\n")
+	if counts["failed"] > 0 {
+		style = w.styles.DangerText
 	}
+	w.field("Checks", "Final post-Apply: "+strings.Join(parts, "; "), style)
 }
 
-// renderFinalPath renders where finished files landed: the file path for
-// single-file items, the shared directory once a batch has final files.
 func renderFinalPath(w fieldWriter, item spindle.QueueItem) {
-	episodes, _ := item.EpisodeSnapshot()
 	var paths []string
-	for _, ep := range episodes {
-		if p := strings.TrimSpace(ep.FinalPath); p != "" {
-			paths = append(paths, p)
+	for _, ep := range item.Episodes {
+		if ep.FinalPath != "" {
+			paths = append(paths, ep.FinalPath)
 		}
 	}
 	if len(paths) == 0 {
@@ -248,32 +169,25 @@ func renderFinalPath(w fieldWriter, item spindle.QueueItem) {
 	}
 	value := paths[0]
 	if len(paths) > 1 {
-		value = filepath.Dir(paths[0]) + "/"
+		value = filepath.Dir(value) + "/ (per-file destinations in tab 2)"
 	}
 	w.field("Path", value, w.styles.Text)
 }
 
-// renderSubtitleSummary renders the subtitle source summary: a count for
-// multi-episode items, a plain source label for movies and single items.
 func renderSubtitleSummary(w fieldWriter, item spindle.QueueItem) {
-	episodes, _ := item.EpisodeSnapshot()
-	if len(episodes) == 0 {
-		return
-	}
-
-	count := 0
-	for _, ep := range episodes {
-		if strings.EqualFold(strings.TrimSpace(ep.SubtitleSource), "whisperx") {
-			count++
+	var adopted, applied, skipped int
+	for _, ep := range item.Episodes {
+		if ep.SubtitleSource == "opensubtitles" {
+			adopted++
+		}
+		if ep.SubtitledPath != "" {
+			applied++
+		}
+		if ep.SubtitleSource == "none" {
+			skipped++
 		}
 	}
-	if count == 0 {
-		return
+	if adopted+skipped > 0 {
+		w.field("Subs", fmt.Sprintf("%d OpenSubtitles SRT adopted; %d applied; %d skipped", adopted, applied, skipped), w.styles.Text)
 	}
-
-	if len(episodes) == 1 {
-		w.field("Subs", "WhisperX", w.styles.AccentText)
-		return
-	}
-	w.field("Subs", fmt.Sprintf("%d WhisperX", count), w.styles.AccentText)
 }

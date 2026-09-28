@@ -50,13 +50,23 @@ func TestWireRoundTrip(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 	item, _ := store.NewDisc("A", "fp1")
-	sess, err := stage.NewSession(context.Background(), store, item, nil)
+	if err := store.EnsureTasks(item, []queue.TaskSpec{{Type: queue.StageEncoding}}); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := store.TasksForItem(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.StartTask(tasks[0]); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := stage.NewSession(context.Background(), store, item, tasks[0])
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
 	var logBuf bytes.Buffer
 	sess.Logger = slog.New(slog.NewJSONHandler(io.MultiWriter(io.Discard, &logBuf), nil))
-	daemonRep := newSpindleReporter(sess, sess.Logger, "s01_001", 0, 1)
+	daemonRep := newSpindleReporter(sess, sess.Logger, "s01_001")
 	daemonRep.now = func() time.Time { return time.Now().Add(time.Hour) } // defeat throttle
 
 	var result *reel.Result
@@ -78,11 +88,11 @@ func TestWireRoundTrip(t *testing.T) {
 			result = res
 		}
 		if ev.Event == wireStageProgress {
-			got, getErr := store.GetByID(item.ID)
+			got, getErr := store.TasksForItem(item.ID)
 			if getErr != nil {
 				t.Fatalf("get after stage progress: %v", getErr)
 			}
-			snap, snapErr := encodingstate.Unmarshal(got.EncodingDetailsJSON)
+			snap, snapErr := encodingstate.Unmarshal(got[0].EncodingDetailsJSON)
 			if snapErr != nil {
 				t.Fatalf("snapshot after stage progress: %v", snapErr)
 			}
@@ -102,7 +112,7 @@ func TestWireRoundTrip(t *testing.T) {
 	}
 	found := false
 	for _, event := range events {
-		if event.Type == "encoding_substage" && event.EpisodeKey == "s01_001" && event.Substage == "Chunking" && event.Message == "Detecting shot cuts" {
+		if event.Type == "activity_running" && event.EpisodeKey == "s01_001" && event.Substage == "Chunking" && event.Message == "Detecting shot cuts" {
 			found = true
 		}
 	}
@@ -119,22 +129,22 @@ func TestWireRoundTrip(t *testing.T) {
 		t.Fatalf("result round-trip mismatch: %+v", result)
 	}
 
-	got, err := store.GetByID(item.ID)
+	got, err := store.TasksForItem(item.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	snap, err := encodingstate.Unmarshal(got.EncodingDetailsJSON)
+	snap, err := encodingstate.Unmarshal(got[0].EncodingDetailsJSON)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	if snap.InputFile != "in.mkv" || snap.Resolution != "1920x800" {
+	if snap.InputFile != "in.mkv" || snap.Resolution != "1920x1080" || snap.OutputResolution != "1920x800" {
 		t.Fatalf("initialization or crop not applied: %+v", snap)
 	}
 	if snap.Encoder != "svt-av1" || snap.AudioCodec != "opus" {
 		t.Fatalf("config not applied: %+v", snap)
 	}
-	if snap.TotalFrames != 1234 {
-		t.Fatalf("encoding started not applied: %+v", snap)
+	if snap.TotalFrames != 0 || snap.ETASeconds != 0 {
+		t.Fatalf("completed encode retained live counters: %+v", snap)
 	}
 	if snap.Warning != "test warning" {
 		t.Fatalf("warning not applied: %+v", snap)

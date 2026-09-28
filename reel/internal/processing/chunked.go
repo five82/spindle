@@ -8,7 +8,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	nativeaudio "github.com/five82/spindle/reel/internal/audio"
@@ -159,6 +158,7 @@ func processChunkedWithEncoder(
 			percent := int(float64(current) * 100 / float64(total))
 			now := time.Now()
 			if current == total || percent >= lastPlanPercent+5 || now.Sub(lastPlanProgress) >= 10*time.Second {
+				rep.StageProgress(reporter.StageProgress{Lane: "work", State: "running", Stage: "Shot cut detection", Message: "Scanning source frames", Completed: int64(current), Total: int64(total), Unit: "frames"})
 				rep.Verbose(fmt.Sprintf("Shot cut detection progress: %d%% (%d/%d frames)", percent, current, total))
 				lastPlanPercent = percent
 				lastPlanProgress = now
@@ -319,7 +319,7 @@ func processChunkedWithEncoder(
 		perfc.SetGrainTreatment(grainStats)
 		perfc.UpdateMeta(func(m *perf.Meta) { m.Denoise = encCfg.Denoise })
 		for _, line := range encode.GrainTreatmentSummary(grainStats) {
-			rep.StageProgress(reporter.StageProgress{Stage: "Encoding", Message: line})
+			rep.StageProgress(reporter.StageProgress{Stage: "Encoding", State: "done", Message: line})
 		}
 	}
 
@@ -337,7 +337,7 @@ func processChunkedWithEncoder(
 		m.Chunks = len(chunks)
 	})
 	rep.StageProgress(reporter.StageProgress{
-		Stage:   "Encoding",
+		Stage: "encoding", Lane: "video",
 		Message: fmt.Sprintf("Starting adaptive chunked encoding with up to %d workers", maxWorkers),
 	})
 	rep.EncodingStarted(uint64(vidInf.Frames))
@@ -347,11 +347,14 @@ func processChunkedWithEncoder(
 		at     time.Time
 		frames int
 	}
-	var speedMu sync.Mutex
 	var speedSamples []speedSample
 	const recentSpeedWindow = 60 * time.Second
 
+	var audio *audioJob
 	progressCallback := func(progress worker.Progress) {
+		if audio != nil {
+			audio.report(rep)
+		}
 		// Calculate average speed, recent rolling speed, and ETA.
 		elapsed := time.Since(startTime)
 		var speed float32
@@ -368,7 +371,6 @@ func processChunkedWithEncoder(
 			videoSeconds := float64(runFramesComplete) / fps
 			speed = float32(videoSeconds / elapsed.Seconds())
 
-			speedMu.Lock()
 			now := time.Now()
 			speedSamples = append(speedSamples, speedSample{at: now, frames: runFramesComplete})
 			cutoff := now.Add(-recentSpeedWindow)
@@ -388,31 +390,36 @@ func processChunkedWithEncoder(
 					recentSpeed = float32((float64(framesDelta) / fps) / secondsDelta)
 				}
 			}
-			speedMu.Unlock()
 
-			if recentSpeed == 0 {
-				recentSpeed = speed
-			}
-
-			if speed > 0 {
+			// A local estimate needs advancing recent samples after calibration.
+			if recentSpeed > 0 && elapsed >= 30*time.Second && (cfg.QualityMode != config.QualityModeTarget || progress.CalibrationReady) && progress.ChunksComplete >= 3 && progress.Percent() >= 10 {
 				remainingFrames := progress.FramesTotal - progress.FramesComplete
 				remainingVideoSeconds := float64(remainingFrames) / fps
-				eta = time.Duration(remainingVideoSeconds/float64(speed)) * time.Second
+				eta = time.Duration(remainingVideoSeconds/float64(recentSpeed)) * time.Second
 			}
 		}
 
+		unit := "encoded frames"
+		if cfg.QualityMode == config.QualityModeTarget {
+			unit = "accepted frames"
+		}
 		rep.EncodingProgress(reporter.ProgressSnapshot{
-			CurrentFrame:   uint64(progress.FramesComplete),
-			TotalFrames:    uint64(progress.FramesTotal),
-			Percent:        float32(progress.Percent()),
-			Speed:          speed,
-			RecentSpeed:    recentSpeed,
+			FrameUnit:    unit,
+			Calibrating:  cfg.QualityMode == config.QualityModeTarget && !progress.CalibrationReady,
+			CurrentFrame: uint64(progress.FramesComplete),
+			TotalFrames:  uint64(progress.FramesTotal),
+			Percent:      float32(progress.Percent()),
+			Speed:        speed,
+			RecentSpeed:  recentSpeed,
+			FPS:          speed * float32(fps),
+			InFlight:     progress.InFlight, EncodeSlotWaitSeconds: progress.EncodeSlotWaitSeconds,
 			ETA:            eta,
 			ChunksComplete: progress.ChunksComplete,
 			ChunksTotal:    progress.ChunksTotal,
 			ActiveWorkers:  progress.ActiveWorkers,
 			TargetWorkers:  progress.TargetWorkers,
 			MaxWorkers:     progress.MaxWorkers,
+			Probing:        progress.Probing, Scoring: progress.Scoring, Finishing: progress.Finishing,
 		})
 
 		perfc.RecordWorkerSample(perf.WorkerSample{
@@ -432,7 +439,7 @@ func processChunkedWithEncoder(
 	encodeCtx, cancelEncode := context.WithCancel(ctx)
 	defer cancelEncode()
 
-	audio := startAudioJob(encodeCtx, cancelEncode, inputPath, workDir, audioStreams, videoProps.DurationSecs, rep, perfc)
+	audio = startAudioJob(encodeCtx, cancelEncode, inputPath, workDir, audioStreams, videoProps.DurationSecs, rep, perfc)
 	// Every return path must stop audio and join its goroutine; canceling
 	// first keeps the join prompt on error returns.
 	defer func() {
@@ -544,6 +551,8 @@ type audioJob struct {
 	streams    []nativeaudio.EncodedStream
 	err        error
 	joined     bool
+	reported   bool
+	reporter   reporter.Reporter
 }
 
 // startAudioJob begins audio extraction in the background (it only reads the
@@ -555,11 +564,13 @@ type audioJob struct {
 // perf.json. An extraction error cancels the shared encode context so the
 // video encode stops promptly.
 func startAudioJob(ctx context.Context, cancel context.CancelFunc, inputPath, workDir string, streams []media.AudioStreamInfo, videoDurationSecs float64, rep reporter.Reporter, perfc *perf.Collector) *audioJob {
-	job := &audioJob{done: make(chan struct{}), finishStep: func() {}}
+	job := &audioJob{done: make(chan struct{}), finishStep: func() {}, reporter: rep}
 	if len(streams) == 0 {
+		job.reported = true
 		close(job.done)
 		return job
 	}
+	rep.StageProgress(reporter.StageProgress{Lane: "audio", Stage: "audio", Message: fmt.Sprintf("Extracting %d audio tracks", len(streams))})
 	job.finishStep = startVerboseStep(rep, "Audio extraction")
 	phaseStart := time.Now()
 	go func() {
@@ -579,9 +590,28 @@ func (a *audioJob) join() ([]nativeaudio.EncodedStream, error) {
 	if !a.joined {
 		<-a.done
 		a.finishStep()
+		a.report(a.reporter)
 		a.joined = true
 	}
 	return a.streams, a.err
+}
+
+// report is called only on the serialized video-reporting path or after it
+// joins. The audio goroutine never writes to a reporter or wire concurrently.
+func (a *audioJob) report(rep reporter.Reporter) {
+	if a.reported || rep == nil {
+		return
+	}
+	select {
+	case <-a.done:
+		a.reported = true
+		state, message := "done", "Audio extraction finished"
+		if a.err != nil {
+			state, message = "failed", a.err.Error()
+		}
+		rep.StageProgress(reporter.StageProgress{Lane: "audio", Stage: "audio", State: state, Message: message})
+	default:
+	}
 }
 
 func cvvdpDisplaySummary(cfg *config.Config, inf *video.Info) string {

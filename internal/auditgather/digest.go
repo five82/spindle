@@ -62,11 +62,16 @@ func writeDigestHeader(b *strings.Builder, r *Report, jsonPath string) {
 	}
 	for _, t := range r.Item.Tasks {
 		line := fmt.Sprintf("Task %s: %s", t.Type, t.State)
+		if t.ID > 0 {
+			line += fmt.Sprintf(" id=%d", t.ID)
+		}
 		if t.Attempts > 1 {
 			line += fmt.Sprintf(" (attempts=%d)", t.Attempts)
 		}
 		if t.State == "running" {
-			line += fmt.Sprintf(" %.1f%% %q", t.ProgressPercent, t.ProgressMessage)
+			if len(t.Activities) == 0 && t.ProgressMessage != "" {
+				line += fmt.Sprintf(" %q", t.ProgressMessage)
+			}
 			if t.ActiveAssetKey != "" {
 				line += " asset=" + t.ActiveAssetKey
 			}
@@ -75,6 +80,13 @@ func writeDigestHeader(b *strings.Builder, r *Report, jsonPath string) {
 			line += " error=" + t.Error
 		}
 		fmt.Fprintln(b, line)
+		for _, a := range t.Activities {
+			fmt.Fprintf(b, "  %s %s asset=%s: %s", a.State, a.Operation, a.AssetKey, a.Message)
+			if a.Total > 0 && a.Unit != "" {
+				fmt.Fprintf(b, " (%d/%d %s)", a.Completed, a.Total, a.Unit)
+			}
+			fmt.Fprintln(b)
+		}
 	}
 	phases := applicablePhases(r.StageGate)
 	fmt.Fprintf(b, "Applicable phases: %s\n", strings.Join(phases, ", "))

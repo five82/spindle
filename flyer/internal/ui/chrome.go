@@ -170,34 +170,5 @@ func wrapText(s string, width int) []string {
 		return []string{s}
 	}
 
-	var lines []string
-	var line string
-	for _, word := range strings.Fields(s) {
-		for lipgloss.Width(word) > width {
-			// Hard-split an overlong word.
-			if line != "" {
-				lines = append(lines, line)
-				line = ""
-			}
-			runes := []rune(word)
-			lines = append(lines, string(runes[:width]))
-			word = string(runes[width:])
-		}
-		switch {
-		case line == "":
-			line = word
-		case lipgloss.Width(line)+1+lipgloss.Width(word) <= width:
-			line += " " + word
-		default:
-			lines = append(lines, line)
-			line = word
-		}
-	}
-	if line != "" {
-		lines = append(lines, line)
-	}
-	if len(lines) == 0 {
-		return []string{""}
-	}
-	return lines
+	return strings.Split(ansi.Wrap(s, width, ""), "\n")
 }

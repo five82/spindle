@@ -28,6 +28,12 @@ type Validation struct {
 
 // Snapshot captures the full state of an encoding operation at a point in time.
 type Snapshot struct {
+	Calibrating           bool        `json:"calibrating,omitempty"`
+	RecentSpeed           float64     `json:"recent_speed,omitempty"`
+	MaxWorkers            int         `json:"max_workers,omitempty"`
+	InFlight              int         `json:"in_flight,omitempty"`
+	EncodeSlotWaitSeconds float64     `json:"encode_slot_wait_seconds,omitempty"`
+	AssetKey              string      `json:"asset_key,omitempty"`
 	Percent               float64     `json:"percent,omitempty"`
 	ETASeconds            float64     `json:"eta_seconds,omitempty"`
 	FPS                   float64     `json:"fps,omitempty"`
@@ -37,6 +43,14 @@ type Snapshot struct {
 	EstimatedTotalBytes   int64       `json:"estimated_total_bytes,omitempty"`
 	Substage              string      `json:"substage,omitempty"`
 	InputFile             string      `json:"input_file,omitempty"`
+	OutputResolution      string      `json:"output_resolution,omitempty"`
+	ChunksComplete        int         `json:"chunks_complete,omitempty"`
+	ChunksTotal           int         `json:"chunks_total,omitempty"`
+	ActiveWorkers         int         `json:"active_workers,omitempty"`
+	TargetWorkers         int         `json:"target_workers,omitempty"`
+	Probing               int         `json:"probing,omitempty"`
+	Scoring               int         `json:"scoring,omitempty"`
+	Finishing             int         `json:"finishing,omitempty"`
 	Resolution            string      `json:"resolution,omitempty"`
 	DynamicRange          string      `json:"dynamic_range,omitempty"`
 	Encoder               string      `json:"encoder,omitempty"`

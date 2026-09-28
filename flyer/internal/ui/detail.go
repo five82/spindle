@@ -32,12 +32,13 @@ func (w fieldWriter) fieldStyled(label string, labelStyle lipgloss.Style, value 
 	if strings.TrimSpace(value) == "" {
 		return
 	}
-	lines := wrapText(value, max(w.width-detailFieldLabelWidth, 20))
-	w.b.WriteString(labelStyle.Render(fmt.Sprintf("%-*s", detailFieldLabelWidth, label)))
+	labelWidth := max(detailFieldLabelWidth, len(label)+1)
+	lines := wrapText(value, max(w.width-labelWidth, 20))
+	w.b.WriteString(labelStyle.Render(fmt.Sprintf("%-*s", labelWidth, label)))
 	w.b.WriteString(valueStyle.Render(lines[0]))
 	w.b.WriteString("\n")
 	for _, line := range lines[1:] {
-		w.b.WriteString(strings.Repeat(" ", detailFieldLabelWidth))
+		w.b.WriteString(strings.Repeat(" ", labelWidth))
 		w.b.WriteString(valueStyle.Render(line))
 		w.b.WriteString("\n")
 	}
@@ -103,9 +104,21 @@ func (m *Model) renderStatusChips(item spindle.QueueItem, styles Styles) string 
 	// unrecognized stage name renders neutrally instead of crashing or
 	// falling back to a hardcoded color table.
 	info := stageDisplay(itemDisplayStage(item))
-	label := info.label
+	var label string
 	if item.IsTerminal() {
 		label = info.doneLabel
+	} else if item.UserStopped {
+		label = "Stopped"
+	} else {
+		var active []string
+		for _, task := range item.WorkingTasks() {
+			active = append(active, stageDisplay(task.Type).label)
+		}
+		if len(active) > 0 {
+			label = strings.Join(active, " + ")
+		} else {
+			label = "Waiting"
+		}
 	}
 	chips = append(chips, roleStyle(info.role, styles).Bold(true).Render(strings.ToUpper(label)))
 
@@ -164,100 +177,94 @@ func (m *Model) writeSection(b *strings.Builder, title string, styles Styles, wi
 }
 
 // needsAttention reports whether the item has anything for the operator.
-func needsAttention(item spindle.QueueItem) bool {
-	if item.NeedsReview || strings.TrimSpace(item.ErrorMessage) != "" {
-		return true
-	}
-	if item.FailedTask() != nil || strings.EqualFold(item.Stage, "failed") {
-		return true
-	}
-	if item.Encoding != nil && item.Encoding.Error != nil {
-		return true
-	}
-	if item.Encoding != nil && strings.TrimSpace(item.Encoding.Warning) != "" {
-		return true
-	}
-	if v := itemValidation(item); v != nil && !v.Passed && len(v.Steps) > 0 {
-		return true
-	}
-	return false
-}
+func needsAttention(item spindle.QueueItem) bool { return len(itemProblems(item)) > 0 }
 
-func itemValidation(item spindle.QueueItem) *spindle.EncodingValidation {
-	if item.Encoding == nil {
-		return nil
+// A single ordered issue list drives Attention, Problems, and the badge. Raw
+// diagnostics remain separate, since a log line does not prove a current fault.
+func itemProblems(item spindle.QueueItem) []string {
+	var problems []string
+	seen := make(map[string]bool)
+	add := func(scope, text string) {
+		text = strings.TrimSpace(text)
+		if text != "" && !seen[text] {
+			problems = append(problems, scope+text)
+			seen[text] = true
+		}
 	}
-	return item.Encoding.Validation
+	for _, task := range item.Tasks {
+		if task.IsFailed() {
+			scope := stageDisplay(task.Type).label + " failed"
+			if task.Attempts > 1 {
+				scope += fmt.Sprintf(" (attempt %d)", task.Attempts)
+			}
+			add(scope+": ", task.Error)
+		}
+	}
+	add("", item.ErrorMessage)
+	if item.FailedAtStage != "" && len(item.Tasks) == 0 {
+		add("", stageDisplay(item.FailedAtStage).label+" failed")
+	}
+	for _, ep := range item.Episodes {
+		if ep.IsFailed() {
+			add("", ep.Key+": "+ep.ErrorMessage)
+		}
+		if v := ep.FinalValidation; v.Verdict() == "failed" || v.Verdict() == "unavailable" {
+			text := "Final checks " + v.Verdict() + ": " + strings.Join(v.FailedChecks, "; ") + v.Error
+			if v.AVSync != nil && v.AVSync.Error != "" {
+				text += " A/V sync: " + v.AVSync.Error
+			}
+			add("", ep.Key+": "+text)
+		}
+		if ep.NeedsReview {
+			add(ep.Key+": ", ep.ReviewReason)
+		}
+		if ep.SubtitleSource == "none" {
+			add("", ep.Key+": subtitles skipped: "+ep.SubtitleSkipReason+"; no display SRT")
+		}
+		for _, issue := range append(append([]string{}, ep.SubtitleReviewIssues...), ep.SubtitleSevereIssues...) {
+			add(ep.Key+": ", issue)
+		}
+	}
+	if item.NeedsReview {
+		for _, reason := range item.ReviewReasons {
+			add("Review: ", reason)
+		}
+		if len(item.ReviewReasons) == 0 {
+			add("", "Needs operator review")
+		}
+	}
+	if e := item.Encoding; e != nil {
+		if e.Error != nil {
+			add("Encode: ", e.Error.Message)
+			add("Encode: ", e.Error.Title)
+			add("Context: ", e.Error.Context)
+			add("Suggestion: ", e.Error.Suggestion)
+		}
+		add("Warning: ", e.Warning)
+		if e.Validation != nil && !e.Validation.Passed {
+			for _, check := range e.Validation.Steps {
+				if !check.Passed {
+					add("Reel intermediate: ", check.Name+": "+check.Details)
+				}
+			}
+		}
+	}
+	if len(problems) == 0 && item.Stage == "failed" {
+		add("", "Failed at "+item.FailedAtStage)
+	}
+	return problems
 }
 
 // renderAttention renders the single home for review/error information.
 // Renders nothing when the item is healthy.
 func (m *Model) renderAttention(w fieldWriter, item spindle.QueueItem, styles Styles) {
-	if !needsAttention(item) {
+	problems := itemProblems(item)
+	if len(problems) == 0 {
 		return
 	}
 	m.writeSection(w.b, "Attention", styles, w.width)
-
-	// Review reason(s)
-	if item.NeedsReview {
-		reason := strings.Join(item.ReviewReasons, "; ")
-		if reason == "" {
-			reason = "Needs operator review"
-		}
-		w.fieldStyled("Review", styles.WarningText, reason, styles.Text)
-	}
-
-	// Error message
-	if msg := strings.TrimSpace(item.ErrorMessage); msg != "" {
-		w.fieldStyled("Error", styles.DangerText, msg, styles.Text)
-	}
-
-	// Detailed error from Reel
-	if item.Encoding != nil && item.Encoding.Error != nil {
-		err := item.Encoding.Error
-		if title := strings.TrimSpace(err.Title); title != "" && title != strings.TrimSpace(item.ErrorMessage) {
-			w.field("Cause", title, styles.Text)
-		}
-		w.field("Context", strings.TrimSpace(err.Context), styles.Text)
-		w.field("Suggest", strings.TrimSpace(err.Suggestion), styles.SuccessText)
-	}
-
-	// Non-fatal encoder warning (e.g. a fallback Reel took mid-encode).
-	if item.Encoding != nil {
-		w.fieldStyled("Warning", styles.WarningText, strings.TrimSpace(item.Encoding.Warning), styles.Text)
-	}
-
-	// Failure position for items whose task board can't show it.
-	if stage := strings.TrimSpace(item.FailedAtStage); stage != "" && len(item.Tasks) == 0 {
-		w.fieldStyled("Failed", styles.DangerText, stageDisplay(stage).label, styles.Text)
-	}
-
-	// Leftover file state helps recovery decisions after a failure.
-	if item.FailedTask() != nil || strings.EqualFold(item.Stage, "failed") {
-		w.field("Files", m.describeItemFileStates(item), styles.Text)
-	}
-
-	// Failing validation steps
-	if v := itemValidation(item); v != nil && !v.Passed && len(v.Steps) > 0 {
-		for _, step := range v.Steps {
-			icon, iconStyle := "✓", styles.SuccessText
-			if !step.Passed {
-				icon, iconStyle = "✗", styles.DangerText
-			}
-			name := strings.TrimSpace(step.Name)
-			if name == "" {
-				name = "Check"
-			}
-			w.b.WriteString(iconStyle.Render(icon))
-			w.b.WriteString(" ")
-			w.b.WriteString(styles.Text.Render(name))
-			if details := strings.TrimSpace(step.Details); details != "" {
-				w.b.WriteString(" ")
-				w.b.WriteString(styles.FaintText.Render(details))
-			}
-			w.b.WriteString("\n")
-		}
-	}
+	w.field("Issue", truncate(problems[0], max(w.width-10, 20)), styles.WarningText)
+	w.field("Details", fmt.Sprintf("%d issue(s); see 3 Problems", len(problems)), styles.MutedText)
 }
 
 // renderMedia renders the stable media facts block: what is being processed
@@ -336,9 +343,14 @@ func (m *Model) renderOutput(w fieldWriter, item spindle.QueueItem, styles Style
 
 // isEpisodicItem reports whether the item carries episode-level content
 // worth a list: a multi-episode batch or anything TV. Movies track a single
-// internal "main" episode that has no list value of its own.
+// internal "main" asset displayed in the File tab.
 func isEpisodicItem(item spindle.QueueItem) bool {
 	episodes, _ := item.EpisodeSnapshot()
+	for _, ep := range episodes {
+		if ep.Season > 0 || ep.Episode > 0 {
+			return true
+		}
+	}
 	return len(episodes) > 1 || detectMediaType(item.Metadata) == "tv"
 }
 
@@ -367,7 +379,7 @@ func sourceSummary(src *spindle.SourceTitle) string {
 		return ""
 	}
 	value := strings.TrimSpace(src.Name)
-	if value == "" && src.TitleID > 0 {
+	if value == "" {
 		value = fmt.Sprintf("Title %02d", src.TitleID)
 	}
 	if value == "" {

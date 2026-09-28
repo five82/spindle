@@ -11,14 +11,18 @@ type EncodeResult struct {
 
 // Progress represents encoding progress information.
 type Progress struct {
-	ChunksComplete int
-	ChunksTotal    int
-	FramesComplete int
-	FramesTotal    int
-	BytesComplete  uint64
-	ActiveWorkers  int
-	TargetWorkers  int
-	MaxWorkers     int
+	ChunksComplete   int
+	ChunksTotal      int
+	FramesComplete   int
+	FramesTotal      int
+	BytesComplete    uint64
+	ActiveWorkers    int
+	TargetWorkers    int
+	MaxWorkers       int
+	Probing          int
+	Scoring          int
+	Finishing        int
+	CalibrationReady bool
 
 	// InFlight is the number of chunks currently being worked on. In
 	// target-quality mode a chunk stays in flight while it probes and scores,

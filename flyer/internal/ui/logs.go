@@ -43,6 +43,9 @@ type logState struct {
 	rawLines    []spindle.LogEvent
 	follow      bool
 	lastRefresh time.Time
+	fetchError  error
+	loaded      bool
+	generation  uint64
 
 	// Cursors for incremental fetching
 	streamCursor uint64
@@ -54,6 +57,10 @@ type logState struct {
 	filterComponent string
 	filterLane      string
 	filterRequest   string
+	filterStage     string
+	filterAsset     string
+	filterTask      string
+	filterAttempt   string
 
 	// Search
 	searchActive   bool
@@ -147,6 +154,12 @@ func (m Model) getLogTitle() string {
 
 // renderLogStatus renders the log status bar.
 func (m *Model) renderLogStatus(styles Styles) string {
+	if m.logState.fetchError != nil {
+		return styles.WarningText.Render("Log fetch failed; retained buffer stale: " + m.logState.fetchError.Error())
+	}
+	if !m.logState.loaded && len(m.logState.rawLines) == 0 {
+		return styles.MutedText.Render("Loading log window")
+	}
 	// If we have an active search with matches, show search status instead
 	if m.logState.searchRegex != nil && len(m.logState.searchMatches) > 0 {
 		matchNum := m.logState.searchMatchIdx + 1
@@ -188,7 +201,7 @@ func (m *Model) renderLogStatus(styles Styles) string {
 	if m.logState.follow {
 		autoTail = "on"
 	}
-	status := fmt.Sprintf("%s log %d lines auto-tail %s", src, len(m.logState.rawLines), autoTail)
+	status := fmt.Sprintf("%s log %d lines auto-tail %s; bounded history", src, len(m.logState.rawLines), autoTail)
 
 	var parts []string
 	parts = append(parts, styles.FaintText.Render(status))
@@ -217,6 +230,11 @@ func (m *Model) renderLogStatus(styles Styles) string {
 		}
 		if m.logState.filterRequest != "" {
 			filterParts = append(filterParts, "req="+m.logState.filterRequest)
+		}
+		for _, f := range []struct{ name, value string }{{"stage", m.logState.filterStage}, {"asset", m.logState.filterAsset}, {"task", m.logState.filterTask}, {"attempt", m.logState.filterAttempt}} {
+			if f.value != "" {
+				filterParts = append(filterParts, f.name+"="+f.value)
+			}
 		}
 		if len(filterParts) > 0 {
 			parts = append(parts, styles.MutedText.Render("filter: "+strings.Join(filterParts, " ")))
@@ -424,7 +442,7 @@ func (m *Model) getLevelStyle(level string, styles Styles) lipgloss.Style {
 
 // logFiltersActive returns true if any log filters are active.
 func (m *Model) logFiltersActive() bool {
-	return m.logState.filterLevel != "" || m.logState.filterComponent != "" || m.logState.filterLane != "" || m.logState.filterRequest != ""
+	return m.logState.filterLevel != "" || m.logState.filterComponent != "" || m.logState.filterLane != "" || m.logState.filterRequest != "" || m.logState.filterStage != "" || m.logState.filterAsset != "" || m.logState.filterTask != "" || m.logState.filterAttempt != ""
 }
 
 // handleLogsKey processes keyboard input for logs view.
@@ -658,34 +676,7 @@ func (m *Model) refreshLogs(item *spindle.QueueItem) tea.Cmd {
 
 // fetchDaemonLogs fetches daemon logs from the API.
 func (m *Model) fetchDaemonLogs() tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), logFetchTimeout)
-		defer cancel()
-
-		query := spindle.LogQuery{
-			Since:      m.logState.streamCursor,
-			Limit:      logFetchLimit,
-			Level:      m.logState.filterLevel,
-			Component:  m.logState.filterComponent,
-			Lane:       m.logState.filterLane,
-			DaemonOnly: true, // Only logs without item association
-			Request:    m.logState.filterRequest,
-		}
-		if m.logState.streamCursor == 0 {
-			query.Tail = true
-		}
-
-		batch, err := m.client.FetchLogs(ctx, query)
-		if err != nil {
-			return logErrorMsg{err: err}
-		}
-
-		return logBatchMsg{
-			events: batch.Events,
-			next:   batch.Next,
-			source: logSourceDaemon,
-		}
-	}
+	return m.fetchLogs(logSourceDaemon, 0, m.logState.streamCursor)
 }
 
 // fetchItemLogs fetches item-specific logs from the streaming API.
@@ -701,60 +692,51 @@ func (m *Model) fetchItemLogs(item *spindle.QueueItem) tea.Cmd {
 		m.logState.itemCursor = 0
 		m.logState.rawLines = nil
 		m.logState.lastItemID = itemID
+		m.logState.loaded, m.logState.fetchError = false, nil
 		m.clearLogSearch()
 		m.logState.contentVersion++
 	}
 
-	// Capture cursor for the closure
-	cursor := m.logState.itemCursor
+	return m.fetchLogs(logSourceItem, itemID, m.logState.itemCursor)
+}
 
+func (m *Model) fetchLogs(source logSource, itemID int64, cursor uint64) tea.Cmd {
+	s := m.logState
+	query := spindle.LogQuery{Since: cursor, Limit: logFetchLimit, Tail: cursor == 0, ItemID: itemID, DaemonOnly: source == logSourceDaemon,
+		Level: s.filterLevel, Component: s.filterComponent, Lane: s.filterLane, Request: s.filterRequest,
+		Stage: s.filterStage, Asset: s.filterAsset, TaskID: s.filterTask, Attempt: s.filterAttempt}
+	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), logFetchTimeout)
 		defer cancel()
-
-		query := spindle.LogQuery{
-			Since:     cursor,
-			Limit:     logFetchLimit,
-			ItemID:    itemID,
-			Level:     m.logState.filterLevel,
-			Component: m.logState.filterComponent,
-			Lane:      m.logState.filterLane,
-			Request:   m.logState.filterRequest,
-		}
-		if cursor == 0 {
-			query.Tail = true
-		}
-
-		batch, err := m.client.FetchLogs(ctx, query)
+		batch, err := client.FetchLogs(ctx, query)
 		if err != nil {
-			return logErrorMsg{err: err}
+			return logErrorMsg{err: err, source: source, itemID: itemID, generation: s.generation}
 		}
-
-		return logBatchMsg{
-			events: batch.Events,
-			next:   batch.Next,
-			source: logSourceItem,
-			itemID: itemID,
-		}
+		return logBatchMsg{events: batch.Events, next: batch.Next, source: source, itemID: itemID, generation: s.generation}
 	}
 }
 
 // Log messages
 
 type logBatchMsg struct {
-	events []spindle.LogEvent
-	next   uint64
-	source logSource
-	itemID int64 // For item logs, tracks which item this is for
+	generation uint64
+	events     []spindle.LogEvent
+	next       uint64
+	source     logSource
+	itemID     int64 // For item logs, tracks which item this is for
 }
 
 type logErrorMsg struct {
-	err error
+	generation uint64
+	err        error
+	itemID     int64
+	source     logSource
 }
 
 // handleLogBatch processes a batch of log events from the streaming API.
 func (m *Model) handleLogBatch(msg logBatchMsg) {
-	if msg.source != m.logState.mode {
+	if msg.source != m.logState.mode || msg.generation != m.logState.generation {
 		return
 	}
 
@@ -768,6 +750,7 @@ func (m *Model) handleLogBatch(msg logBatchMsg) {
 		m.logState.streamCursor = msg.next
 	}
 
+	m.logState.loaded, m.logState.fetchError = true, nil
 	// Guard against duplicate/overlapping batches: only append events whose
 	// Seq is strictly greater than the last one already appended. rawLines
 	// already tracks the active mode's events (cleared on item switch), so
@@ -888,6 +871,13 @@ func (m *Model) initLogFilterInputs() {
 	m.logFilterInputs[1] = compInput
 	m.logFilterInputs[2] = laneInput
 	m.logFilterInputs[3] = reqInput
+	for i, placeholder := range []string{"stage type", "asset key (e.g. main)", "task ID from Events", "attempt number"} {
+		input := textinput.New()
+		input.Placeholder = placeholder
+		input.CharLimit = 80
+		input.SetWidth(30)
+		m.logFilterInputs[i+4] = input
+	}
 }
 
 // openLogFilters opens the log filters modal.
@@ -897,6 +887,10 @@ func (m *Model) openLogFilters() {
 	m.logFilterInputs[1].SetValue(m.logState.filterComponent)
 	m.logFilterInputs[2].SetValue(m.logState.filterLane)
 	m.logFilterInputs[3].SetValue(m.logState.filterRequest)
+	for i, value := range []string{m.logState.filterStage, m.logState.filterAsset, m.logState.filterTask, m.logState.filterAttempt} {
+		m.logFilterInputs[i+4].SetValue(value)
+		m.logFilterInputs[i+4].Blur()
+	}
 	m.logFilterFocusIdx = 0
 	m.logFilterInputs[0].Focus()
 	m.logFilterInputs[1].Blur()
@@ -935,10 +929,9 @@ func (m Model) handleLogFiltersKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case msg.String() == "ctrl+c":
 		// Clear all filters (modal-specific, doesn't quit)
-		m.logFilterInputs[0].SetValue("")
-		m.logFilterInputs[1].SetValue("")
-		m.logFilterInputs[2].SetValue("")
-		m.logFilterInputs[3].SetValue("")
+		for i := range m.logFilterInputs {
+			m.logFilterInputs[i].SetValue("")
+		}
 		return m, nil
 	}
 
@@ -954,6 +947,13 @@ func (m *Model) applyLogFilters() {
 	m.logState.filterComponent = strings.TrimSpace(m.logFilterInputs[1].Value())
 	m.logState.filterLane = strings.TrimSpace(m.logFilterInputs[2].Value())
 	m.logState.filterRequest = strings.TrimSpace(m.logFilterInputs[3].Value())
+	m.logState.filterStage = strings.TrimSpace(m.logFilterInputs[4].Value())
+	m.logState.filterAsset = strings.TrimSpace(m.logFilterInputs[5].Value())
+	m.logState.filterTask = strings.TrimSpace(m.logFilterInputs[6].Value())
+	m.logState.filterAttempt = strings.TrimSpace(m.logFilterInputs[7].Value())
+	m.logState.loaded, m.logState.fetchError = false, nil
+	m.logState.generation++
+	m.logState.contentVersion++
 
 	// Reset log buffer to fetch with new filters
 	m.logState.rawLines = nil
@@ -990,6 +990,7 @@ func (m Model) renderLogFilters() string {
 		{"Component: ", 1},
 		{"Lane:      ", 2},
 		{"Request:   ", 3},
+		{"Stage:     ", 4}, {"Asset:     ", 5}, {"Task:      ", 6}, {"Attempt:   ", 7},
 	}
 	for _, f := range fields {
 		label := f.label
@@ -1000,7 +1001,7 @@ func (m Model) renderLogFilters() string {
 		}
 		b.WriteString(label)
 		b.WriteString(m.logFilterInputs[f.index].View())
-		b.WriteString("\n\n")
+		b.WriteString("\n")
 	}
 
 	// Buttons hint

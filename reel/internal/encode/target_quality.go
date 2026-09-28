@@ -124,6 +124,9 @@ type targetQualityRun struct {
 	// atomically so progress snapshots can read it lock-free.
 	flightMu   sync.Mutex
 	flightCond *sync.Cond
+	probing    atomic.Int64
+	scoring    atomic.Int64
+	finishing  atomic.Int64
 	inFlight   atomic.Int64
 
 	encodeErr atomic.Pointer[error]
@@ -246,7 +249,10 @@ func EncodeTargetQuality(
 		r.collect(resultChan)
 	}()
 
-	go r.sampleProgress(ctx)
+	progressDone := make(chan struct{})
+	go func() { defer close(progressDone); r.sampleProgress(ctx) }()
+	// No callback may outlive encoding and race the caller's next phase.
+	defer func() { cancel(); <-progressDone }()
 	go limiter.monitor(ctx, cancel, r.setError)
 	go func() {
 		<-ctx.Done()
@@ -441,16 +447,26 @@ func (r *targetQualityRun) snapshotProgressLocked() worker.Progress {
 	p := r.progress
 	p.ActiveWorkers, p.TargetWorkers, p.MaxWorkers = r.limiter.stats()
 	p.InFlight = int(r.inFlight.Load())
+	p.Probing, p.Scoring, p.Finishing = int(r.probing.Load()), int(r.scoring.Load()), int(r.finishing.Load())
+	p.CalibrationReady = true
+	if r.calibration != nil {
+		_, p.CalibrationReady = r.calibration.Offset()
+	}
 	p.EncodeSlotWaitSeconds = r.limiter.slotWaitSeconds()
 	return p
 }
 
-func (r *targetQualityRun) emitProgress(p worker.Progress) {
+func (r *targetQualityRun) emitProgress() {
 	if r.progressCb == nil {
 		return
 	}
 	r.progressCbMu.Lock()
 	defer r.progressCbMu.Unlock()
+	// Capture after serializing delivery, not before: a queued observation
+	// must never regress counters already delivered by another callback.
+	r.progressMu.Lock()
+	p := r.snapshotProgressLocked()
+	r.progressMu.Unlock()
 	r.progressCb(p)
 }
 
@@ -526,15 +542,14 @@ func (r *targetQualityRun) collect(resultChan <-chan targetQualityResult) {
 		r.progress.ChunksComplete++
 		r.progress.FramesComplete += result.Frames
 		r.progress.BytesComplete += result.Size
-		p := r.snapshotProgressLocked()
-		r.limiter.observeProgress(p.FramesComplete)
+		r.limiter.observeProgress(r.progress.FramesComplete)
 		r.progressMu.Unlock()
 
 		_ = chunk.AppendDone(chunk.ChunkComp{Idx: result.ChunkIdx, Frames: result.Frames, Size: result.Size}, r.workDir)
 		r.logsMu.Lock()
 		r.logs = append(r.logs, result.Log)
 		r.logsMu.Unlock()
-		r.emitProgress(p)
+		r.emitProgress()
 	}
 }
 
@@ -552,10 +567,7 @@ func (r *targetQualityRun) sampleProgress(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			r.progressMu.Lock()
-			p := r.snapshotProgressLocked()
-			r.progressMu.Unlock()
-			r.emitProgress(p)
+			r.emitProgress()
 		}
 	}
 }
@@ -775,6 +787,8 @@ func (r *targetQualityRun) encodeChunk(ctx context.Context, ch chunk.Chunk, plan
 	// probe is reused verbatim as the final chunk -- no re-encode. copyFile errors
 	// if that IVF is somehow absent.
 	finalPath := chunk.IVFPath(r.workDir, ch.Idx)
+	r.finishing.Add(1)
+	defer r.finishing.Add(-1)
 	if err := copyFile(probeIVFPath(r.workDir, ch.Idx, best.CRF), finalPath); err != nil {
 		return fail(err)
 	}
@@ -855,6 +869,8 @@ func probePeakSecondBps(probePath string, inf *video.Info) (float64, error) {
 }
 
 func (r *targetQualityRun) scoreProbe(ctx context.Context, pool chan quality.ChunkScorer, probePath string, ch chunk.Chunk, cache *chunkRefCache) (float32, float64, error) {
+	r.scoring.Add(1)
+	defer r.scoring.Add(-1)
 	var scorer quality.ChunkScorer
 	select {
 	case scorer = <-pool:
@@ -901,6 +917,8 @@ func probeIVFPath(workDir string, chunkIdx int, crf float32) string {
 // is always fsynced: every probe is reusable as the final chunk and relied on
 // for resume.
 func (r *targetQualityRun) encodeProbe(ctx context.Context, ch chunk.Chunk, outputPath string, crf float32, cache *chunkRefCache) worker.EncodeResult {
+	r.probing.Add(1)
+	defer r.probing.Add(-1)
 	if cached := cache.open(); cached != nil {
 		defer cached.Close()
 		return encodeChunkStreaming(ctx, cached, ch, r.inf, r.cfg, outputPath, crf, r.width, r.height, nil)

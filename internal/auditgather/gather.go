@@ -164,6 +164,7 @@ func buildTaskSummaries(tasks []httpapi.TaskResponse) []TaskSummary {
 	out := make([]TaskSummary, 0, len(tasks))
 	for _, t := range tasks {
 		out = append(out, TaskSummary{
+			ID: t.ID, Activities: t.Activities,
 			Type:            t.Type,
 			State:           t.State,
 			Attempts:        t.Attempts,

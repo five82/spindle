@@ -10,6 +10,7 @@ import (
 	"github.com/five82/spindle/internal/language"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
 )
@@ -57,6 +58,7 @@ func verifyFinalOutputs(
 	verdict := &ripspec.FinalValidation{Passed: true}
 
 	for _, exp := range expectations {
+		sess.Activity(queue.Activity{Operation: "final_validation", AssetKey: exp.key, Message: "Checking final output " + exp.key})
 		entry := checkFinalOutput(ctx, sess.Env, exp, sourceAudioIndex)
 		if entry.Error != "" {
 			logger.Warn("final output could not be probed",
@@ -134,6 +136,15 @@ func checkFinalOutput(
 		return entry
 	}
 
+	for _, stream := range output.Streams {
+		switch stream.CodecType {
+		case "video":
+			entry.Resolution = fmt.Sprintf("%dx%d", stream.Width, stream.Height)
+			entry.VideoCodec = stream.CodecName
+		case "audio":
+			entry.Audio = append(entry.Audio, fmt.Sprintf("%s %s %dch", language.ExtractFromTags(stream.Tags), stream.CodecName, stream.Channels))
+		}
+	}
 	entry.AVSync = checkAVSync(ctx, env, exp.key, output, sourceAudioIndex)
 	if entry.AVSync.Error == "" && !entry.AVSync.Passed {
 		entry.FailedChecks = append(entry.FailedChecks, fmt.Sprintf(

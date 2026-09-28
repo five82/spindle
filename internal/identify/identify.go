@@ -452,7 +452,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		"optical_drive", h.cfg.MakeMKV.OpticalDrive,
 	)
 
-	sess.Progress(5, "Phase 1/3 - Cleaning stale staging")
+	sess.Activity(queue.Activity{Operation: "cleanup", Message: "Cleaning stale staging"})
 
 	// Clean stale staging directories (older than 48 hours).
 	cleanResult := stagingdir.CleanStale(ctx, h.cfg.Paths.StagingDir, 48*time.Hour, nil, logger)
@@ -460,15 +460,19 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		logger.Info("cleaned stale staging directories", "removed", cleanResult.Removed)
 	}
 
-	sess.Progress(20, "Phase 2/3 - Scanning disc and resolving metadata")
+	sess.Activity(queue.Activity{Operation: "disc_scan", Message: "Scanning optical disc"})
 
-	result, err := h.Identify(ctx, item, logger)
+	result, err := h.scanDisc(ctx, item, logger)
 	if err != nil {
 		return err
 	}
 
+	sess.Activity(queue.Activity{Operation: "metadata", Message: "Resolving metadata"})
+	if err := h.resolveMetadata(ctx, item, result, logger); err != nil {
+		return err
+	}
 	// Persist envelope.
-	sess.Progress(85, "Phase 3/3 - Finalizing identification")
+	sess.Activity(queue.Activity{Operation: "persist", Message: "Finalizing identification"})
 	sess.SetEnvelope(&result.Envelope)
 	if err := h.persistEnvelope(sess); err != nil {
 		return err

@@ -132,6 +132,7 @@ func TestPrintTaskLines(t *testing.T) {
 				BytesCopied: 1024,
 				TotalBytes:  4096,
 			},
+			Activities:     []queue.Activity{{State: "running", AssetKey: "s01e01", Message: "Ripping title 3", Completed: 1024, Total: 4096, Unit: "bytes"}},
 			ActiveAssetKey: "s01e01",
 		},
 		{
@@ -149,13 +150,13 @@ func TestPrintTaskLines(t *testing.T) {
 		printTaskLines("  ", tasks, true)
 	})
 
-	if !strings.Contains(out, "Progress (ripping):") || !strings.Contains(out, "Ripping title 3") || !strings.Contains(out, "42%") {
+	if !strings.Contains(out, "Progress (ripping):") || !strings.Contains(out, "Ripping title 3") || strings.Contains(out, "42%") {
 		t.Errorf("missing running task progress line: %q", out)
 	}
 	if !strings.Contains(out, "s01e01") {
 		t.Errorf("missing active asset key in verbose mode: %q", out)
 	}
-	if !strings.Contains(out, "1024 B / 4096 B") {
+	if !strings.Contains(out, "1024/4096 bytes") {
 		t.Errorf("missing bytes line: %q", out)
 	}
 	if !strings.Contains(out, "Failed:") || !strings.Contains(out, "encoding") || !strings.Contains(out, "encoder crashed") {

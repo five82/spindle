@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS item_events (
     time TEXT NOT NULL,
     type TEXT NOT NULL,
     stage TEXT NOT NULL,
+    task_id INTEGER NOT NULL DEFAULT 0,
+    attempt INTEGER NOT NULL DEFAULT 0,
     episode_key TEXT NOT NULL DEFAULT '',
     substage TEXT NOT NULL DEFAULT '',
     message TEXT NOT NULL DEFAULT '',
@@ -29,6 +31,8 @@ type Event struct {
 	ItemID          int64   `json:"itemId"`
 	Time            string  `json:"time"`
 	Type            string  `json:"type"`
+	TaskID          int64   `json:"taskId,omitempty"`
+	Attempt         int     `json:"attempt,omitempty"`
 	Stage           Stage   `json:"stage"`
 	EpisodeKey      string  `json:"episodeKey,omitempty"`
 	Substage        string  `json:"substage,omitempty"`
@@ -44,8 +48,8 @@ func (s *Store) RecordEvent(e Event) error {
 	}
 	return retryOnBusy(func() error {
 		_, err := s.db.Exec(`INSERT INTO item_events
-            (item_id, time, type, stage, episode_key, substage, message, percent, duration_seconds)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, e.ItemID, e.Time, e.Type, e.Stage,
+            (item_id, time, type, stage, task_id, attempt, episode_key, substage, message, percent, duration_seconds)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, e.ItemID, e.Time, e.Type, e.Stage, e.TaskID, e.Attempt,
 			e.EpisodeKey, e.Substage, e.Message, e.Percent, e.DurationSeconds)
 		if err != nil {
 			return fmt.Errorf("record event for item %d: %w", e.ItemID, err)
@@ -59,7 +63,7 @@ func (s *Store) Events(itemID, cursor int64, limit int) ([]Event, int64, error) 
 	if limit < 1 || limit > 500 {
 		limit = 500
 	}
-	rows, err := s.db.Query(`SELECT id, item_id, time, type, stage, episode_key, substage, message, percent, duration_seconds
+	rows, err := s.db.Query(`SELECT id, item_id, time, type, stage, task_id, attempt, episode_key, substage, message, percent, duration_seconds
         FROM item_events WHERE item_id = ? AND id > ? ORDER BY id LIMIT ?`, itemID, cursor, limit)
 	if err != nil {
 		return nil, cursor, fmt.Errorf("query events for item %d: %w", itemID, err)
@@ -68,7 +72,7 @@ func (s *Store) Events(itemID, cursor int64, limit int) ([]Event, int64, error) 
 	var events []Event
 	for rows.Next() {
 		var e Event
-		if err := rows.Scan(&e.ID, &e.ItemID, &e.Time, &e.Type, &e.Stage,
+		if err := rows.Scan(&e.ID, &e.ItemID, &e.Time, &e.Type, &e.Stage, &e.TaskID, &e.Attempt,
 			&e.EpisodeKey, &e.Substage, &e.Message, &e.Percent, &e.DurationSeconds); err != nil {
 			return nil, cursor, fmt.Errorf("scan item event: %w", err)
 		}

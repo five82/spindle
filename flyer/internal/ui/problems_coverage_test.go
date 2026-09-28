@@ -70,7 +70,7 @@ func TestTriageSelectionAndNavigation(t *testing.T) {
 		t.Fatal("empty triage must clear selection")
 	}
 	next, _ = m.handleProblemsKey(appKey("j"))
-	if next.(Model).problemsRow != 0 || !strings.Contains(stripANSI(m.renderProblems()), "No failed or review items") {
+	if next.(Model).problemsRow != 0 || !strings.Contains(stripANSI(m.renderProblems()), "No current structured issues") {
 		t.Fatal("empty triage must not navigate")
 	}
 }
@@ -82,7 +82,7 @@ func TestTriageLeadReasonPriority(t *testing.T) {
 		want string
 	}{
 		{"task", spindle.QueueItem{Tasks: []spindle.Task{{Type: "encoding", State: "failed", Error: "  disk full  "}}, NeedsReview: true}, "Encoding failed: disk full"},
-		{"review", spindle.QueueItem{NeedsReview: true, ReviewReasons: []string{"first", "second"}}, "first; second"},
+		{"review", spindle.QueueItem{NeedsReview: true, ReviewReasons: []string{"first", "second"}}, "Review: first"},
 		{"error", spindle.QueueItem{ErrorMessage: "  crashed  "}, "crashed"},
 		{"stage", spindle.QueueItem{FailedAtStage: "ripping"}, "Ripping failed"},
 		{"generic review", spindle.QueueItem{NeedsReview: true}, "Needs operator review"},
@@ -110,7 +110,7 @@ func TestItemProblemsSectionsAndLogs(t *testing.T) {
 	m.problemsState.lastItemID = 7
 	m.problemsState.logLines = []spindle.LogEvent{{Sequence: 1, Level: "warn", Message: "daemon warning"}}
 	got := stripANSI(m.renderItemProblems(item))
-	for _, want := range []string{"Review Reasons", "missing subtitle", "Error", "bad disc", "Failed Episodes", "S01E01 - Pilot", "read error", "Encoding Error", "Encode failed", "no space", "Context:", "/output", "Suggestion:", "free disk", "Warning", "quality low", "Validation", "video", "audio", "missing track", "Log Messages", "daemon warning"} {
+	for _, want := range []string{"Current issues", "missing subtitle", "bad disc", "S01E01", "read error", "Encode failed", "no space", "Context:", "/output", "Suggestion:", "free disk", "Warning", "quality low", "Reel intermediate", "audio", "missing track", "Diagnostic history", "Historical/unclassified", "daemon warning"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q from %q", want, got)
 		}
@@ -120,11 +120,11 @@ func TestItemProblemsSectionsAndLogs(t *testing.T) {
 	}
 	m.problemsState.lastItemID = 8
 	m.problemsState.logLines = nil
-	if got := stripANSI(m.renderItemProblems(&spindle.QueueItem{ID: 8})); got != "No warnings or errors for this item" {
+	if got := stripANSI(m.renderItemProblems(&spindle.QueueItem{ID: 8})); !strings.Contains(got, "No current structured issues") || !strings.Contains(got, "Diagnostics loading") {
 		t.Fatalf("empty problems = %q", got)
 	}
 	item.Encoding.Validation = &spindle.EncodingValidation{Passed: true, Steps: []spindle.EncodingValidationStep{{Name: "video", Passed: true}}}
-	if got := stripANSI(m.renderItemProblems(item)); !strings.Contains(got, "Validation ✓") {
+	if got := stripANSI(m.renderItemProblems(item)); strings.Contains(got, "Reel intermediate: video") {
 		t.Fatalf("passing validation omitted: %q", got)
 	}
 }

@@ -42,19 +42,26 @@ type EncodingConfigSummary struct {
 
 // ProgressSnapshot contains encoding progress information.
 type ProgressSnapshot struct {
-	CurrentFrame   uint64
-	TotalFrames    uint64
-	Percent        float32
-	Speed          float32
-	RecentSpeed    float32
-	FPS            float32
-	ETA            time.Duration
-	Bitrate        string
-	ChunksComplete int
-	ChunksTotal    int
-	ActiveWorkers  int
-	TargetWorkers  int
-	MaxWorkers     int
+	Calibrating           bool
+	FrameUnit             string
+	CurrentFrame          uint64
+	TotalFrames           uint64
+	Percent               float32
+	Speed                 float32
+	RecentSpeed           float32
+	FPS                   float32
+	ETA                   time.Duration
+	Bitrate               string
+	ChunksComplete        int
+	ChunksTotal           int
+	ActiveWorkers         int
+	TargetWorkers         int
+	MaxWorkers            int
+	InFlight              int
+	EncodeSlotWaitSeconds float64
+	Probing               int
+	Scoring               int
+	Finishing             int
 }
 
 // ValidationSummary contains validation results.
@@ -127,8 +134,13 @@ type FileResult struct {
 
 // StageProgress represents a generic stage update.
 type StageProgress struct {
-	Stage   string
-	Percent float32
-	Message string
-	ETA     *time.Duration
+	Lane      string
+	State     string
+	Completed int64
+	Total     int64
+	Unit      string
+	Stage     string
+	Percent   float32
+	Message   string
+	ETA       *time.Duration
 }

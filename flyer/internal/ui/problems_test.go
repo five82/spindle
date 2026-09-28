@@ -16,7 +16,7 @@ func stripANSI(s string) string {
 }
 
 func TestRenderStructuredProblems_LeadsWithFailedTask(t *testing.T) {
-	m := &Model{theme: GetTheme("slate")}
+	m := &Model{theme: GetTheme("slate"), width: 100}
 	styles := m.theme.Styles()
 
 	item := &spindle.QueueItem{
@@ -31,8 +31,8 @@ func TestRenderStructuredProblems_LeadsWithFailedTask(t *testing.T) {
 	m.renderStructuredProblems(&b, item, styles)
 	got := stripANSI(b.String())
 
-	failedIdx := strings.Index(got, "Failed Task")
-	reviewIdx := strings.Index(got, "Review Reasons")
+	failedIdx := strings.Index(got, "Encoding failed")
+	reviewIdx := strings.Index(got, "Review:")
 	if failedIdx == -1 {
 		t.Fatalf("renderStructuredProblems() missing Failed Task header, got %q", got)
 	}
@@ -54,7 +54,7 @@ func TestRenderStructuredProblems_LeadsWithFailedTask(t *testing.T) {
 }
 
 func TestRenderStructuredProblems_FailedAtStageFallbackWhenTasksAbsent(t *testing.T) {
-	m := &Model{theme: GetTheme("slate")}
+	m := &Model{theme: GetTheme("slate"), width: 100}
 	styles := m.theme.Styles()
 
 	item := &spindle.QueueItem{
@@ -65,8 +65,8 @@ func TestRenderStructuredProblems_FailedAtStageFallbackWhenTasksAbsent(t *testin
 	m.renderStructuredProblems(&b, item, styles)
 	got := stripANSI(b.String())
 
-	if !strings.Contains(got, "Failed Task") {
-		t.Fatalf("renderStructuredProblems() missing fallback Failed Task header, got %q", got)
+	if !strings.Contains(got, "Ripping failed") {
+		t.Fatalf("renderStructuredProblems() missing fallback failure, got %q", got)
 	}
 	if !strings.Contains(got, "Ripping") {
 		t.Fatalf("renderStructuredProblems() missing fallback stage label, got %q", got)
@@ -74,7 +74,7 @@ func TestRenderStructuredProblems_FailedAtStageFallbackWhenTasksAbsent(t *testin
 }
 
 func TestRenderStructuredProblems_NoFailedTaskComposesAsBefore(t *testing.T) {
-	m := &Model{theme: GetTheme("slate")}
+	m := &Model{theme: GetTheme("slate"), width: 100}
 	styles := m.theme.Styles()
 
 	item := &spindle.QueueItem{
@@ -92,7 +92,7 @@ func TestRenderStructuredProblems_NoFailedTaskComposesAsBefore(t *testing.T) {
 	if strings.Contains(got, "Failed Task") {
 		t.Fatalf("renderStructuredProblems() should not show Failed Task section, got %q", got)
 	}
-	if !strings.HasPrefix(strings.TrimLeft(got, " "), "Review Reasons") {
+	if !strings.Contains(got, "Review: subtitle no-match") {
 		t.Fatalf("renderStructuredProblems() should lead with Review Reasons as before, got %q", got)
 	}
 }

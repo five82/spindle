@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/llm"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/opensubtitles"
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
 	"github.com/five82/spindle/internal/textutil"
@@ -117,7 +119,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return &stage.ErrDegraded{Msg: "tmdb season contains no episodes"}
 	}
 
-	sess.Progress(10, "Phase 1/3 - Transcribing episodes", stage.WithActiveEpisode(""))
+	sess.Activity(queue.Activity{Operation: "transcripts", Message: "Preparing episode transcripts"})
 
 	// The initial reference fetch needs only the envelope and TMDB season, so
 	// it runs concurrently with transcription: the fetch loop is network-bound
@@ -127,20 +129,28 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 	plan := deriveCandidateEpisodes(env, season, env.Metadata.DiscNumber)
 	refCache := make(map[int]referenceFingerprint)
 	fetchCtx, cancelFetch := context.WithCancel(ctx)
-	defer cancelFetch()
 	type refFetchOutcome struct {
 		refs []referenceFingerprint
 		err  error
 	}
 	refFetched := make(chan refFetchOutcome, 1)
+	fetchDone := make(chan struct{})
+	defer func() { cancelFetch(); <-fetchDone }()
 	logger.Info("reference subtitle fetch started",
 		"decision_type", logs.DecisionContentIDCandidates,
 		"decision_result", "fetch_overlapped",
 		"decision_reason", "network-bound reference fetch runs during GPU-bound transcription",
 		"initial_episode_count", len(plan.InitialEpisodes),
 	)
+	sess.Activity(queue.Activity{ID: "references", Operation: "fetch", Message: "Fetching reference subtitles"})
 	go func() {
+		defer close(fetchDone)
 		refs, err := h.fetchReferenceFingerprints(fetchCtx, logger, item, seasonNum, env.Metadata.ID, season, plan.InitialEpisodes, refCache)
+		state := "done"
+		if err != nil {
+			state = "failed"
+		}
+		sess.Activity(queue.Activity{ID: "references", Operation: "fetch", State: state, Message: fmt.Sprintf("Reference fetch: %d acquired", len(refs)), Completed: int64(len(refs)), Unit: "references"})
 		refFetched <- refFetchOutcome{refs: refs, err: err}
 	}()
 
@@ -162,7 +172,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return &stage.ErrDegraded{Msg: "no valid transcriptions"}
 	}
 
-	sess.Progress(50, "Phase 2/3 - Fetching reference subtitles", stage.WithActiveEpisode(""))
+	sess.Activity(queue.Activity{Operation: "transcripts", State: "done", Message: "Episode transcripts ready"})
 
 	fetched := <-refFetched
 	refs, err := fetched.refs, fetched.err
@@ -182,7 +192,7 @@ func (h *Handler) Run(ctx context.Context, sess *stage.Session) error {
 		return err
 	}
 
-	sess.Progress(95, "Phase 3/3 - Episode identification complete", stage.WithActiveEpisode(""))
+	sess.Activity(queue.Activity{Operation: "matching", State: "done", Message: "Episode identification complete"})
 	return nil
 }
 
@@ -268,7 +278,7 @@ func (h *Handler) matchEpisodes(
 		sess.AddReviewReason("Episode ID: one or more matches rely on suspect references")
 	}
 
-	sess.Progress(80, "Phase 3/3 - Matching episodes")
+	sess.Activity(queue.Activity{Operation: "matching", Message: "Matching episodes"})
 
 	noClaimRips := make(map[string]struct{}, len(resolution.RipsWithoutClaims))
 	for _, key := range resolution.RipsWithoutClaims {
@@ -376,8 +386,9 @@ func (h *Handler) generateEpisodeFingerprints(ctx context.Context, sess *stage.S
 		return nil, nil
 	}
 
-	sess.Progress(15, fmt.Sprintf("Phase 1/3 - Transcribing %d of %d episodes (batched)", len(reqs), episodeCount), stage.WithActiveEpisode(""))
-	results, err := h.transcriber.TranscribeBatch(ctx, reqs)
+	results, err := h.transcriber.TranscribeBatch(ctx, reqs, func(phase transcription.Phase, _ time.Duration) {
+		sess.Activity(queue.Activity{Operation: string(phase), Message: fmt.Sprintf("%s: batch of %d/%d source files", phase, len(reqs), episodeCount)})
+	})
 	if err != nil {
 		return nil, fmt.Errorf("transcribe episode batch: %w", err)
 	}

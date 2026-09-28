@@ -8,18 +8,26 @@ Flyer is a personal tool. I'm sharing it because I believe in open source but I'
 
 ## Features
 
-- **Dashboard.** Queue table with progress and filtering, plus a live NOW band
+- **Dashboard.** Queue table with completed-file counts and filtering, plus a live NOW band
   that names the item and task holding each scheduler resource (drive, GPU,
   encode).
 - **Drive availability.** The header always shows whether the optical drive is
   AVAILABLE, BUSY, or PAUSED.
 - **Item inspector.** Full-screen drill-in for one item, with Overview,
-  Episodes, Problems, Logs, and Events tabs. Episodes applies to TV box sets;
-  Events shows queue-backed stage and encoding-substage history across daemon restarts.
-- **Problems triage.** Every failed or review item with its lead reason, one
-  keypress away from the details.
+  Episodes (File for movies), Problems, Logs, and Events tabs. Independent work
+  and explicit waits remain visible. Long operations disclose measured work
+  after ten seconds; unknown totals never become a percentage. Any ETA is
+  approximate and scoped to the current file's video, not the whole item.
+  `t` toggles secondary file evidence without hiding the inventory. Output
+  checks describe Apply's final files, separately from Reel's intermediate checks.
+  Events retains task/attempt transitions and durations across daemon restarts,
+  until the transient queue is cleared.
+- **Problems triage.** Current failures, review needs, unavailable checks, and
+  nonfatal outcomes such as skipped subtitles, one keypress from details.
+  Bounded diagnostic history is separate from current structured issues.
 - **Logs.** Daemon and per-item logs with highlighting, follow mode, and filters
-  for level, component, lane, and request.
+  for level, component, lane, request, stage, asset, task, and attempt. Failed
+  fetches retain their error and mark retained data stale rather than empty.
 - **Search.** Regex log search with `n`/`N`. The queue's `/` filters rows by
   title.
 - **Themes.** Slate and Nightfox, cycled with `T`.

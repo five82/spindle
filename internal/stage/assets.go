@@ -8,9 +8,8 @@ import (
 
 // AssetJob describes one per-asset unit of stage work. ProgressIndex is
 // zero-based and ProgressTotal is the denominator to use for user-facing
-// phase/progress messages. Different planners may choose a filtered job list or
-// the full envelope key list as the progress denominator to preserve the stage's
-// existing progress semantics.
+// phase messages only. Position is never evidence of completed work;
+// completion counts come from recorded assets.
 type AssetJob struct {
 	Key           string
 	Input         ripspec.Asset
@@ -20,16 +19,6 @@ type AssetJob struct {
 
 // Number returns the one-based job number for progress messages.
 func (j AssetJob) Number() int { return j.ProgressIndex + 1 }
-
-// Percent converts a per-job percent into total stage progress for this job.
-func (j AssetJob) Percent(currentJobPercent float64) float64 {
-	return OverallPercent(j.ProgressIndex, j.ProgressTotal, currentJobPercent)
-}
-
-// CompletionPercent returns total stage progress after this job is complete.
-func (j AssetJob) CompletionPercent() float64 {
-	return OverallPercent(j.ProgressIndex+1, j.ProgressTotal, 0)
-}
 
 // PhaseMessage formats a user-visible stage progress message.
 func (j AssetJob) PhaseMessage(action string) string {
@@ -146,29 +135,4 @@ func (s *Session) SaveAssetFailure(kind, key, errMsg string) error {
 		})
 		return nil
 	})
-}
-
-// OverallPercent converts per-item progress into total stage progress for a
-// fixed-size job list.
-func OverallPercent(completedItems, totalItems int, currentItemPercent float64) float64 {
-	if totalItems <= 0 {
-		return 0
-	}
-	if completedItems < 0 {
-		completedItems = 0
-	}
-	if completedItems > totalItems {
-		completedItems = totalItems
-	}
-	if currentItemPercent < 0 {
-		currentItemPercent = 0
-	}
-	if currentItemPercent > 100 {
-		currentItemPercent = 100
-	}
-	progress := float64(completedItems) + (currentItemPercent / 100)
-	if progress > float64(totalItems) {
-		progress = float64(totalItems)
-	}
-	return progress / float64(totalItems) * 100
 }

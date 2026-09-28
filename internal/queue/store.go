@@ -28,7 +28,6 @@ CREATE TABLE IF NOT EXISTS queue_items (
     metadata_json TEXT,
     needs_review INTEGER NOT NULL DEFAULT 0,
     review_reason TEXT,
-    encoding_details_json TEXT,
     user_stopped INTEGER NOT NULL DEFAULT 0
 );
 
@@ -131,7 +130,7 @@ func isBusyError(err error) bool {
 // allColumns is the column list for SELECT queries.
 const allColumns = `id, disc_title, stage, failed_at_stage, error_message,
     created_at, updated_at, rip_spec_data, disc_fingerprint, metadata_json,
-    needs_review, review_reason, encoding_details_json, user_stopped`
+    needs_review, review_reason, user_stopped`
 
 // scanItem scans a row into an Item.
 func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
@@ -139,7 +138,7 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 	var discTitle, failedAtStage, errorMessage sql.NullString
 	var createdAt, updatedAt sql.NullString
 	var ripSpecData, discFingerprint, metadataJSON sql.NullString
-	var reviewReason, encodingDetailsJSON sql.NullString
+	var reviewReason sql.NullString
 	var stage string
 
 	err := row.Scan(
@@ -148,7 +147,7 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 		&createdAt, &updatedAt,
 		&ripSpecData, &discFingerprint, &metadataJSON,
 		&it.NeedsReview, &reviewReason,
-		&encodingDetailsJSON, &it.userStopped,
+		&it.userStopped,
 	)
 	if err != nil {
 		return nil, err
@@ -164,7 +163,6 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 	it.DiscFingerprint = discFingerprint.String
 	it.MetadataJSON = metadataJSON.String
 	it.ReviewReason = reviewReason.String
-	it.EncodingDetailsJSON = encodingDetailsJSON.String
 
 	return &it, nil
 }
@@ -352,26 +350,12 @@ func (s *Store) UpdateWorkState(item *Item) error {
 			disc_title = ?,
 			updated_at = CURRENT_TIMESTAMP,
 			rip_spec_data = ?, disc_fingerprint = ?, metadata_json = ?,
-			needs_review = ?, review_reason = ?,
-			encoding_details_json = ?
+			needs_review = ?, review_reason = ?
 		WHERE id = ? AND user_stopped = 0`,
 		item.DiscTitle,
 		item.RipSpecData, item.DiscFingerprint, item.MetadataJSON,
 		item.NeedsReview, item.ReviewReason,
-		item.EncodingDetailsJSON,
 		item.ID,
-	)
-}
-
-// UpdateEncodingDetails persists ONLY the encoding telemetry column. The
-// encoding task is the column's single writer.
-func (s *Store) UpdateEncodingDetails(item *Item) error {
-	return s.execUnlessStopped(item, fmt.Sprintf("update encoding details item %d", item.ID), nil, `
-		UPDATE queue_items SET
-			encoding_details_json = ?,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ? AND user_stopped = 0`,
-		item.EncodingDetailsJSON, item.ID,
 	)
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
@@ -26,7 +27,9 @@ type Session struct {
 	// concurrent branch of an item has its own task row, so progress writes
 	// never contend. A detached task (ID 0) keeps progress in memory only
 	// (OneShot CLI execution, where no scheduler task exists).
-	Task *queue.Task
+	Task       *queue.Task
+	progressMu sync.Mutex
+	now        func() time.Time
 }
 
 // NewSession creates a stage session and parses the item's RipSpec envelope.
@@ -270,6 +273,7 @@ type progressUpdate struct {
 	bytesCopied   *int64
 	totalBytes    *int64
 	encodingJSON  *string
+	activity      *queue.Activity
 }
 
 // WithActiveEpisode sets the task's active asset key during a progress update.
@@ -290,14 +294,28 @@ func WithEncodingDetails(json string) ProgressOption {
 	return func(u *progressUpdate) { u.encodingJSON = &json }
 }
 
-// Progress updates the running task's progress columns. Encoding telemetry
-// rides along on the item (single writer: the encoding task). A detached
+// Activity reports one bounded lane of work. The session timestamps and journals
+// transitions; repeated counters update the snapshot only. Concurrent branches
+// such as transcription/reference fetching share the session's progress lock.
+func (s *Session) Activity(a queue.Activity) {
+	s.Progress(0, a.Message, WithActivity(a))
+}
+
+// WithActivity persists an operation together with its encoding counters.
+func WithActivity(a queue.Activity) ProgressOption {
+	return func(u *progressUpdate) { u.activity = &a }
+}
+
+// Progress updates the running task's progress columns and encoding telemetry
+// atomically. A detached
 // task (ID 0) keeps progress in memory only. Persistence failures are
 // non-fatal: progress is display state, so they are logged and swallowed.
 func (s *Session) Progress(percent float64, message string, opts ...ProgressOption) {
 	if s == nil || s.Store == nil || s.Item == nil || s.Task == nil {
 		return
 	}
+	s.progressMu.Lock()
+	defer s.progressMu.Unlock()
 	update := progressUpdate{}
 	for _, opt := range opts {
 		opt(&update)
@@ -306,6 +324,25 @@ func (s *Session) Progress(percent float64, message string, opts ...ProgressOpti
 	s.Task.ProgressPercent = percent
 	s.Task.ProgressMessage = message
 	if update.activeEpisode != nil {
+		if s.Task.ActiveAssetKey != *update.activeEpisode {
+			observed := time.Now()
+			if s.now != nil {
+				observed = s.now()
+			}
+			for _, a := range s.Task.Activities {
+				if s.Task.ID == 0 || a.State != "running" && a.State != "waiting" {
+					continue
+				}
+				start, _ := time.Parse(time.RFC3339Nano, a.StartedAt)
+				if err := s.Store.RecordEvent(queue.Event{ItemID: s.Item.ID, TaskID: s.Task.ID, Attempt: s.Task.Attempts, Type: "activity_ended", Stage: s.Task.Type, EpisodeKey: a.AssetKey, Substage: a.Operation, Message: a.Message, DurationSeconds: observed.Sub(start).Seconds()}); err != nil {
+					s.warnProgressFailure(err)
+				}
+			}
+			s.Task.Activities = nil
+			if *update.activeEpisode != "" {
+				s.Task.EncodingDetailsJSON = ""
+			}
+		}
 		s.Task.ActiveAssetKey = *update.activeEpisode
 	}
 	if update.bytesCopied != nil {
@@ -315,10 +352,78 @@ func (s *Session) Progress(percent float64, message string, opts ...ProgressOpti
 		s.Task.ProgressTotalBytes = *update.totalBytes
 	}
 	if update.encodingJSON != nil {
-		s.Item.EncodingDetailsJSON = *update.encodingJSON
-		if err := s.Store.UpdateEncodingDetails(s.Item); err != nil {
-			s.warnProgressFailure(err)
-			return
+		s.Task.EncodingDetailsJSON = *update.encodingJSON
+	}
+	if update.activity != nil {
+		a := *update.activity
+		observed := time.Now()
+		if s.now != nil {
+			observed = s.now()
+		}
+		now := observed.UTC().Format(time.RFC3339Nano)
+		if a.ID == "" {
+			a.ID = "work"
+		}
+		if a.State == "" {
+			a.State = "running"
+		}
+		if a.ID == "work" {
+			s.Task.ActiveAssetKey = a.AssetKey
+		}
+		a.StartedAt, a.UpdatedAt = now, now
+		index := len(s.Task.Activities)
+		transition := true
+		for i, previous := range s.Task.Activities {
+			if previous.ID != a.ID {
+				continue
+			}
+			index = i
+			if previous.Operation == a.Operation && previous.AssetKey == a.AssetKey {
+				transition = previous.State != a.State
+				if previous.State == "running" || previous.State == "waiting" || !transition {
+					a.StartedAt, a.AdvancedAt = previous.StartedAt, previous.AdvancedAt
+				}
+				if a.State != "running" && a.State != "waiting" && a.Unit == "" {
+					a.Completed, a.Total, a.Unit = previous.Completed, previous.Total, previous.Unit
+				}
+				// Concurrent completions may arrive out of order. A new
+				// operation or attempt resets counters, not a late observation.
+				if previous.State == "running" && a.Unit == previous.Unit && a.Total == previous.Total {
+					a.Completed = max(a.Completed, previous.Completed)
+				}
+			} else if s.Task.ID != 0 && (previous.State == "running" || previous.State == "waiting") {
+				start, _ := time.Parse(time.RFC3339Nano, previous.StartedAt)
+				if err := s.Store.RecordEvent(queue.Event{ItemID: s.Item.ID, TaskID: s.Task.ID, Attempt: s.Task.Attempts, Type: "activity_ended", Stage: s.Task.Type,
+					EpisodeKey: previous.AssetKey, Substage: previous.Operation, Message: previous.Message, DurationSeconds: observed.Sub(start).Seconds()}); err != nil {
+					s.warnProgressFailure(err)
+				}
+			}
+			if a.Completed != previous.Completed {
+				a.AdvancedAt = now
+			}
+			break
+		}
+		if index == len(s.Task.Activities) {
+			s.Task.Activities = append(s.Task.Activities, a)
+		} else {
+			s.Task.Activities[index] = a
+		}
+		if transition && a.State == "waiting" && s.Logger != nil {
+			s.Logger.Info("operation waiting", "decision_type", "operation_wait", "decision_result", "waiting", "decision_reason", a.Message)
+		}
+		if a.State == "waiting" && a.Operation == "input" {
+			s.Task.EncodingDetailsJSON = ""
+		}
+		if transition && s.Task.ID != 0 {
+			var duration float64
+			if a.State != "running" && a.State != "waiting" {
+				start, _ := time.Parse(time.RFC3339Nano, a.StartedAt)
+				duration = observed.Sub(start).Seconds()
+			}
+			if err := s.Store.RecordEvent(queue.Event{ItemID: s.Item.ID, TaskID: s.Task.ID, Attempt: s.Task.Attempts,
+				Type: "activity_" + a.State, Stage: s.Task.Type, EpisodeKey: a.AssetKey, Substage: a.Operation, Message: a.Message, DurationSeconds: duration}); err != nil {
+				s.warnProgressFailure(err)
+			}
 		}
 	}
 	if s.Task.ID == 0 {
@@ -347,6 +452,9 @@ func (s *Session) warnProgressFailure(err error) {
 // SetActiveEpisode persists a change to the task's active asset key without
 // changing the current percent or message.
 func (s *Session) SetActiveEpisode(key string) {
+	if s == nil || s.Task == nil {
+		return
+	}
 	s.Progress(s.Task.ProgressPercent, s.Task.ProgressMessage, WithActiveEpisode(key))
 }
 

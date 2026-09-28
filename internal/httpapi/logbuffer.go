@@ -75,6 +75,10 @@ func (b *LogBuffer) Append(entry LogEntry) {
 
 // LogQueryOpts configures a log buffer query.
 type LogQueryOpts struct {
+	Stage      string
+	Asset      string
+	TaskID     string
+	Attempt    string
 	Since      uint64 // cursor from a prior query's next: return entries with seq >= Since (0 = from the start)
 	Limit      int    // max entries to return (default 200)
 	Tail       bool   // return the most recent entries (ignored when Since > 0)
@@ -189,6 +193,14 @@ func (b *LogBuffer) bsearchSince(startIdx int, since uint64) int {
 }
 
 func (b *LogBuffer) matchesFilter(e LogEntry, opts LogQueryOpts, minLevel int) bool {
+	if opts.Stage != "" && !strings.EqualFold(opts.Stage, e.Stage) {
+		return false
+	}
+	for field, value := range map[string]string{"episode_key": opts.Asset, "task_id": opts.TaskID, "attempt": opts.Attempt} {
+		if value != "" && !strings.EqualFold(value, e.Fields[field]) {
+			return false
+		}
+	}
 	if opts.ItemID > 0 && e.ItemID != opts.ItemID {
 		return false
 	}

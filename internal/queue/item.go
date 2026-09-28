@@ -30,20 +30,19 @@ func parseTimestamp(s string) (time.Time, error) {
 // handler reports against its own task, so concurrent branches of one item
 // never share a progress slot.
 type Item struct {
-	ID                  int64
-	DiscTitle           string
-	Stage               Stage
-	FailedAtStage       Stage
-	ErrorMessage        string
-	CreatedAt           string
-	UpdatedAt           string
-	RipSpecData         string
-	DiscFingerprint     string
-	MetadataJSON        string
-	NeedsReview         int
-	ReviewReason        string
-	EncodingDetailsJSON string
-	userStopped         int
+	ID              int64
+	DiscTitle       string
+	Stage           Stage
+	FailedAtStage   Stage
+	ErrorMessage    string
+	CreatedAt       string
+	UpdatedAt       string
+	RipSpecData     string
+	DiscFingerprint string
+	MetadataJSON    string
+	NeedsReview     int
+	ReviewReason    string
+	userStopped     int
 }
 
 // UserStopped reports whether the item was explicitly stopped by the user.

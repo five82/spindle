@@ -68,7 +68,9 @@ func (m Model) renderHeader() string {
 
 	// Logo, daemon status, and drive availability are never dropped.
 	parts = append(parts, headerPart{styles.Logo.Render("flyer"), 0})
-	if m.snapshot.Status.Running {
+	if m.snapshot.Status.Draining {
+		parts = append(parts, headerPart{styles.WarningText.Render("DRAINING"), 0})
+	} else if m.snapshot.Status.Running {
 		parts = append(parts, headerPart{styles.SuccessText.Render("● ON"), 0})
 	} else {
 		parts = append(parts, headerPart{styles.DangerText.Render("● OFF"), 0})
@@ -375,11 +377,10 @@ func (m Model) renderCommandBar() string {
 				cmd{"f", "Filters", 3},
 			)
 		}
-		// The episode toggle only earns a hint when there is a list to
-		// toggle; movies carry a single internal episode at most.
+		// Inventory stays visible; t reveals secondary evidence for movies too.
 		if m.inspectorTab == tabOverview || m.inspectorTab == tabEpisodes {
-			if item := m.getInspectedItem(); item != nil && isEpisodicItem(*item) {
-				commands = append(commands, cmd{"t", "Episodes", 3})
+			if item := m.getInspectedItem(); item != nil {
+				commands = append(commands, cmd{"t", "Details", 3})
 			}
 		}
 		commands = append(commands, cmd{"Esc", "Back", 1})

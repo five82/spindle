@@ -54,11 +54,12 @@ func TestQueueCompletedStripCollapses(t *testing.T) {
 	}
 }
 
-func TestQueueCompletedItemShowsSizeReduction(t *testing.T) {
+func TestQueueCompletedItemShowsPublishedFiles(t *testing.T) {
 	items := []spindle.QueueItem{{
 		ID:           12,
 		DisplayTitle: "Example Movie",
 		Stage:        "completed",
+		Episodes:     []spindle.EpisodeStatus{{Key: "main", FinalPath: "/library/movie"}},
 		Encoding: &spindle.EncodingStatus{
 			EncodedSize:          5 << 30,
 			SizeReductionPercent: 79,
@@ -69,7 +70,7 @@ func TestQueueCompletedItemShowsSizeReduction(t *testing.T) {
 	styles := m.theme.Styles()
 	cols := computeQueueColumns(items, 120)
 	row := stripANSI(m.renderQueueRow(items[0], cols, false, styles))
-	if !strings.Contains(row, "-79%") {
+	if !strings.Contains(row, "1/1 published") {
 		t.Fatalf("completed row missing size reduction, got %q", row)
 	}
 }

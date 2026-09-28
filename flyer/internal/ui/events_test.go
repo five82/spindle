@@ -13,6 +13,7 @@ import (
 
 func TestItemEventsRenderKeepsLifecycleOutcomes(t *testing.T) {
 	m := New(Options{PrefsPath: t.TempDir() + "/prefs.toml"})
+	m.itemEvents.loaded = true
 	m.itemEvents.events = []spindle.ItemEvent{
 		{Type: "stage_start", Stage: "ripping"},
 		{Type: "stage_start", Stage: "encoding"},
@@ -71,7 +72,7 @@ func TestItemEventsTabPagesAndIgnoresStaleReplies(t *testing.T) {
 	if m.itemEvents.cursor != 1 || len(m.itemEvents.events) != 1 {
 		t.Fatalf("first page: %+v", m.itemEvents)
 	}
-	if shown := stripANSI(m.renderItemEvents()); shown != "No stage events yet" {
+	if shown := stripANSI(m.renderItemEvents()); !strings.Contains(shown, "worker reserved (may wait for input)") {
 		t.Fatalf("idle encoding shown as work: %q", shown)
 	}
 	m.handleItemEventBatch(msg) // duplicate response must not append twice

@@ -66,31 +66,10 @@ func TestPendingKeyedAssetJobsSkipsCompletedOutputAndMissingInput(t *testing.T) 
 	}
 }
 
-func TestOverallPercentClampsInputs(t *testing.T) {
-	if got := OverallPercent(1, 4, 50); got != 37.5 {
-		t.Fatalf("OverallPercent() = %f, want 37.5", got)
-	}
-	if got := OverallPercent(-1, 4, -10); got != 0 {
-		t.Fatalf("OverallPercent negative = %f, want 0", got)
-	}
-	if got := OverallPercent(5, 4, 150); got != 100 {
-		t.Fatalf("OverallPercent clamp = %f, want 100", got)
-	}
-	if got := OverallPercent(1, 0, 50); got != 0 {
-		t.Fatalf("OverallPercent zero total = %f, want 0", got)
-	}
-}
-
 func TestAssetJobProgressHelpers(t *testing.T) {
 	job := AssetJob{ProgressIndex: 1, ProgressTotal: 4}
 	if got := job.Number(); got != 2 {
 		t.Fatalf("Number() = %d, want 2", got)
-	}
-	if got := job.Percent(50); got != 37.5 {
-		t.Fatalf("Percent() = %f, want 37.5", got)
-	}
-	if got := job.CompletionPercent(); got != 50 {
-		t.Fatalf("CompletionPercent() = %f, want 50", got)
 	}
 	if got := job.PhaseMessage("Encoding title00.mkv"); got != "Phase 2/4 - Encoding title00.mkv" {
 		t.Fatalf("PhaseMessage() = %q", got)
