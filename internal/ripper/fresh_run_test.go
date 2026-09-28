@@ -14,7 +14,7 @@ import (
 func TestRunFreshMoviePersistsValidatedRipAndCache(t *testing.T) {
 	bin := t.TempDir()
 	for name, script := range map[string]string{
-		"ffprobe":    "#!/bin/sh\nprintf '%s\\n' '{\"streams\":[{\"codec_type\":\"video\"},{\"codec_type\":\"audio\"}],\"format\":{\"duration\":\"120\"}}'\n",
+		"ffprobe":    "#!/bin/sh\ncase \" $* \" in *-show_entries\\ packet=pts_time*) printf '0\\n7200\\n';; *) printf '%s\\n' '{\"streams\":[{\"codec_type\":\"video\"},{\"codec_type\":\"audio\"}],\"format\":{\"duration\":\"7200\"}}';; esac\n",
 		"makemkvcon": "#!/bin/sh\nfor arg do\n case \"$arg\" in */ripped) truncate -s 52428801 \"$arg/movie_t01.mkv\";; esac\ndone\nprintf '%s\\n' 'PRGV:100,100,65536' 'MSG:5036,0,2,\"Copy complete\",\"%1 titles saved, %2 failed\",1,0'\n",
 	} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {

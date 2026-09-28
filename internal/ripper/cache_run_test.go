@@ -13,13 +13,13 @@ import (
 
 func TestRunRestoresValidCachedMovieWithoutDrive(t *testing.T) {
 	bin := t.TempDir()
-	script := "#!/bin/sh\nprintf '%s\\n' '{\"streams\":[{\"codec_type\":\"video\"},{\"codec_type\":\"audio\"}],\"format\":{\"duration\":\"120\"}}'\n"
+	script := "#!/bin/sh\ncase \" $* \" in *-show_entries\\ packet=pts_time*) printf '0\\n7200\\n';; *) printf '%s\\n' '{\"streams\":[{\"codec_type\":\"video\"},{\"codec_type\":\"audio\"}],\"format\":{\"duration\":\"7200\"}}';; esac\n"
 	if err := os.WriteFile(filepath.Join(bin, "ffprobe"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	staging := t.TempDir()
-	sess := newRipSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}})
+	sess := newRipSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}, Titles: []ripspec.Title{{ID: 1, Duration: 7200}}})
 	src := t.TempDir()
 	file, err := os.Create(filepath.Join(src, "movie_t01.mkv"))
 	if err != nil {

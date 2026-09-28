@@ -375,8 +375,10 @@ func TestCombinedContentSimilarityLiftsOnlyPlausibleRawMatches(t *testing.T) {
 		raw      float64
 		want     float64
 	}{
+		{name: "Simpsons S03E01 matched reference", weighted: 0.4678, raw: 0.9441, want: 0.9441},
 		{name: "proper noun ASR mismatch", weighted: 0.55, raw: 0.965, want: 0.965},
 		{name: "same-series raw false positive", weighted: 0.085, raw: 0.91, want: 0.085},
+		{name: "nearby false positive remains guarded", weighted: 0.44, raw: 0.9441, want: 0.44},
 		{name: "strong weighted match", weighted: 0.934, raw: 0.988, want: 0.988},
 		{name: "raw below guard", weighted: 0.70, raw: 0.89, want: 0.70},
 	}
@@ -387,6 +389,22 @@ func TestCombinedContentSimilarityLiftsOnlyPlausibleRawMatches(t *testing.T) {
 				t.Fatalf("combinedContentSimilarity(%v, %v) = %v, want %v", tt.weighted, tt.raw, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSimpsonsE01StrongRawMarginalWeightedRequiresVerification(t *testing.T) {
+	// Item 3: the E01 reference and WhisperX transcript were the same episode,
+	// but the IDF-weighted score narrowly missed the direct-acceptance guard.
+	score := combinedContentSimilarity(0.4678, 0.9441)
+	claims := buildClaims(
+		[]ripFingerprint{{EpisodeKey: "s03_001", TitleID: 0}},
+		[]referenceFingerprint{{EpisodeNumber: 1}},
+		scoreMatrices{Final: [][]float64{{score}}, Weighted: [][]float64{{0.4678}}, Raw: [][]float64{{0.9441}}},
+		DefaultPolicy(),
+	)
+	if len(claims) != 1 || claims[0].AutoAccept || !claims[0].Match.NeedsVerification ||
+		claims[0].Match.VerificationReason != "raw_similarity_weighted_guard" {
+		t.Fatalf("expected pending E01 LLM claim, got %+v", claims)
 	}
 }
 

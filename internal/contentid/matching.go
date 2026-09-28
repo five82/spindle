@@ -12,6 +12,7 @@ const (
 	maxVerificationCandidatesPerRip = 2
 	rawLiftMinRawSimilarity         = 0.90
 	rawLiftMinWeightedSimilarity    = 0.50
+	rawLiftVerificationFloor        = 0.45
 )
 
 type scoreMatrices struct {
@@ -167,6 +168,10 @@ func buildClaims(rips []ripFingerprint, refs []referenceFingerprint, scores scor
 			episodeMargin := score - episodeRunnerUpScore
 			neighborMargin := score - neighborScore
 			confidence, quality, needsVerify, verifyReason := deriveMatchConfidence(score, ripMargin, episodeMargin, neighborMargin, ref.Suspect, policy)
+			if scores.Raw[i][j] >= rawLiftMinRawSimilarity && scores.Weighted[i][j] < rawLiftMinWeightedSimilarity {
+				needsVerify = true
+				verifyReason = "raw_similarity_weighted_guard"
+			}
 			match := matchResult{
 				EpisodeKey:              rip.EpisodeKey,
 				TitleID:                 rip.TitleID,
@@ -433,7 +438,7 @@ func buildScoreMatrices(rips []ripFingerprint, refs []referenceFingerprint) scor
 }
 
 func combinedContentSimilarity(weighted, raw float64) float64 {
-	if raw >= rawLiftMinRawSimilarity && weighted >= rawLiftMinWeightedSimilarity {
+	if raw >= rawLiftMinRawSimilarity && weighted >= rawLiftVerificationFloor {
 		return math.Max(weighted, raw)
 	}
 	return weighted
@@ -465,7 +470,7 @@ func isAutoAcceptedClaim(match matchResult, policy Policy) bool {
 		match.ScoreMargin >= policy.ClearMatchMargin &&
 		match.EpisodeScoreMargin >= policy.ClearMatchMargin &&
 		match.NeighborScoreMargin >= policy.ClearMatchMargin/2 &&
-		!match.ReferenceSuspect &&
+		!match.ReferenceSuspect && !match.NeedsVerification &&
 		match.Confidence >= policy.DecisiveAutoAcceptThreshold
 }
 

@@ -103,7 +103,7 @@ The `stage_gate` object in the audit output contains:
 | `phase_external_validation` | Post-encoding AND non-DVD source |
 
 **Key principles:**
-- External validation (blu-ray.com lookups) is only useful when (a) there are encoded files to cross-reference AND (b) the source is Blu-ray. **Skip external validation entirely for DVDs.**
+- Blu-ray.com crop/commentary validation requires encoded files and a Blu-ray source. **Skip Blu-ray.com validation for DVDs.** Separately, for any TV disc (including DVD), search for a credible disc-specific episode listing when available and compare its count to the selected title/placeholder count. Do not infer the per-disc count from the season's total; check edition/reissue notes (episodes may have been removed), and if no reliable listing for this edition exists, say the count is unverified.
 - UHD status is not encoded in `disc_source`. Infer UHD from contextual signals: disc title containing "UHD", 2160p resolutions in bdinfo, or similar markers in the audit data.
 - **For failed items:** Focus the report on diagnosing the failure. Analyze the error, the events leading up to it, and any retry patterns. Do not pad the report with sections that say "N/A - not reached".
 - **No-TMDB-match is fatal at identification for every disc.** Expect these items to fail before ripping rather than continue as degraded unknown-media-type review items. An item that reached ripping therefore always has `media_type=movie` or `tv`; `media_type=unknown` means the item failed at (or has not yet finished) identification. A ripped item carrying `unknown` is itself a finding — the ripper rejects that media type outright.
@@ -143,9 +143,9 @@ Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors
 
 3. **Data flow anomalies**:
    - Track counts changing unexpectedly between stages
-   - Reconcile TV counts across `makemkv_scan_complete.titles_found`, title-selection decisions, `episode_placeholders`, the episode manifest, and ripped assets. A contiguous resolved sequence does not prove the first or last episode is present.
+   - Reconcile TV counts across `makemkv_scan_complete.titles_found`, title-selection decisions, `episode_placeholders`, the episode manifest, and ripped assets. A contiguous resolved sequence does not prove the first or last episode is present. If a disc listing includes E1 but content ID calls the first rip a probable extra, investigate the reference-selection metadata and similarity gate before accepting the missing-E1 conclusion; a high metadata score alone does not prove a content match.
    - Title-level TV deduplication only runs on Blu-ray segment maps: DVD maps are title-local and TitleHash is metadata-only, so identification refuses to dedup non-Blu-ray titles at all. A `duplicate_detection` decision carrying `title_id`/`duplicate_of` on a DVD should never appear — if one does, treat it as a CRITICAL missing-episode risk and a bug in the dedup gate.
-   - Episode counts not matching expectations
+   - Episode counts not matching expectations. For TV, cross-check against a credible disc-specific web listing when available, even on DVDs; trace any excess/missing titles to the selection decision and disc structure rather than assuming every episode-length scan title is an episode.
    - File sizes that seem wrong for the content
 
 4. **LLM decision review** (from `analysis.decision_groups`):
@@ -610,7 +610,7 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] Reported any `keydb_download_error` stale-catalog fallback as a WARNING
 - [ ] Analyzed logs/decisions for anomalies beyond simple error counts, drilling into the full JSON wherever the digest flagged an omission or something looked off
 - [ ] Read full JSON `transitions` for stage starts/terminal outcomes and encoding substages; used `analysis.stage_timings` for the timing table, not nonexistent `logs.stages`
-- [ ] If TV: reconciled scanned, selected, placeholder, manifest, ripped, and final episode counts; investigated every reduction
+- [ ] If TV: reconciled scanned, selected, placeholder, manifest, ripped, and final episode counts; checked a credible disc-specific episode listing if available (DVD included); investigated every reduction or excess
 - [ ] For failed items: diagnosed failure cause from `item.error_message` and log events
 - [ ] Traced each finding to its earliest wrong decision or non-code cause; grouped dependent symptoms and distinguished evidence from inference
 

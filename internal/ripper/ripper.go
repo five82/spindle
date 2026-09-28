@@ -201,7 +201,48 @@ func (h *Handler) restoreFromRipCache(ctx context.Context, sess *stage.Session, 
 			)
 		}
 	}
+	// A previous run may have cached a title that the current selection now
+	// rejects. Do not keep a stale extra (or trust a cached video whose audio
+	// makes its container duration look plausible).
+	h.restoreTitlesFromCachedEnvelope(logger, env, meta.RipSpecData)
+	if cacheUsable && env.Metadata.MediaType == "tv" && len(env.Episodes) > 0 {
+		if meta.TitleCount != len(env.Episodes) {
+			cacheUsable = false
+		} else {
+			for _, ep := range env.Episodes {
+				if err := h.validateRippedArtifact(ctx, cachedTitleFiles[ep.TitleID], ep.RuntimeSeconds); err != nil {
+					logger.Warn("rip cache video invalid", "event_type", "rip_cache_invalid",
+						"error_hint", err.Error(), "impact", "cache discarded; fresh disc rip required")
+					cacheUsable = false
+					break
+				}
+			}
+		}
+	}
+	if cacheUsable && env.Metadata.MediaType == "movie" {
+		selection, ok, _, _, _ := PrimaryTitleDecisionSummary(env.Titles)
+		files := listMKVFiles(rippedDir)
+		if !ok || meta.TitleCount != 1 || len(files) != 1 {
+			cacheUsable = false
+		} else {
+			for path := range files {
+				if err := h.validateRippedArtifact(ctx, path, selection.Duration); err != nil {
+					logger.Warn("rip cache video invalid", "event_type", "rip_cache_invalid",
+						"error_hint", err.Error(), "impact", "cache discarded; fresh disc rip required")
+					cacheUsable = false
+				}
+			}
+		}
+	}
 	if !cacheUsable {
+		logger.Info("rip cache rejected", "decision_type", logs.DecisionRipCache,
+			"decision_result", "incomplete", "decision_reason", "cached titles do not match validated selection")
+		if err := h.cache.Remove(item.DiscFingerprint); err != nil {
+			return true, fmt.Errorf("remove invalid rip cache: %w", err)
+		}
+		if err := os.RemoveAll(rippedDir); err != nil {
+			return true, fmt.Errorf("remove restored invalid rips: %w", err)
+		}
 		return false, nil
 	}
 
@@ -227,7 +268,6 @@ func (h *Handler) restoreFromRipCache(ctx context.Context, sess *stage.Session, 
 	if err := h.mapAndValidateAssets(ctx, logger, sess, rippedDir, cachedTitleFiles); err != nil {
 		return true, err
 	}
-	h.restoreTitlesFromCachedEnvelope(logger, env, meta.RipSpecData)
 	if err := persistRipResults(sess); err != nil {
 		return true, err
 	}
@@ -313,7 +353,7 @@ func (h *Handler) ripTitles(ctx context.Context, sess *stage.Session, rippedDir 
 		}
 		if key := titleEpisodeKey[title.ID]; key != "" {
 			if asset, ok := sess.Env.Assets.FindAsset(ripspec.AssetKindRipped, key); ok && asset.IsCompleted() {
-				if _, statErr := os.Stat(asset.Path); statErr == nil {
+				if err := h.validateRippedArtifact(ctx, asset.Path, title.Duration); err == nil {
 					sess.Logger.Info("title already ripped",
 						"decision_type", logs.DecisionTitleRip,
 						"decision_result", "skipped",
@@ -323,6 +363,11 @@ func (h *Handler) ripTitles(ctx context.Context, sess *stage.Session, rippedDir 
 					)
 					sess.Progress(0, fmt.Sprintf("Phase %d/%d - Ripped title %d", i+1, len(targets), title.ID))
 					continue
+				}
+				sess.Logger.Info("invalid preserved rip will be retried", "decision_type", logs.DecisionTitleRip,
+					"decision_result", "retry", "decision_reason", "preserved video failed rip validation", "title_id", title.ID)
+				if err := os.Remove(asset.Path); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("remove invalid preserved rip: %w", err)
 				}
 			}
 		}
@@ -375,6 +420,19 @@ func (h *Handler) ripTitle(ctx context.Context, sess *stage.Session, rippedDir s
 	if err != nil {
 		return err
 	}
+	if err := h.validateRippedArtifact(ctx, newFile, title.Duration); err != nil {
+		logger.Error("ripped video incomplete", "event_type", "rip_validation_error",
+			"error_hint", "ripped video does not cover selected title", "error", err, "title_id", title.ID)
+		return fmt.Errorf("rip title %d: %w", title.ID, err)
+	}
+	info, err := os.Stat(newFile)
+	if err != nil {
+		return fmt.Errorf("stat validated rip: %w", err)
+	}
+	logger.Info("title rip completed", "decision_type", logs.DecisionTitleRip,
+		"decision_result", "completed",
+		"decision_reason", fmt.Sprintf("title_id=%d file=%s size=%d", title.ID, newFile, info.Size()),
+		"title_id", title.ID, "file", newFile, "size_bytes", info.Size())
 	if episodeKey != "" {
 		if err := sess.SaveAssetSuccess(ripspec.AssetKindRipped, ripspec.Asset{
 			EpisodeKey: episodeKey,
@@ -405,18 +463,6 @@ func (h *Handler) discoverNewRippedFile(logger *slog.Logger, rippedDir string, t
 		return "", fmt.Errorf("rip title %d: no new mkv file in %s after rip", titleID, rippedDir)
 	}
 
-	var newFileSize int64
-	if fi, statErr := os.Stat(newFile); statErr == nil {
-		newFileSize = fi.Size()
-	}
-	logger.Info("title rip completed",
-		"decision_type", logs.DecisionTitleRip,
-		"decision_result", "completed",
-		"decision_reason", fmt.Sprintf("title_id=%d file=%s size=%d", titleID, newFile, newFileSize),
-		"title_id", titleID,
-		"file", newFile,
-		"size_bytes", newFileSize,
-	)
 	return newFile, nil
 }
 
@@ -791,7 +837,14 @@ func (h *Handler) mapAndValidateAssets(ctx context.Context, logger *slog.Logger,
 			continue
 		}
 		visited[asset.Path] = struct{}{}
-		if err := h.validateRippedArtifact(ctx, asset.Path); err != nil {
+		expected := 0
+		for _, ep := range env.Episodes {
+			if ep.Key == asset.EpisodeKey {
+				expected = ep.RuntimeSeconds
+				break
+			}
+		}
+		if err := h.validateRippedArtifact(ctx, asset.Path, expected); err != nil {
 			if env.Metadata.MediaType == "tv" && len(env.Episodes) > 0 {
 				// Per-episode failure isolation: mark failed, continue.
 				logger.Warn("ripped episode failed validation",

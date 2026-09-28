@@ -108,6 +108,9 @@ func selectTVEpisodeTitles(titles []ripspec.Title, minTitleLength int, expected 
 		alive, shortestComponent = resolveComposites(alive, &result)
 	}
 	alive = excludeGrossOutliers(alive, median, shortestComponent, &result)
+	if discSource == "dvd" {
+		alive = excludeChapterOutliers(alive, &result)
+	}
 	if len(alive) == 1 && len(candidates) > 1 && result.Decisions[alive[0].decisionIndex].Reason != "combined_double_episode_candidate" {
 		result.Ambiguous = true
 		result.AmbiguityReasons = append(result.AmbiguityReasons, "single_episode_length_candidate")
@@ -159,6 +162,40 @@ func excludeGrossOutliers(candidates []tvTitleCandidate, median, shortestCompone
 		alive = append(alive, candidate)
 	}
 	return alive
+}
+
+// excludeChapterOutliers rejects a DVD title only when a strong cluster of
+// episode-length titles has a consistent, much richer chapter AND cell layout.
+// Cell maps are title-local, so their identities cannot establish duplicates.
+func excludeChapterOutliers(alive []tvTitleCandidate, result *tvTitleSelectionResult) []tvTitleCandidate {
+	type layout struct{ chapters, cells int }
+	counts := make(map[layout]int)
+	for _, candidate := range alive {
+		t := candidate.title
+		if t.Chapters >= 5 && t.SegmentCount >= 4 {
+			counts[layout{t.Chapters, t.SegmentCount}]++
+		}
+	}
+	mode, majority := layout{}, 0
+	for candidate, count := range counts {
+		if count > majority {
+			mode, majority = candidate, count
+		}
+	}
+	if majority < 4 || majority*2 <= len(alive) {
+		return alive
+	}
+	kept := make([]tvTitleCandidate, 0, len(alive))
+	for _, candidate := range alive {
+		t := candidate.title
+		if t.Chapters > 0 && t.SegmentCount > 0 && t.Chapters*2 < mode.chapters && t.SegmentCount*2 <= mode.cells {
+			result.Decisions[candidate.decisionIndex].Reason = "chapter_layout_outlier"
+			result.ExtraCount++
+			continue
+		}
+		kept = append(kept, candidate)
+	}
+	return kept
 }
 
 // durationWeightedMedian returns the duration of the candidate at the

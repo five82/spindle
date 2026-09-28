@@ -857,6 +857,30 @@ func TestCreateEpisodePlaceholders_SegmentMapTakesPriorityOverTitleHash(t *testi
 	}
 }
 
+func TestSelectTVEpisodeTitles_SimpsonsSeason3Disc1(t *testing.T) {
+	// Six episodes on disc 1; title 6 looks episode-length in the scan but
+	// belongs to a different, sparse chapter/cell layout (its rip has only
+	// 112 seconds of video). Title 7 is a short extra.
+	titles := []ripspec.Title{}
+	for id, duration := range []int{1380, 1378, 1374, 1377, 1381, 1377} {
+		titles = append(titles, ripspec.Title{ID: id, Duration: duration, Chapters: 7, SegmentCount: 6})
+	}
+	titles = append(titles,
+		ripspec.Title{ID: 6, Duration: 1377, Chapters: 3, SegmentCount: 3},
+		ripspec.Title{ID: 7, Duration: 120, Chapters: 5, SegmentCount: 5})
+	expected := make([]tmdb.Episode, 24)
+	for i := range expected {
+		expected[i] = tmdb.Episode{EpisodeNumber: i + 1, Runtime: 23}
+	}
+	got := selectTVEpisodeTitles(titles, 120, expected, "dvd")
+	if len(got.SelectedTitles) != 6 || got.ExtraCount != 2 {
+		t.Fatalf("selected %+v, extras %d; want six episodes and two extras", got.SelectedTitles, got.ExtraCount)
+	}
+	if got.Decisions[6].Reason != "chapter_layout_outlier" || got.Decisions[7].Reason != "gross_runtime_outlier" {
+		t.Fatalf("decisions: %+v", got.Decisions)
+	}
+}
+
 func TestSelectTVEpisodeTitles_DVDDoesNotDeduplicateMetadataCollisions(t *testing.T) {
 	titles := []ripspec.Title{
 		{ID: 0, Duration: 1372, SegmentMap: "1-10,11", TitleHash: "a"},

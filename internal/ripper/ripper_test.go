@@ -500,9 +500,22 @@ func TestRipTitlesSkipsCompletedTitles(t *testing.T) {
 
 	rippedDir := t.TempDir()
 	rippedFile := filepath.Join(rippedDir, "title_t01.mkv")
-	if err := os.WriteFile(rippedFile, []byte("x"), 0o644); err != nil {
+	f, err := os.Create(rippedFile)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if err := f.Truncate(minRipFileSizeBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	probe := "#!/bin/sh\ncase \" $* \" in *-show_entries\\ packet=pts_time*) printf '0\\n1800\\n';; *) printf '%s\\n' '{\"streams\":[{\"codec_type\":\"video\"},{\"codec_type\":\"audio\"}],\"format\":{\"duration\":\"1800\"}}';; esac\n"
+	if err := os.WriteFile(filepath.Join(bin, "ffprobe"), []byte(probe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	env := ripspec.Envelope{
 		Version:  ripspec.CurrentVersion,

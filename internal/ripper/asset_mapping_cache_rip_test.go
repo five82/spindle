@@ -141,7 +141,7 @@ func TestIncompleteRipCacheIsIgnoredAndRipStatsPersist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.Attributes.Rip == nil || saved.Attributes.Rip.Bytes != 10 || saved.Attributes.Rip.Titles != 2 || saved.Attributes.Rip.Seconds != 3.5 {
+	if saved.Attributes.Rip == nil || saved.Attributes.Rip.Bytes != 0 || saved.Attributes.Rip.Titles != 2 || saved.Attributes.Rip.Seconds != 3.5 {
 		t.Fatalf("rip stats: %+v", saved.Attributes.Rip)
 	}
 }
@@ -149,18 +149,30 @@ func TestIncompleteRipCacheIsIgnoredAndRipStatsPersist(t *testing.T) {
 func TestRipTitlesPreservesCompletedRipAndHonorsCancellation(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "show_t01.mkv")
-	if err := os.WriteFile(file, []byte("preserved"), 0o644); err != nil {
+	f, err := os.Create(file)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if err := f.Truncate(minRipFileSizeBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	probe := "#!/bin/sh\nprintf '%s\\n' '{\"streams\":[{\"codec_type\":\"video\"},{\"codec_type\":\"audio\"}],\"format\":{\"duration\":\"120\"}}'\n"
+	if err := os.WriteFile(filepath.Join(bin, "ffprobe"), []byte(probe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	sess := newRipSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "tv"}, Episodes: []ripspec.Episode{{Key: "one", TitleID: 1}}})
 	sess.Env.Assets.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{EpisodeKey: "one", TitleID: 1, Path: file, Status: ripspec.AssetStatusCompleted})
 	h := &Handler{}
 	if err := h.ripTitles(context.Background(), sess, dir, []ripspec.Title{{ID: 1}}); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(file)
-	if err != nil || string(data) != "preserved" {
-		t.Fatalf("resume overwrote rip: %q %v", data, err)
+	if info, err := os.Stat(file); err != nil || info.Size() != minRipFileSizeBytes+1 {
+		t.Fatalf("resume overwrote rip: %v %v", info, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

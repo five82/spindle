@@ -818,6 +818,8 @@ func (h *Handler) createEpisodePlaceholders(ctx context.Context, logger *slog.Lo
 				"decision_reason", decision.Reason,
 				"title_id", decision.Title.ID,
 				"duration", decision.Title.Duration,
+				"chapters", decision.Title.Chapters,
+				"segment_count", decision.Title.SegmentCount,
 			)
 		case decision.Reason == "below_min_title_length":
 			logger.Debug("tv title excluded",
@@ -850,6 +852,8 @@ func (h *Handler) createEpisodePlaceholders(ctx context.Context, logger *slog.Lo
 					"outlier_bar_seconds", selection.OutlierBarSeconds,
 					"weighted_median_seconds", selection.WeightedMedianSeconds,
 				)
+			case "chapter_layout_outlier":
+				attrs = append(attrs, "chapters", decision.Title.Chapters, "segment_count", decision.Title.SegmentCount)
 			case "expected_runtime_mismatch", "over_expected_episode_count":
 				attrs = append(attrs,
 					"expected_runtimes_seconds", fmt.Sprint(selection.ExpectedRuntimeTargets),

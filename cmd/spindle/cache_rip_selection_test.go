@@ -41,7 +41,7 @@ func TestCacheRipTitleSelectionWithDiscFixture(t *testing.T) {
 	scripts := map[string]string{
 		"lsblk":      fmt.Sprintf("#!/bin/sh\necho '{\"blockdevices\":[{\"name\":\"sr0\",\"label\":\"Test Movie\",\"mountpoint\":%q}]}'\n", mount),
 		"makemkvcon": "#!/bin/sh\ncase \"$3\" in\n info) printf '%s\\n' 'CINFO:2,0,\"Test Movie\"' 'TINFO:1,2,0,\"Feature\"' 'TINFO:1,9,0,\"1:30:00\"'\n if [ \"$SCAN_MODE\" = multi ]; then printf '%s\\n' 'TINFO:2,2,0,\"Alternate\"' 'TINFO:2,9,0,\"1:28:00\"'; fi;;\n mkv) for arg do case \"$arg\" in */ripped) truncate -s 10485761 \"$arg/feature_t01.mkv\";; esac; done\n printf '%s\\n' 'MSG:5036,0,2,\"Copy complete\",\"%1 titles saved, %2 failed\",1,0';;\nesac\n",
-		"ffprobe":    "#!/bin/sh\nprintf '%s\\n' '{\"streams\":[{\"codec_type\":\"video\"},{\"codec_type\":\"audio\"}],\"format\":{\"duration\":\"120\"}}'\n",
+		"ffprobe":    "#!/bin/sh\ncase \" $* \" in *-show_entries\\ packet=pts_time*) printf '0\\n5400\\n';; *) printf '%s\\n' '{\"streams\":[{\"codec_type\":\"video\"},{\"codec_type\":\"audio\"}],\"format\":{\"duration\":\"5400\"}}';; esac\n",
 	}
 	for name, script := range scripts {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
