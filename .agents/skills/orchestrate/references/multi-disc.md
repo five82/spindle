@@ -6,24 +6,23 @@ Covers: a single film split over two discs (long epics, roadshow editions).
 
 Check TMDB (via `spindle disc identify` and a web search of the TMDB entry):
 
-- **TMDB lists it as one movie with one full runtime** (the normal case,
-  e.g. a 4-hour cut split for disc capacity): the library wants **one file**.
-  Confirm: disc A runtime + disc B runtime ≈ TMDB runtime.
+- **TMDB lists it as one movie with one full runtime** (the normal case, e.g. a
+  4-hour cut split for disc capacity): the library wants **one file**. Confirm:
+  disc A runtime + disc B runtime ≈ TMDB runtime.
 - **TMDB models the parts as separate movies** (each part has its own entry,
-  poster, and runtime - e.g. films released theatrically as two parts):
-  the library wants **two files, as two separate movies**, each processed
-  and named against its own TMDB entry. In that case handle each disc as a
-  normal single feature (prefer the automated pipeline per disc) and stop
-  reading here.
+  poster, and runtime - e.g. films released theatrically as two parts): the
+  library wants **two files, as two separate movies**, each processed and named
+  against its own TMDB entry. In that case handle each disc as a normal single
+  feature (prefer the automated pipeline per disc) and stop reading here.
 
 ## 2. One-file flow
 
-1. Rip the feature title from each disc with `spindle rip` into scratch
-   (scan each disc; the feature is the long title). Note which file is part
-   1 vs part 2 - disc labels and runtimes tell you.
+1. Rip the feature title from each disc with `spindle rip` into scratch (scan
+   each disc; the feature is the long title). Note which file is part 1 vs part
+   2 - disc labels and runtimes tell you.
 2. **Join before encoding** so the result is one seamless encode:
 
-   ```
+   ```bash
    mkvmerge -o scratch/joined.mkv part1.mkv + part2.mkv
    ```
 
@@ -32,22 +31,23 @@ Check TMDB (via `spindle disc identify` and a web search of the TMDB entry):
    film). Verify the joined duration equals the sum of the parts and plays
    across the seam (`ffprobe`, and spot-check a few seconds around the join
    point with ffmpeg if in doubt).
+
 3. Apply the skill's audio rule to the joined source: run `ffprobe` and
    `spindle debug commentary`, then remux it to the primary track plus only
    confirmed commentary tracks. Joining can expose identical lossless/core or
    downmix tracks from both halves; do not pass those redundancies to Reel.
-4. `spindle encode scratch/refined.mkv -o scratch/encoded/` - one encode of
-   the full film.
+4. `spindle encode scratch/refined.mkv -o scratch/encoded/` - one encode of the
+   full film.
 5. `spindle subtitle --tmdb-id ID` on the encoded file (it is a feature);
    whisperx-subtitles skill if no download verifies.
 6. Place as a normal single movie:
    `Movies/Film (1963) [tmdbid-12345]/Film (1963) [tmdbid-12345].mkv`.
 
-If the halves genuinely will not concatenate (different resolutions or
-layouts), do not place them as a multipart Loom movie. Loom expects one video
-file directly in a movie directory and selects only the newest when several
-are present. Keep the parts outside Loom's configured movie library and say
-in the report why no Loom-cataloged movie was produced.
+If the halves genuinely will not concatenate (different resolutions or layouts),
+do not place them as a multipart Loom movie. Loom expects one video file
+directly in a movie directory and selects only the newest when several are
+present. Keep the parts outside Loom's configured movie library and say in the
+report why no Loom-cataloged movie was produced.
 
 ## 3. Verify and finish
 

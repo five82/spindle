@@ -3,7 +3,8 @@
 Common repository rules live in [../AGENTS.md](../AGENTS.md).
 
 Flyer is a read-only TUI for monitoring Spindle. The UI visual language follows
-[docs/design.md](docs/design.md); palettes live in [docs/themes.md](docs/themes.md).
+[docs/design.md](docs/design.md); palettes live in
+[docs/themes.md](docs/themes.md).
 
 ## Boundaries
 
@@ -13,7 +14,8 @@ Flyer is a read-only TUI for monitoring Spindle. The UI visual language follows
 - Keep Flyer buildable without CGO or native encoding libraries.
 - Tests must not read the real home directory or Spindle config; use
   `t.TempDir()` and `t.Setenv("HOME", ...)`.
-- Simplification must preserve log messages, CLI feedback, and status indicators.
+- Simplification must preserve log messages, CLI feedback, and status
+  indicators.
 
 ## Development
 
@@ -25,5 +27,5 @@ go test ./flyer/...
 ./deploy.sh flyer  # when deploying
 ```
 
-When considering features, ask whether they solve a real daily-use problem;
-do not add speculative abstractions.
+When considering features, ask whether they solve a real daily-use problem; do
+not add speculative abstractions.

@@ -1,27 +1,30 @@
 # flyer
 
-A read only terminal dashboard for [Spindle](https://github.com/five82/spindle), the disc-ripping daemon. It polls the Spindle API and shows queue status, item details, and logs.
+A read only terminal dashboard for [Spindle](https://github.com/five82/spindle),
+the disc-ripping daemon. It polls the Spindle API and shows queue status, item
+details, and logs.
 
 ## Expectations
 
-Flyer is a personal tool. I'm sharing it because I believe in open source but I'm not a maintainer. Expect rough edges.
+Flyer is a personal tool. I'm sharing it because I believe in open source but
+I'm not a maintainer. Expect rough edges.
 
 ## Features
 
-- **Dashboard.** Queue table with completed-file counts and filtering, plus a live NOW band
-  that names the item and task holding each scheduler resource (drive, GPU,
-  encode).
+- **Dashboard.** Queue table with completed-file counts and filtering, plus a
+  live NOW band that names the item and task holding each scheduler resource
+  (drive, GPU, encode).
 - **Drive availability.** The header always shows whether the optical drive is
   AVAILABLE, BUSY, or PAUSED.
-- **Item inspector.** Full-screen drill-in for one item, with Overview,
-  Episodes (File for movies), Problems, Logs, and Events tabs. Independent work
-  and explicit waits remain visible. Long operations disclose measured work
-  after ten seconds; unknown totals never become a percentage. Any ETA is
-  approximate and scoped to the current file's video, not the whole item.
-  `t` toggles secondary file evidence without hiding the inventory. Output
-  checks describe Apply's final files, separately from Reel's intermediate checks.
-  Events retains task/attempt transitions and durations across daemon restarts,
-  until the transient queue is cleared.
+- **Item inspector.** Full-screen drill-in for one item, with Overview, Episodes
+  (File for movies), Problems, Logs, and Events tabs. Independent work and
+  explicit waits remain visible. Long operations disclose measured work after
+  ten seconds; unknown totals never become a percentage. Any ETA is approximate
+  and scoped to the current file's video, not the whole item. `t` toggles
+  secondary file evidence without hiding the inventory. Output checks describe
+  Apply's final files, separately from Reel's intermediate checks. Events
+  retains task/attempt transitions and durations across daemon restarts, until
+  the transient queue is cleared.
 - **Problems triage.** Current failures, review needs, unavailable checks, and
   nonfatal outcomes such as skipped subtitles, one keypress from details.
   Bounded diagnostic history is separate from current structured issues.
@@ -47,7 +50,8 @@ Requirements:
 - Remote mode: an API endpoint and bearer token (see
   [Remote Access](#remote-access))
 
-Flyer runs anywhere it can reach the Spindle API. To build from a source checkout instead:
+Flyer runs anywhere it can reach the Spindle API. To build from a source
+checkout instead:
 
 ```bash
 git clone https://github.com/five82/spindle.git
@@ -60,23 +64,24 @@ cd spindle/flyer && go build ./cmd/flyer
 flyer
 ```
 
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `--config` | `$XDG_CONFIG_HOME/spindle/config.toml` | Spindle config file to read |
-| `--poll` | `2` | Refresh interval in seconds |
-| `--api` | none | Spindle API endpoint (remote mode) |
-| `--token` | none | API bearer token (remote mode) |
+| Flag       | Default                                | Purpose                            |
+| ---------- | -------------------------------------- | ---------------------------------- |
+| `--config` | `$XDG_CONFIG_HOME/spindle/config.toml` | Spindle config file to read        |
+| `--poll`   | `2`                                    | Refresh interval in seconds        |
+| `--api`    | none                                   | Spindle API endpoint (remote mode) |
+| `--token`  | none                                   | API bearer token (remote mode)     |
 
 Press `h` or `?` in the TUI for keyboard shortcuts.
 
 ## Remote Access
 
-Flyer reads Spindle's local config by default. Point it at a remote daemon with flags or environment variables:
+Flyer reads Spindle's local config by default. Point it at a remote daemon with
+flags or environment variables:
 
-| Setting | Flag | Environment variable |
-|---------|------|----------------------|
-| Endpoint | `--api` | `FLYER_API_ENDPOINT` |
-| Token | `--token` | `FLYER_API_TOKEN` |
+| Setting  | Flag      | Environment variable |
+| -------- | --------- | -------------------- |
+| Endpoint | `--api`   | `FLYER_API_ENDPOINT` |
+| Token    | `--token` | `FLYER_API_TOKEN`    |
 
 ```bash
 flyer --api http://server:7487 --token mysecrettoken

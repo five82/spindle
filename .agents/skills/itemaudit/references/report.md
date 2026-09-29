@@ -1,58 +1,122 @@
 ## Audit Report Format
 
-**Only include sections applicable to the item's stage gate.** Omit sections for stages the item never reached. For failed items, the report should focus on diagnosing the failure rather than listing empty sections.
+**Only include sections applicable to the item's stage gate.** Omit sections for
+stages the item never reached. For failed items, the report should focus on
+diagnosing the failure rather than listing empty sections.
 
 ### Presentation Density Guidelines
 
-The analysis must remain exhaustive, but the *presentation* should be proportional to findings. Use compact formats for clean data and expand only where anomalies exist.
+The analysis must remain exhaustive, but the _presentation_ should be
+proportional to findings. Use compact formats for clean data and expand only
+where anomalies exist.
 
 **Issues Found actionability:**
-- Lead with the root cause (code bug vs non-code cause, with evidence and the appropriate fix). Group dependent symptoms such as unresolved identity, subtitle skip, and review routing under their cause unless they require independent action. Never recommend hand-editing a bad output as the fix for an upstream bug.
-- Only put items in **Issues Found** when there is a real defect, user-visible impact, review/failure routing, an unexpected mismatch, or a near-threshold condition worth monitoring.
-- Do not promote normal telemetry into an INFO finding. If no corrective action is needed, keep it in the relevant Artifact Analysis section as neutral context or omit it.
-- Use `[INFO]` findings sparingly for unusual/borderline observations, not for expected below-threshold QC flags.
+
+- Lead with the root cause (code bug vs non-code cause, with evidence and the
+  appropriate fix). Group dependent symptoms such as unresolved identity,
+  subtitle skip, and review routing under their cause unless they require
+  independent action. Never recommend hand-editing a bad output as the fix for
+  an upstream bug.
+- Only put items in **Issues Found** when there is a real defect, user-visible
+  impact, review/failure routing, an unexpected mismatch, or a near-threshold
+  condition worth monitoring.
+- Do not promote normal telemetry into an INFO finding. If no corrective action
+  is needed, keep it in the relevant Artifact Analysis section as neutral
+  context or omit it.
+- Use `[INFO]` findings sparingly for unusual/borderline observations, not for
+  expected below-threshold QC flags.
 
 **Cross-episode data (TV):**
-- Build the majority profile line directly from `analysis.episode_consistency.majority_profile` and deviation list from `analysis.episode_consistency.deviations`
-- When all episodes match (`majority_count == total_episodes`), use a single summary line:
+
+- Build the majority profile line directly from
+  `analysis.episode_consistency.majority_profile` and deviation list from
+  `analysis.episode_consistency.deviations`
+- When all episodes match (`majority_count == total_episodes`), use a single
+  summary line:
   `"All 12 episodes: AV1 1436x1080, 1x Opus mono eng, 1x subrip eng"`
-- Only expand to a per-episode table when `deviations` is non-empty, and only show the differing fields
-- Note: for TV items, `media[]` only contains the representative probe, deviation probes, and error probes. Use `media_omitted` to report how many clean probes were compressed. The representative probe has `representative: true`.
-- Duration and size ranges come directly from `analysis.media_stats`: `"Duration: 1485-1520s | Size: 292-557 MB"`
+- Only expand to a per-episode table when `deviations` is non-empty, and only
+  show the differing fields
+- Note: for TV items, `media[]` only contains the representative probe,
+  deviation probes, and error probes. Use `media_omitted` to report how many
+  clean probes were compressed. The representative probe has
+  `representative: true`.
+- Duration and size ranges come directly from `analysis.media_stats`:
+  `"Duration: 1485-1520s | Size: 292-557 MB"`
 
 **Decision traces:**
-- `analysis.decision_groups` already provides the deduplication -- show identical repeats as `"type x{count}: result (reason)"`; expand a group's `entries` only for decisions with different outcomes, notable parameter variations, or anomalous confidence/scores
-- For episode decisions, show candidate, probability, the 0.90 rule, and match/review reason. Distinguish an accepted identity below threshold (a bug) from an unresolved candidate below threshold (correct abstention requiring review); `candidate=none` carries P(none).
+
+- `analysis.decision_groups` already provides the deduplication -- show
+  identical repeats as `"type x{count}: result (reason)"`; expand a group's
+  `entries` only for decisions with different outcomes, notable parameter
+  variations, or anomalous confidence/scores
+- For episode decisions, show candidate, probability, the 0.90 rule, and
+  match/review reason. Distinguish an accepted identity below threshold (a bug)
+  from an unresolved candidate below threshold (correct abstention requiring
+  review); `candidate=none` carries P(none).
 
 **Episode manifest:**
-- Always show the full per-episode table with episode probabilities, canonical episode numbers, titles, and review flags/reasons. The manifest records the pipeline's decisions, not independent semantic verification. This table is never compressed.
+
+- Always show the full per-episode table with episode probabilities, canonical
+  episode numbers, titles, and review flags/reasons. The manifest records the
+  pipeline's decisions, not independent semantic verification. This table is
+  never compressed.
 
 **External validation:**
-- When all checks confirm, use a compact paragraph rather than multi-level section/subsection structure
+
+- When all checks confirm, use a compact paragraph rather than multi-level
+  section/subsection structure
 - Only expand into detailed comparison when a mismatch is found
 
 **Do not report as findings (these are normal):**
-- Individual subtitle wording or transcription accuracy — subtitle content is outside this skill's scope
-- A subtitle skip as CRITICAL on its own — determine whether it is a consequence of an upstream bug or a genuine no-verified-candidate outcome; report the latter once as a WARNING with its recovery path
-- Non-sequential disc title ordering — disc layout varies by manufacturer and is irrelevant once content ID resolves episodes
-- Inconsistent source audio track counts across titles on the same disc — different playlists routinely carry different language sets
+
+- Individual subtitle wording or transcription accuracy — subtitle content is
+  outside this skill's scope
+- A subtitle skip as CRITICAL on its own — determine whether it is a consequence
+  of an upstream bug or a genuine no-verified-candidate outcome; report the
+  latter once as a WARNING with its recovery path
+- Non-sequential disc title ordering — disc layout varies by manufacturer and is
+  irrelevant once content ID resolves episodes
+- Inconsistent source audio track counts across titles on the same disc —
+  different playlists routinely carry different language sets
 - Audio refinement stripping non-English tracks — that's its job
-- A drain/deploy restart mid-item — `daemon_drain` decisions, cancelled non-drive workers, duplicate stage runs, `startup_queue_state`, skipped already-ripped titles, and encodes resuming from completed chunks are the designed `spindle stop` behavior (see the drain signature in Phase 2)
-- Reel's "discarded stale resume state" warning right after a reel upgrade or a re-ripped source — the designed auto-reset; a finding only when nothing changed to explain it
-- Subtitle `qc_observations` that are below review thresholds and have `validation_result=passed`
-- An adopted subtitle ending before long credits, or a `reference_tail_gap_s` at or below 600 seconds — Matroska duration is a cue span and sparse WhisperX end-credit hallucinations can make the raw reference appear longer
-- Missing HDR10+ dynamic metadata in encoded output — Reel intentionally emits static HDR because the target playback environment does not consume it
-- Target-quality chunks with `stop_reason=rate_capped` (or a `TQ rate-capped chunks` line) scoring below the band — the level 5.1 bitrate cap holding on heavy-grain chunks is the designed playback-compat trade-off; informational only, not a retest or re-encode finding
-- A `grain_treatments[]` entry with `treated: true` (denoise plus a grain table), or an untreated entry whose applicable sample median (`stage2_median_bpp` when re-measured, otherwise `median_bpp`) is below `treatment_bpp_cutoff` — the gate working as designed. High whole-file bpp alone is not a gate false negative; report it only if an independent quality check finds a defect. A treated title whose `denoise_ceiling_jod_min` falls below the recorded `band_top_jod` (default 9.75), or a treated title with no ceiling measured, is worth reporting
-- A movie's encoding task holding the `encode` claim with no encoded output while its rip runs — the deferred plan is expected; see Stage Gating above
-- An identification-failed item having no rip, encode, or staging artifacts — that is the fatal no-TMDB-match rule working, not missing work
+- A drain/deploy restart mid-item — `daemon_drain` decisions, cancelled
+  non-drive workers, duplicate stage runs, `startup_queue_state`, skipped
+  already-ripped titles, and encodes resuming from completed chunks are the
+  designed `spindle stop` behavior (see the drain signature in Phase 2)
+- Reel's "discarded stale resume state" warning right after a reel upgrade or a
+  re-ripped source — the designed auto-reset; a finding only when nothing
+  changed to explain it
+- Subtitle `qc_observations` that are below review thresholds and have
+  `validation_result=passed`
+- An adopted subtitle ending before long credits, or a `reference_tail_gap_s` at
+  or below 600 seconds — Matroska duration is a cue span and sparse WhisperX
+  end-credit hallucinations can make the raw reference appear longer
+- Missing HDR10+ dynamic metadata in encoded output — Reel intentionally emits
+  static HDR because the target playback environment does not consume it
+- Target-quality chunks with `stop_reason=rate_capped` (or a
+  `TQ rate-capped chunks` line) scoring below the band — the level 5.1 bitrate
+  cap holding on heavy-grain chunks is the designed playback-compat trade-off;
+  informational only, not a retest or re-encode finding
+- A `grain_treatments[]` entry with `treated: true` (denoise plus a grain
+  table), or an untreated entry whose applicable sample median
+  (`stage2_median_bpp` when re-measured, otherwise `median_bpp`) is below
+  `treatment_bpp_cutoff` — the gate working as designed. High whole-file bpp
+  alone is not a gate false negative; report it only if an independent quality
+  check finds a defect. A treated title whose `denoise_ceiling_jod_min` falls
+  below the recorded `band_top_jod` (default 9.75), or a treated title with no
+  ceiling measured, is worth reporting
+- A movie's encoding task holding the `encode` claim with no encoded output
+  while its rip runs — the deferred plan is expected; see Stage Gating above
+- An identification-failed item having no rip, encode, or staging artifacts —
+  that is the fatal no-TMDB-match rule working, not missing work
 
 **Stage timing:**
+
 - Always show the timing table — it's compact and useful for spotting anomalies
 
 ### Report Template
 
-```
+```text
 ## Audit Report for Item #<id>
 
 **Title:** <item.disc_title>
@@ -148,57 +212,94 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 
 ## Execution Checklist
 
-After running `spindle queue audit`, check only the phases flagged as `true` in `stage_gate`. **Do not check phases beyond the reached stage.**
+After running `spindle queue audit`, check only the phases flagged as `true` in
+`stage_gate`. **Do not check phases beyond the reached stage.**
 
 ### Always
+
 - [ ] Ran `spindle queue audit <id>`, read the full digest, noted the JSON path
 - [ ] Checked gathering errors (digest header) for incomplete data
 - [ ] Reviewed `stage_gate` to determine applicable phases
 - [ ] Reviewed pre-flagged anomalies
 - [ ] Reported any `keydb_download_error` stale-catalog fallback as a WARNING
-- [ ] Analyzed logs/decisions for anomalies beyond simple error counts, drilling into the full JSON wherever the digest flagged an omission or something looked off
-- [ ] Read full JSON `transitions` for stage starts/terminal outcomes and encoding substages; used `analysis.stage_timings` for the timing table, not nonexistent `logs.stages`
-- [ ] If TV: reconciled scanned, selected, placeholder, manifest, ripped, and final episode counts; checked a credible disc-specific episode listing if available (DVD included); investigated every reduction or excess
-- [ ] For failed items: diagnosed failure cause from `item.error_message` and log events
-- [ ] Traced each finding to its earliest wrong decision or non-code cause; grouped dependent symptoms and distinguished evidence from inference
+- [ ] Analyzed logs/decisions for anomalies beyond simple error counts, drilling
+      into the full JSON wherever the digest flagged an omission or something
+      looked off
+- [ ] Read full JSON `transitions` for stage starts/terminal outcomes and
+      encoding substages; used `analysis.stage_timings` for the timing table,
+      not nonexistent `logs.stages`
+- [ ] If TV: reconciled scanned, selected, placeholder, manifest, ripped, and
+      final episode counts; checked a credible disc-specific episode listing if
+      available (DVD included); investigated every reduction or excess
+- [ ] For failed items: diagnosed failure cause from `item.error_message` and
+      log events
+- [ ] Traced each finding to its earliest wrong decision or non-code cause;
+      grouped dependent symptoms and distinguished evidence from inference
 
 ### Post-Ripping (phase_rip_cache)
+
 - [ ] Analyzed rip cache metadata
 - [ ] If TV: validated per-episode ripped assets in `envelope.assets.ripped`
 
 ### Post-Episode-Identification (phase_episode_id)
-- [ ] Checked `envelope.attributes.content_id` method, TMDB catalog, completion, and matched/unresolved/review counts
-- [ ] Reviewed every manifest entry's `match_probability` against 0.90; distinguished rejected candidates and `none` from accepted identities
-- [ ] Traced unresolved outcomes to catalog/evidence/classifier reasons without inspecting transcript text or assuming extras
-- [ ] Checked runtime, overlap, sequence, and canonical-numbering safeguards; did not infer completeness from high probability
-- [ ] Verified current per-episode review flags, concurrent encoding assets, and final routing; did not treat summary completion as review clearance
+
+- [ ] Checked `envelope.attributes.content_id` method, TMDB catalog, completion,
+      and matched/unresolved/review counts
+- [ ] Reviewed every manifest entry's `match_probability` against 0.90;
+      distinguished rejected candidates and `none` from accepted identities
+- [ ] Traced unresolved outcomes to catalog/evidence/classifier reasons without
+      inspecting transcript text or assuming extras
+- [ ] Checked runtime, overlap, sequence, and canonical-numbering safeguards;
+      did not infer completeness from high probability
+- [ ] Verified current per-episode review flags, concurrent encoding assets, and
+      final routing; did not treat summary completion as review clearance
 
 ### Post-Encoding (phase_encoded, phase_crop)
-- [ ] Read `analysis.final_validation`: confirmed a verdict exists for every output, investigated failed checks and unavailable entries, and did not rely solely on Reel's persisted validation verdict
+
+- [ ] Read `analysis.final_validation`: confirmed a verdict exists for every
+      output, investigated failed checks and unavailable entries, and did not
+      rely solely on Reel's persisted validation verdict
 - [ ] Analyzed streams from `media[]` entries (video, audio, subtitle)
 - [ ] Validated crop detection from `encoding.snapshot.crop_filter`
-- [ ] Read `analysis.grain_treatments`: noted which encodes were treated and at which tier, and checked every treated encode's `denoise_ceiling_jod_min` against the 9.75 band top
-- [ ] Reviewed the apply stage's commentary, audio layout, and subtitle layout verdicts
-- [ ] Correlated any `source_timeline_normalization` decision with Reel's normalization step and the final audio endpoint verdict
+- [ ] Read `analysis.grain_treatments`: noted which encodes were treated and at
+      which tier, and checked every treated encode's `denoise_ceiling_jod_min`
+      against the 9.75 band top
+- [ ] Reviewed the apply stage's commentary, audio layout, and subtitle layout
+      verdicts
+- [ ] Correlated any `source_timeline_normalization` decision with Reel's
+      normalization step and the final audio endpoint verdict
 - [ ] If TV: checked cross-episode consistency
 
 ### Post-Audio-Analysis (phase_commentary)
-- [ ] Reviewed commentary decisions from `analysis.decision_groups`, interpreting Jev probabilities with the 0.65 rule rather than an LLM/episode confidence gate
-- [ ] Checked conservative error fallbacks and verified that similarity did not exclude a track classified or preserved as commentary
-- [ ] If TV: verified cross-episode program-audio consistency; allowed episode-specific commentary tracks with valid labels/dispositions
+
+- [ ] Reviewed commentary decisions from `analysis.decision_groups`,
+      interpreting Jev probabilities with the 0.65 rule rather than an
+      LLM/episode confidence gate
+- [ ] Checked conservative error fallbacks and verified that similarity did not
+      exclude a track classified or preserved as commentary
+- [ ] If TV: verified cross-episode program-audio consistency; allowed
+      episode-specific commentary tracks with valid labels/dispositions
 
 ### Post-Subtitling (phase_subtitles)
-- [ ] Read the apply stage's subtitle layout verdict (adopted titles only; `source=none` skips legitimately have no stream)
+
+- [ ] Read the apply stage's subtitle layout verdict (adopted titles only;
+      `source=none` skips legitimately have no stream)
 - [ ] Checked only aggregate adoption/validation outcomes and routing
-- [ ] Did not open, extract, sample, quote, compare, or judge subtitle/transcript content
+- [ ] Did not open, extract, sample, quote, compare, or judge
+      subtitle/transcript content
 - [ ] If TV: checked per-episode subtitle asset status
 
 ### External Validation (phase_external_validation)
+
 - [ ] Looked up blu-ray.com review
 - [ ] Validated crop and commentary count against review
 
 ### Report
+
 - [ ] Generated report with only applicable sections
-- [ ] Applied presentation density guidelines (compact for clean data, expanded for anomalies)
+- [ ] Applied presentation density guidelines (compact for clean data, expanded
+      for anomalies)
 - [ ] Used `analysis.decision_groups` for decision trace
-- [ ] Recommended an underlying fix or identified the non-code condition to address; if a fix was requested, verified it by reprocessing and re-auditing when possible, or stated the blocker
+- [ ] Recommended an underlying fix or identified the non-code condition to
+      address; if a fix was requested, verified it by reprocessing and
+      re-auditing when possible, or stated the blocker

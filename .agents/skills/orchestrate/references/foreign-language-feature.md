@@ -30,14 +30,14 @@ ffprobe -v error -show_streams -of json RIP.mkv | jq '[.streams[] |
 ```
 
 Require actual stream evidence that the primary feature audio is non-English.
-Keep the original-language primary audio; an English audio-description track
-is not a dub and must not replace it. Apply the normal orchestration audio
-policy before encoding: retain the best original-language primary plus only
-confirmed commentary tracks.
+Keep the original-language primary audio; an English audio-description track is
+not a dub and must not replace it. Apply the normal orchestration audio policy
+before encoding: retain the best original-language primary plus only confirmed
+commentary tracks.
 
-Keep the untouched rip in scratch until the final English SRT has been
-verified. Reel does not carry the source subtitle streams into its encode, so
-the rip is the authority and the OCR fallback source.
+Keep the untouched rip in scratch until the final English SRT has been verified.
+Reel does not carry the source subtitle streams into its encode, so the rip is
+the authority and the OCR fallback source.
 
 If the primary dialogue is English and only some scenes need translation, stop
 using this reference and follow `forced-subtitles.md` instead.
@@ -54,17 +54,16 @@ order:
 1. `foreign_parts_only=false`.
 2. Blu-ray release matching the disc's runtime and frame rate.
 3. Not machine- or AI-translated.
-4. Non-hearing-impaired, unless accessibility captions are specifically
-   wanted.
+4. Non-hearing-impaired, unless accessibility captions are specifically wanted.
 5. Higher rating and download count.
 
-Do not run `spindle subtitle` for this scenario. It verifies downloaded
-English text against a same-language WhisperX transcript of the non-English
-audio, so a valid translation will fail its text-similarity gate.
+Do not run `spindle subtitle` for this scenario. It verifies downloaded English
+text against a same-language WhisperX transcript of the non-English audio, so a
+valid translation will fail its text-similarity gate.
 
 Download and test candidates one at a time, no more than three. The API
-`/download` call consumes quota even when authenticated with the configured
-API key and user token. After each call, record and report the response's
+`/download` call consumes quota even when authenticated with the configured API
+key and user token. After each call, record and report the response's
 `remaining` value.
 
 For each downloaded SRT:
@@ -74,8 +73,8 @@ For each downloaded SRT:
 2. Compare its first and last cue with the actual feature duration. A last cue
    before end credits is normal; a track covering only a small part of the
    feature is not.
-3. Retain only dialogue/subtitle text. Remove release advertisements and
-   obvious uploader spam without rewriting the translation.
+3. Retain only dialogue/subtitle text. Remove release advertisements and obvious
+   uploader spam without rewriting the translation.
 4. Sync it against the refined rip's audio, which avoids cross-language text
    comparison:
 
@@ -86,8 +85,8 @@ For each downloaded SRT:
 5. Spot-check cues against the video at the beginning, at several distributed
    points through the middle, and near the final dialogue. Confirm both timing
    and meaning using the scene and the disc English PGS when needed.
-6. Reject a candidate if synchronization requires local repairs, it drifts,
-   it represents another cut, or its English text does not match the disc's
+6. Reject a candidate if synchronization requires local repairs, it drifts, it
+   represents another cut, or its English text does not match the disc's
    translation closely enough to trust.
 
 A verified candidate becomes the final English SRT. Keep the rip and its PGS
@@ -95,8 +94,8 @@ tracks until final mux verification is complete.
 
 ## 3. OCR the disc full English PGS when needed
 
-Use this path only when no downloaded candidate passes. List the source
-subtitle tracks:
+Use this path only when no downloaded candidate passes. List the source subtitle
+tracks:
 
 ```bash
 mkvmerge -J RIP.mkv | jq '.tracks[] | select(.type == "subtitles") |
@@ -105,9 +104,9 @@ mkvmerge -J RIP.mkv | jq '.tracks[] | select(.type == "subtitles") |
 ```
 
 Choose the full English track, not a `forced only` or `foreign parts` track.
-Prefer the non-HI track unless accessibility captions are wanted. A full
-non-HI English track may omit already-English speech while translating all
-non-English dialogue; that is acceptable for an English-speaking viewer.
+Prefer the non-HI track unless accessibility captions are wanted. A full non-HI
+English track may omit already-English speech while translating all non-English
+dialogue; that is acceptable for an English-speaking viewer.
 
 Check the optional OCR prerequisites before using them:
 
@@ -129,14 +128,14 @@ uvx pgsrip --keep-temp-files english-full.en.sup
 
 Review every generated cue against its PGS image. Correct OCR spelling,
 punctuation, line breaks, and italics; remove OCR artifacts; do not rewrite or
-invent translations. Confirm the final SRT is non-empty, ordered, has no
-invalid overlaps, and has no cue past the final encode duration.
+invent translations. Confirm the final SRT is non-empty, ordered, has no invalid
+overlaps, and has no cue past the final encode duration.
 
 ## 4. Mux and verify
 
-A full English translation is a normal display subtitle, not a forced track.
-For a feature with no English primary audio, make it the default so playback
-is understandable without relying on a client subtitle policy:
+A full English translation is a normal display subtitle, not a forced track. For
+a feature with no English primary audio, make it the default so playback is
+understandable without relying on a client subtitle policy:
 
 - Codec: SubRip/SRT
 - Language: `eng`
@@ -166,5 +165,5 @@ Inspect the result with `mkvmerge -J` and `ffprobe`. Require:
   MKV.
 
 Only then place the file, run `spindle loom scan`, verify Loom reports the
-embedded English subtitle correctly, and delete the downloaded candidates,
-SUP, OCR images, and other scratch files.
+embedded English subtitle correctly, and delete the downloaded candidates, SUP,
+OCR images, and other scratch files.

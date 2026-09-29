@@ -3,17 +3,16 @@
 Spindle turns optical discs into a [Loom](https://github.com/five82/loom)-ready
 library. Insert a disc and the daemon handles identification with
 [TMDB](https://www.themoviedb.org/), ripping with
-[MakeMKV](https://www.makemkv.com/), AV1 encoding with
-[Reel](reel/README.md), subtitles and commentary detection,
-organization, Loom scans, and notifications.
+[MakeMKV](https://www.makemkv.com/), AV1 encoding with [Reel](reel/README.md),
+subtitles and commentary detection, organization, Loom scans, and notifications.
 
 The monorepo contains three tools sharing one Go module:
 
-| Tool | Source | Role |
-|------|--------|------|
-| Spindle | `cmd/spindle`, `internal` | Operator CLI and daemon |
-| [Flyer](flyer/README.md) | `flyer/` | Read-only terminal monitor |
-| [Reel](reel/README.md) | `reel/` | AV1 encoding library and CLI |
+| Tool                     | Source                    | Role                         |
+| ------------------------ | ------------------------- | ---------------------------- |
+| Spindle                  | `cmd/spindle`, `internal` | Operator CLI and daemon      |
+| [Flyer](flyer/README.md) | `flyer/`                  | Read-only terminal monitor   |
+| [Reel](reel/README.md)   | `reel/`                   | AV1 encoding library and CLI |
 
 [GitHub](https://github.com/five82/spindle) hosts the public mirror. Development
 and CI run on a private Forgejo instance. The Go module path stays on GitHub so
@@ -22,10 +21,10 @@ public installations do not require access to the development host.
 ## Expectations
 
 Spindle is a personal tool built for one encoding workflow, hardware setup, and
-set of preferences. It is open source in the spirit of sharing, but not
-actively maintained as a general-purpose product: behavior may change as the
-workflow evolves, and questions or issues may receive a slow response or none.
-The project began as and remains an experiment — expect rough edges.
+set of preferences. It is open source in the spirit of sharing, but not actively
+maintained as a general-purpose product: behavior may change as the workflow
+evolves, and questions or issues may receive a slow response or none. The
+project began as and remains an experiment — expect rough edges.
 
 ## Install
 
@@ -56,11 +55,11 @@ To deploy a source checkout on the machine running Spindle:
 ```
 
 The deploy script builds the working tree, keeps the previous binary beside the
-installed one, and preserves daemon state: a running daemon is restarted while
-a stopped daemon remains stopped. Because the daemon drains in-flight work
-before exiting, a deploy waits at most for the current disc rip;
-`spindle stop --force` skips the drain. Deploy the other tools independently
-with `./deploy.sh flyer` or `./deploy.sh reel`; a target is always required.
+installed one, and preserves daemon state: a running daemon is restarted while a
+stopped daemon remains stopped. Because the daemon drains in-flight work before
+exiting, a deploy waits at most for the current disc rip; `spindle stop --force`
+skips the drain. Deploy the other tools independently with `./deploy.sh flyer`
+or `./deploy.sh reel`; a target is always required.
 
 ### Development checks
 
@@ -75,12 +74,12 @@ otherwise the `no_vship` build. Forgejo uses the latter and keeps the full
 non-GPU test suite, including real SVT encodes. On the stock Debian 13 runner,
 `.forgejo/build-native.sh` builds pinned upstream SVT-AV1 and FFmpeg revisions;
 Debian's older SVT lacks features Reel uses. The installed native artifacts are
-cached by OS, architecture, and build recipe. Ordinary application changes
-reuse that cache; recipe changes or eviction trigger an automatic rebuild.
-No custom CI image, registry credential, or workstation library change is needed.
+cached by OS, architecture, and build recipe. Ordinary application changes reuse
+that cache; recipe changes or eviction trigger an automatic rebuild. No custom
+CI image, registry credential, or workstation library change is needed.
 
-The ARM64 runner cannot run ThreadSanitizer, so run the full checks on the
-AMD64 encoding workstation before deployment to cover race detection and VSHIP.
+The ARM64 runner cannot run ThreadSanitizer, so run the full checks on the AMD64
+encoding workstation before deployment to cover race detection and VSHIP.
 Deployment always builds Spindle and Reel with VSHIP support.
 
 Build just the desired command rather than the entire module when developing
@@ -112,23 +111,22 @@ api_key = "your-tmdb-key"
 ```
 
 The generated sample shows every option, environment override, and default. Use
-`--config /path/to/config.toml` for a non-default location, and
-`spindle --help` / `spindle <command> --help` for the current command and flag
-reference.
+`--config /path/to/config.toml` for a non-default location, and `spindle --help`
+/ `spindle <command> --help` for the current command and flag reference.
 
 Automatic TV episode identification and commentary detection use Jev through
 OpenRouter, configured with the `[llm]` API key. Episode identification compares
-full primary-audio WhisperX transcripts with the entire TMDB season's titles
-and overviews; it does not download reference subtitles. Uncertain matches,
+full primary-audio WhisperX transcripts with the entire TMDB season's titles and
+overviews; it does not download reference subtitles. Uncertain matches,
 incomplete metadata, missing or oversized transcripts, and classifier failures
 send titles to review rather than guessing from disc order. Duplicate episode
-assignments and runtime inconsistencies also trigger review; runtime alone
-never renumbers episodes or creates an episode range. Both classifiers report
-option probabilities and decision rules instead of generated explanations.
+assignments and runtime inconsistencies also trigger review; runtime alone never
+renumbers episodes or creates an episode range. Both classifiers report option
+probabilities and decision rules instead of generated explanations.
 
-To expose the daemon API to the read-only
-[Flyer](flyer/README.md) monitor, configure a TCP listener and,
-for anything beyond trusted localhost access, a bearer token:
+To expose the daemon API to the read-only [Flyer](flyer/README.md) monitor,
+configure a TCP listener and, for anything beyond trusted localhost access, a
+bearer token:
 
 ```toml
 [api]
@@ -166,15 +164,15 @@ they fall back to a direct read-only view of the queue database.
 ## Pipeline
 
 Queue items run identification, ripping, episode-identification, encoding,
-analysis, subtitling, apply, and organizing tasks before reaching a completed
-or failed terminal state. This is a task graph rather than a strict sequence:
+analysis, subtitling, apply, and organizing tasks before reaching a completed or
+failed terminal state. This is a task graph rather than a strict sequence:
 encoding can consume titles while ripping continues, and analysis can overlap
 encoding. `queue show` reports the live per-task state.
 
-A failed item stops short of completion. Fix the reported cause and retry it.
-An item that needs review can still complete, but questionable output is routed
-to the configured review area instead of being silently accepted. Clean TV
-episodes may reach the library while only unresolved episodes go to review.
+A failed item stops short of completion. Fix the reported cause and retry it. An
+item that needs review can still complete, but questionable output is routed to
+the configured review area instead of being silently accepted. Clean TV episodes
+may reach the library while only unresolved episodes go to review.
 
 Successful organization cleans that item's staging directory. Cleanup failures
 are warnings, so completed media is never discarded over leftover temporary
@@ -204,12 +202,11 @@ agent skill in `.agents/skills/`, for titles nothing on OpenSubtitles matches.
 
 The daemon automates the standard case: one disc, one feature or one TV season.
 Edge cases — disc extras, theatrical shorts, multi-disc movies, multiple
-editions, discs MakeMKV struggles with — are handled by a coding agent using
-the `orchestrate` skill in `.agents/skills/orchestrate/`. The skill drives the
-same building blocks by hand: `spindle disc scan`, `spindle rip`,
-`spindle encode`, `spindle subtitle`, and `spindle loom scan`. The daemon must
-be stopped while orchestration runs; `spindle rip` and `spindle encode` enforce
-this.
+editions, discs MakeMKV struggles with — are handled by a coding agent using the
+`orchestrate` skill in `.agents/skills/orchestrate/`. The skill drives the same
+building blocks by hand: `spindle disc scan`, `spindle rip`, `spindle encode`,
+`spindle subtitle`, and `spindle loom scan`. The daemon must be stopped while
+orchestration runs; `spindle rip` and `spindle encode` enforce this.
 
 ## Rip cache
 
@@ -274,8 +271,8 @@ Locations come from the generated configuration:
 - `state_dir`: timestamped JSON daemon logs, the transient queue database, and
   `metrics.jsonl` — one appended record per completed item, holding stage
   durations and resource waits, rip throughput per physical drive, and
-  per-episode encode stats; durable across queue clears and queryable with
-  `jq` or an LLM
+  per-episode encode stats; durable across queue clears and queryable with `jq`
+  or an LLM
 - XDG cache: rip cache, disc-ID cache, and OpenSubtitles cache
 - XDG runtime directory, with `/tmp` fallback: daemon socket and lock
 

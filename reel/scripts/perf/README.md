@@ -10,12 +10,12 @@ traces are not committed.
 
 ## Files
 
-| File | Role |
-|------|------|
-| `clips.tsv` | Contiguous-cut recipes: abbreviation, length, resolution, dynamic range, timecodes, output name, and source. |
-| `run-suite.sh` | Runs Reel sequentially and captures build/environment metadata, wall, size, GPU/VRAM, host telemetry, `perf.json`, and target-quality logs. |
-| `analyze.py` | Summarizes phase timing, worker history, probe counts, stop reasons, quality, and encode-versus-metric work into `summary.json`. |
-| `compare-runs.py` | Compares wall, size, probes, and quality between two run directories. |
+| File              | Role                                                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `clips.tsv`       | Contiguous-cut recipes: abbreviation, length, resolution, dynamic range, timecodes, output name, and source.                                |
+| `run-suite.sh`    | Runs Reel sequentially and captures build/environment metadata, wall, size, GPU/VRAM, host telemetry, `perf.json`, and target-quality logs. |
+| `analyze.py`      | Summarizes phase timing, worker history, probe counts, stop reasons, quality, and encode-versus-metric work into `summary.json`.            |
+| `compare-runs.py` | Compares wall, size, probes, and quality between two run directories.                                                                       |
 
 Related tools:
 
@@ -53,18 +53,18 @@ scripts/perf/analyze.py "$REEL_TESTING_DIR/perf-runs/<timestamp>-baseline"
 scripts/perf/compare-runs.py <run_A> <run_B>
 ```
 
-By default the suite deletes bulky `.reel-*` workdirs after harvesting the
-small artifacts. Pass `--keep-workdirs` when the experiment needs independent
+By default the suite deletes bulky `.reel-*` workdirs after harvesting the small
+artifacts. Pass `--keep-workdirs` when the experiment needs independent
 validation or probe-IVF inspection.
 
 ## Matrices
 
-| Matrix | Clips | Use |
-|--------|-------|-----|
-| `default` | `air-5m im-5m bts-5m sully-5m kbv1-5m sullyhv-15m` | Historical A/B shape. Preserve it for continuity, but do not assume an old run is a valid baseline for current code. |
-| `coverage` | `air-5m bts-5m im-5m soms-5m io-5m sully-5m kbv1-5m ko-5m sullyhv-15m` | Broad TQ coverage across clean/grainy SDR, clean/grainy 4K, CG, and hard content. |
-| `encoder` | `sully-5m kbv1-5m ko-5m sullyhv-15m` | Encoder-side changes where 4K encode and memory-bandwidth behavior matter. |
-| `long` | `air-20m bts-20m sully-20m ko-20m` | Serial/startup phases and SDR steady state that five-minute warmup-dominated clips cannot show. |
+| Matrix     | Clips                                                                  | Use                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `default`  | `air-5m im-5m bts-5m sully-5m kbv1-5m sullyhv-15m`                     | Historical A/B shape. Preserve it for continuity, but do not assume an old run is a valid baseline for current code. |
+| `coverage` | `air-5m bts-5m im-5m soms-5m io-5m sully-5m kbv1-5m ko-5m sullyhv-15m` | Broad TQ coverage across clean/grainy SDR, clean/grainy 4K, CG, and hard content.                                    |
+| `encoder`  | `sully-5m kbv1-5m ko-5m sullyhv-15m`                                   | Encoder-side changes where 4K encode and memory-bandwidth behavior matter.                                           |
+| `long`     | `air-20m bts-20m sully-20m ko-20m`                                     | Serial/startup phases and SDR steady state that five-minute warmup-dominated clips cannot show.                      |
 
 Corpus roles:
 
@@ -115,8 +115,8 @@ Each run directory contains:
 - `<clip>/<clip>.log`, `.gpu`, `.host`: Reel output and sampled telemetry.
 - `<clip>/perf.json`: harvested pipeline phases and worker history.
 - `<clip>/target-quality.json`: harvested aggregate search decisions.
-- `<clip>/.reel-*/tq/*.json`: per-chunk search decisions when
-  `--keep-workdirs` is used.
+- `<clip>/.reel-*/tq/*.json`: per-chunk search decisions when `--keep-workdirs`
+  is used.
 
 Keep only distilled decisions in `docs/PERFORMANCE_TESTING.md`; leave large raw
 artifacts here under `$REEL_TESTING_DIR`.

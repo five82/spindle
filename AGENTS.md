@@ -7,55 +7,55 @@
   native CI dependencies, not to build the Go applications.
 - From the monorepo root, use `./deploy.sh spindle|flyer|reel` for deployments;
   do not reproduce its steps manually. A target is required.
-- For a queue schema change, stop Spindle and run `spindle queue clear --all --yes`
-  while stopped before `./deploy.sh spindle`: only the stopped-daemon command
-  deletes the transient DB files. The deploy script preserves stopped state,
-  so run `spindle start` afterward if the daemon should be running.
-- For Go code or runtime behavior changes, run `./check-ci.sh` (tests,
-  race, CGO, lint, govulncheck) before handoff, or explain why you couldn't.
-  Use focused checks while iterating. For documentation or instruction-only
-  changes, validate the affected text instead; full CI is not required.
+- For a queue schema change, stop Spindle and run
+  `spindle queue clear --all --yes` while stopped before `./deploy.sh spindle`:
+  only the stopped-daemon command deletes the transient DB files. The deploy
+  script preserves stopped state, so run `spindle start` afterward if the daemon
+  should be running.
+- For Go code or runtime behavior changes, run `./check-ci.sh` (tests, race,
+  CGO, lint, govulncheck) before handoff, or explain why you couldn't. Use
+  focused checks while iterating. For documentation or instruction-only changes,
+  validate the affected text instead; full CI is not required.
 - **Audit synchronization is mandatory for every Spindle code change.** Review
   `internal/auditgather/` and `.agents/skills/itemaudit/` (the skill and its
-  phase references) against the change, and update both wherever affected in
-  the same task. Check collected
-  evidence, JSON/digest fields, stage gates, anomaly rules/severity, decision
-  names, thresholds, and the skill's report template/checklist. Remove obsolete
-  assumptions and add/update audit regression tests when behavior changes.
-  Auditing is part of the implementation, not optional follow-up work. In the
-  handoff, state what was updated or why neither needed changes; passing CI
-  alone does not establish that auditing is in sync.
+  phase references) against the change, and update both wherever affected in the
+  same task. Check collected evidence, JSON/digest fields, stage gates, anomaly
+  rules/severity, decision names, thresholds, and the skill's report
+  template/checklist. Remove obsolete assumptions and add/update audit
+  regression tests when behavior changes. Auditing is part of the
+  implementation, not optional follow-up work. In the handoff, state what was
+  updated or why neither needed changes; passing CI alone does not establish
+  that auditing is in sync.
 - Finish and verify the agreed task, including fixing failures caused by your
-  changes; ask before dropping scope or leaving TODOs. Local inspection,
-  edits, tests, and rerunning affected checks do not need approval.
+  changes; ask before dropping scope or leaving TODOs. Local inspection, edits,
+  tests, and rerunning affected checks do not need approval.
 - Coordinate major trade-offs with the user; never unilaterally defer
-  functionality. Ask before deployments, destructive queue operations,
-  optional system installs, or other externally consequential actions unless
-  explicitly requested.
+  functionality. Ask before deployments, destructive queue operations, optional
+  system installs, or other externally consequential actions unless explicitly
+  requested.
 - Keep edits ASCII unless the file already uses extended characters.
 - When asked to commit, commit to the current branch - normally `main`. Do not
   create a branch, open a PR, or push elsewhere unless explicitly told to.
 
 ## Project
 
-Personal single-operator tool: optical disc -> Loom library (MakeMKV rip,
-Reel AV1 target-quality encode, TMDB metadata, OpenSubtitles subtitles synced
-against WhisperX transcripts, ntfy).
-Feature-complete and in a bugfix phase — avoid over-engineering. Break
-forward: no backwards compatibility, no compat layers, no deprecated paths.
-Queue writes go through the daemon HTTP API. Stopped-daemon exceptions:
-`status` / `queue list` / `queue show` fall back to a direct read-only DB
-read, and `queue clear --all` deletes the transient queue DB files.
+Personal single-operator tool: optical disc -> Loom library (MakeMKV rip, Reel
+AV1 target-quality encode, TMDB metadata, OpenSubtitles subtitles synced against
+WhisperX transcripts, ntfy). Feature-complete and in a bugfix phase — avoid
+over-engineering. Break forward: no backwards compatibility, no compat layers,
+no deprecated paths. Queue writes go through the daemon HTTP API. Stopped-daemon
+exceptions: `status` / `queue list` / `queue show` fall back to a direct
+read-only DB read, and `queue clear --all` deletes the transient queue DB files.
 
 ## Repository
 
 One Go module, `github.com/five82/spindle`, contains:
 
-| Component | Source | Role |
-|-----------|--------|------|
-| Spindle | `cmd/spindle`, `internal` | Daemon + CLI |
-| Flyer | `flyer/` | Read-only HTTP terminal monitor |
-| Reel | `reel/` | AV1 encoding library and CLI |
+| Component | Source                    | Role                            |
+| --------- | ------------------------- | ------------------------------- |
+| Spindle   | `cmd/spindle`, `internal` | Daemon + CLI                    |
+| Flyer     | `flyer/`                  | Read-only HTTP terminal monitor |
+| Reel      | `reel/`                   | AV1 encoding library and CLI    |
 
 The private Forgejo instance is authoritative; GitHub
 (`https://github.com/five82/spindle`) is a one-way public push mirror. Push
@@ -68,19 +68,18 @@ Shuttle remains separate at `~/projects/shuttle/`:
 
 ## Complexity budget
 
-YAGNI and KISS: build only what the current task requires; when two
-approaches work, take the simpler one.
+YAGNI and KISS: build only what the current task requires; when two approaches
+work, take the simpler one.
 
 Production LOC should be flat or negative; tests may grow freely. Before any
-fix, identify the invariant that makes the bug impossible and what existing
-code becomes redundant if it's enforced — prefer deletion and stronger
-invariants over additive patches. No new packages, interfaces, exported
-symbols, config flags, workers, caches, or abstraction layers unless they
-clearly reduce total complexity. Avoid helper sprawl: don't extract
-single-use helpers unless they represent a real domain concept. Don't add
-configuration to avoid making a design decision. For non-trivial work,
-report the production LOC delta, new exported surface, and what was removed
-or simplified.
+fix, identify the invariant that makes the bug impossible and what existing code
+becomes redundant if it's enforced — prefer deletion and stronger invariants
+over additive patches. No new packages, interfaces, exported symbols, config
+flags, workers, caches, or abstraction layers unless they clearly reduce total
+complexity. Avoid helper sprawl: don't extract single-use helpers unless they
+represent a real domain concept. Don't add configuration to avoid making a
+design decision. For non-trivial work, report the production LOC delta, new
+exported surface, and what was removed or simplified.
 
 ## Behavior and observability
 
@@ -95,8 +94,8 @@ or simplified.
 ## Hard invariants
 
 - Final display subtitle output is SRT. Never PGS as final library output.
-- The queue DB is transient: no migrations, no schema versioning. Schema
-  changes mean clear the database.
+- The queue DB is transient: no migrations, no schema versioning. Schema changes
+  mean clear the database.
 - `queue` must not import `ripspec` (RipSpec is opaque text to the store);
   stage-handler packages must not import one another; `config` must not import
   client packages. The `apply` stage owns all encoded-file rewrites after the
@@ -126,12 +125,12 @@ throughput with `rip.drive_vendor`/`rip.drive_model` identifying the physical
 drive, and per-episode encode stats (`encodes[]`: `resolution_class`
 2160p/1080p/sd, `speed` as video-seconds per wall-second, `phase_seconds`,
 Reel's `target_quality` CRF-search aggregate including the
-`ssimu2_calibration_offset` grain/complexity proxy, and `grain_treatment` —
-the grain gate's verdict (`treated`, `median_bpp` against its treatment cutoff)
-with source-matched grain estimation details and the
+`ssimu2_calibration_offset` grain/complexity proxy, and `grain_treatment` — the
+grain gate's verdict (`treated`, `median_bpp` against its treatment cutoff) with
+source-matched grain estimation details and the
 `denoise_ceiling_jod_mean`/`_min` that caps a treated title's reported scores).
-Records are append-only; fields may be added over time, so
-query by field name, not position. Example:
+Records are append-only; fields may be added over time, so query by field name,
+not position. Example:
 
 ```sh
 jq -s '[.[] | .encodes[]] | group_by(.resolution_class)
