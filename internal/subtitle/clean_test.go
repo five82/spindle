@@ -72,6 +72,17 @@ func TestCleanDownloadedSubtitleConvertsLineBreakMarkers(t *testing.T) {
 	}
 }
 
+func TestCleanDownloadedSubtitleStripsASSHardSpaces(t *testing.T) {
+	cues, _ := cleanDownloadedSubtitle(srtBytes(
+		`\h\hCaptain's Log,`,
+		`We are\h\hready`+"\n"+`\h\h\hto depart.`,
+		`\h\h\h`,
+	))
+	if len(cues) != 2 || cues[0].Text != "Captain's Log," || cues[1].Text != "We are ready\nto depart." {
+		t.Fatalf("ASS hard spaces leaked into display cues: %+v", cues)
+	}
+}
+
 func TestCleanDownloadedSubtitleStripsMarkup(t *testing.T) {
 	cues, _ := cleanDownloadedSubtitle(srtBytes(
 		`{\an8}<font color="#ffff00"><i>He is coming.</i></font>`,

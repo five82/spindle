@@ -133,6 +133,9 @@ func cueIsSpam(text string) bool {
 // cleanCueText strips markup and SDH annotation from one cue, returning ""
 // when nothing displayable remains.
 func cleanCueText(text string) string {
+	// ASS hard spaces can survive SRT conversion as literal \h sequences.
+	// Treat them as whitespace before trimming/normalizing display lines.
+	text = strings.ReplaceAll(text, `\h`, " ")
 	text = assOverrideTagPattern.ReplaceAllString(text, "")
 	text = markupTagPattern.ReplaceAllStringFunc(text, func(tag string) string {
 		name := strings.ToLower(markupTagPattern.FindStringSubmatch(tag)[1])
