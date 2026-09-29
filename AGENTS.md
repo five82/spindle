@@ -12,6 +12,15 @@
   deletes the transient DB files. The deploy script preserves stopped state,
   so run `spindle start` afterward if the daemon should be running.
 - Before handing work back, run `./check-ci.sh` (tests, race, CGO, lint, govulncheck) or explain why you couldn't.
+- **Audit synchronization is mandatory for every Spindle code change.** Review
+  `internal/auditgather/` and `.agents/skills/itemaudit/SKILL.md` against the
+  change, and update both wherever affected in the same task. Check collected
+  evidence, JSON/digest fields, stage gates, anomaly rules/severity, decision
+  names, thresholds, and the skill's report template/checklist. Remove obsolete
+  assumptions and add/update audit regression tests when behavior changes.
+  Auditing is part of the implementation, not optional follow-up work. In the
+  handoff, state what was updated or why neither needed changes; passing CI
+  alone does not establish that auditing is in sync.
 - Finish the work you start; ask before dropping scope or leaving TODOs.
 - Coordinate major trade-offs with the user; never unilaterally defer functionality.
 - Keep edits ASCII unless the file already uses extended characters.

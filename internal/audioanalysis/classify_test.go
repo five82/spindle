@@ -83,7 +83,7 @@ func TestClassifyUsesFrozenEvaluatedRubricAndProbability(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"answers": map[string]any{"decision": map[string]any{"type": "choice", "choice": choice, "confidence": 0.1, "probabilities": map[string]float64{"commentary": tc.p, "not_commentary": 1 - tc.p}}}})
 			}))
 			defer server.Close()
-			client := llm.New(config.LLMConfig{APIKey: "test", BaseURL: server.URL + "/api/v1/chat/completions", Model: "must-not-use-chat"}, nil)
+			client := llm.New(config.LLMConfig{APIKey: "test", BaseURL: server.URL + "/api/v1"}, nil)
 			got, err := Classify(context.Background(), client, tc.title, tc.text)
 			if err != nil {
 				t.Fatal(err)

@@ -211,11 +211,8 @@ func describeEpisodeMapping(ep spindle.EpisodeStatus) string {
 		return "Unmatched"
 	}
 	value := formatEpisodeLabel(ep)
-	if ep.MatchScore > 0 {
-		value += fmt.Sprintf("; score %.2f", ep.MatchScore)
-	}
-	if ep.MatchConfidence > 0 {
-		value += fmt.Sprintf("; confidence %.2f", ep.MatchConfidence)
+	if ep.MatchProbability > 0 {
+		value += fmt.Sprintf("; probability %.2f", ep.MatchProbability)
 	}
 	return value
 }

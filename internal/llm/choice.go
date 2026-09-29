@@ -10,8 +10,8 @@ import (
 
 const choiceModel = "typesafe/jev-1.13"
 
-// Choice evaluates state against named criteria using Jev, independently of the
-// configured chat model. It returns the validated probability of every option,
+// Choice evaluates state against named criteria using Jev.
+// It returns the validated probability of every option,
 // not Jev's separate confidence statistic. Callers own their decision policy.
 func (c *Client) Choice(ctx context.Context, state, instructions string, criteria map[string]string) (map[string]float64, error) {
 	if c == nil {
@@ -26,9 +26,7 @@ func (c *Client) Choice(ctx context.Context, state, instructions string, criteri
 			"type": "choice", "instructions": instructions, "criteria": criteria,
 		}},
 	}
-	// System One is a sibling of chat completions, sharing the configured origin
-	// and API prefix. This also keeps local OpenRouter-compatible test servers usable.
-	endpoint := strings.TrimSuffix(strings.TrimRight(c.baseURL, "/"), "/chat/completions") + "/systemone"
+	endpoint := strings.TrimRight(c.baseURL, "/") + "/systemone"
 	var probabilities map[string]float64
 	err := c.complete(ctx, endpoint, choiceModel, request, func(body []byte) error {
 		var resp struct {
@@ -50,17 +48,22 @@ func (c *Client) Choice(ctx context.Context, state, instructions string, criteri
 		if winner == nil {
 			return fmt.Errorf("choice missing from probabilities")
 		}
+		// Jev can return mass 0.99 and a reported winner 0.01 below the
+		// displayed maximum. Bound both discrepancies to one percentage point
+		// (plus floating-point slack), regardless of option count. Preserve the
+		// values: normalizing could push a below-threshold option into acceptance.
+		const roundingTolerance = 0.01 + 1e-9
 		probabilities = make(map[string]float64, len(criteria))
 		var total float64
 		for option := range criteria {
 			p := answer.Probabilities[option]
-			if p == nil || *p < 0 || *p > 1 || *p > *winner {
+			if p == nil || *p < 0 || *p > 1 || *p > *winner+roundingTolerance {
 				return fmt.Errorf("invalid choice probability for %q", option)
 			}
 			probabilities[option] = *p
 			total += *p
 		}
-		if math.Abs(total-1) > 0.001 {
+		if math.Abs(total-1) > roundingTolerance {
 			return fmt.Errorf("choice probabilities do not sum to one")
 		}
 		return nil

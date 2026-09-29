@@ -1,0 +1,658 @@
+[
+  {
+    "name": "South Park S5 D2",
+    "disc_number": 2,
+    "season": {
+      "episodes": [
+        {
+          "episode_number": 1,
+          "runtime": 23
+        },
+        {
+          "episode_number": 2,
+          "runtime": 23
+        },
+        {
+          "episode_number": 3,
+          "runtime": 23
+        },
+        {
+          "episode_number": 4,
+          "runtime": 23
+        },
+        {
+          "episode_number": 5,
+          "runtime": 23
+        },
+        {
+          "episode_number": 6,
+          "runtime": 23
+        },
+        {
+          "episode_number": 7,
+          "runtime": 23
+        },
+        {
+          "episode_number": 8,
+          "runtime": 23
+        },
+        {
+          "episode_number": 9,
+          "runtime": 23
+        },
+        {
+          "episode_number": 10,
+          "runtime": 23
+        },
+        {
+          "episode_number": 11,
+          "runtime": 23
+        },
+        {
+          "episode_number": 12,
+          "runtime": 23
+        },
+        {
+          "episode_number": 13,
+          "runtime": 23
+        },
+        {
+          "episode_number": 14,
+          "runtime": 23
+        }
+      ]
+    },
+    "episodes": [
+      {
+        "key": "s05_001",
+        "episode": 12,
+        "runtime_seconds": 1326
+      },
+      {
+        "key": "s05_002",
+        "episode": 11,
+        "runtime_seconds": 1326
+      },
+      {
+        "key": "s05_003",
+        "episode": 10,
+        "runtime_seconds": 1326
+      },
+      {
+        "key": "s05_004",
+        "episode": 14,
+        "runtime_seconds": 1326
+      },
+      {
+        "key": "s05_005",
+        "episode": 9,
+        "runtime_seconds": 1326
+      },
+      {
+        "key": "s05_006",
+        "episode": 13,
+        "runtime_seconds": 1326
+      },
+      {
+        "key": "s05_007",
+        "episode": 8,
+        "runtime_seconds": 1326
+      }
+    ]
+  },
+  {
+    "name": "Breaking Bad S1 D1",
+    "disc_number": 1,
+    "season": {
+      "episodes": [
+        {
+          "episode_number": 1,
+          "runtime": 59
+        },
+        {
+          "episode_number": 2,
+          "runtime": 49
+        },
+        {
+          "episode_number": 3,
+          "runtime": 49
+        },
+        {
+          "episode_number": 4,
+          "runtime": 49
+        },
+        {
+          "episode_number": 5,
+          "runtime": 49
+        },
+        {
+          "episode_number": 6,
+          "runtime": 49
+        },
+        {
+          "episode_number": 7,
+          "runtime": 48
+        }
+      ]
+    },
+    "episodes": [
+      {
+        "key": "s01_001",
+        "episode": 1,
+        "runtime_seconds": 3486
+      },
+      {
+        "key": "s01_002",
+        "episode": 2,
+        "runtime_seconds": 2892
+      },
+      {
+        "key": "s01_003",
+        "episode": 3,
+        "runtime_seconds": 2891
+      },
+      {
+        "key": "s01_004",
+        "episode": 4,
+        "runtime_seconds": 2895
+      }
+    ]
+  },
+  {
+    "name": "Star Trek: The Next Generation S1 D1",
+    "disc_number": 1,
+    "season": {
+      "episodes": [
+        {
+          "episode_number": 1,
+          "runtime": 91
+        },
+        {
+          "episode_number": 2,
+          "runtime": 46
+        },
+        {
+          "episode_number": 3,
+          "runtime": 46
+        },
+        {
+          "episode_number": 4,
+          "runtime": 46
+        },
+        {
+          "episode_number": 5,
+          "runtime": 46
+        },
+        {
+          "episode_number": 6,
+          "runtime": 46
+        },
+        {
+          "episode_number": 7,
+          "runtime": 46
+        },
+        {
+          "episode_number": 8,
+          "runtime": 46
+        },
+        {
+          "episode_number": 9,
+          "runtime": 46
+        },
+        {
+          "episode_number": 10,
+          "runtime": 46
+        },
+        {
+          "episode_number": 11,
+          "runtime": 46
+        },
+        {
+          "episode_number": 12,
+          "runtime": 46
+        },
+        {
+          "episode_number": 13,
+          "runtime": 46
+        },
+        {
+          "episode_number": 14,
+          "runtime": 46
+        },
+        {
+          "episode_number": 15,
+          "runtime": 46
+        },
+        {
+          "episode_number": 16,
+          "runtime": 46
+        },
+        {
+          "episode_number": 17,
+          "runtime": 46
+        },
+        {
+          "episode_number": 18,
+          "runtime": 46
+        },
+        {
+          "episode_number": 19,
+          "runtime": 46
+        },
+        {
+          "episode_number": 20,
+          "runtime": 46
+        },
+        {
+          "episode_number": 21,
+          "runtime": 46
+        },
+        {
+          "episode_number": 22,
+          "runtime": 46
+        },
+        {
+          "episode_number": 23,
+          "runtime": 46
+        },
+        {
+          "episode_number": 24,
+          "runtime": 46
+        },
+        {
+          "episode_number": 25,
+          "runtime": 46
+        }
+      ]
+    },
+    "episodes": [
+      {
+        "key": "s01_001",
+        "episode": 1,
+        "runtime_seconds": 5481
+      },
+      {
+        "key": "s01_002",
+        "episode": 3,
+        "runtime_seconds": 2730
+      },
+      {
+        "key": "s01_003",
+        "episode": 2,
+        "runtime_seconds": 2734
+      }
+    ]
+  },
+  {
+    "name": "The Simpsons S3 D1",
+    "disc_number": 1,
+    "season": {
+      "episodes": [
+        {
+          "episode_number": 1,
+          "runtime": 23
+        },
+        {
+          "episode_number": 2,
+          "runtime": 23
+        },
+        {
+          "episode_number": 3,
+          "runtime": 23
+        },
+        {
+          "episode_number": 4,
+          "runtime": 23
+        },
+        {
+          "episode_number": 5,
+          "runtime": 23
+        },
+        {
+          "episode_number": 6,
+          "runtime": 23
+        },
+        {
+          "episode_number": 7,
+          "runtime": 23
+        },
+        {
+          "episode_number": 8,
+          "runtime": 23
+        },
+        {
+          "episode_number": 9,
+          "runtime": 23
+        },
+        {
+          "episode_number": 10,
+          "runtime": 23
+        },
+        {
+          "episode_number": 11,
+          "runtime": 23
+        },
+        {
+          "episode_number": 12,
+          "runtime": 23
+        },
+        {
+          "episode_number": 13,
+          "runtime": 23
+        },
+        {
+          "episode_number": 14,
+          "runtime": 23
+        },
+        {
+          "episode_number": 15,
+          "runtime": 23
+        },
+        {
+          "episode_number": 16,
+          "runtime": 23
+        },
+        {
+          "episode_number": 17,
+          "runtime": 23
+        },
+        {
+          "episode_number": 18,
+          "runtime": 23
+        },
+        {
+          "episode_number": 19,
+          "runtime": 23
+        },
+        {
+          "episode_number": 20,
+          "runtime": 23
+        },
+        {
+          "episode_number": 21,
+          "runtime": 23
+        },
+        {
+          "episode_number": 22,
+          "runtime": 23
+        },
+        {
+          "episode_number": 23,
+          "runtime": 23
+        },
+        {
+          "episode_number": 24,
+          "runtime": 23
+        }
+      ]
+    },
+    "episodes": [
+      {
+        "key": "s03_001",
+        "episode": 1,
+        "runtime_seconds": 1380
+      },
+      {
+        "key": "s03_002",
+        "episode": 2,
+        "runtime_seconds": 1378
+      },
+      {
+        "key": "s03_003",
+        "episode": 3,
+        "runtime_seconds": 1374
+      },
+      {
+        "key": "s03_004",
+        "episode": 4,
+        "runtime_seconds": 1377
+      },
+      {
+        "key": "s03_005",
+        "episode": 5,
+        "runtime_seconds": 1381
+      },
+      {
+        "key": "s03_006",
+        "episode": 6,
+        "runtime_seconds": 1377
+      }
+    ]
+  },
+  {
+    "name": "South Park S5 D1",
+    "disc_number": 1,
+    "season": {
+      "episodes": [
+        {
+          "episode_number": 1,
+          "runtime": 23
+        },
+        {
+          "episode_number": 2,
+          "runtime": 23
+        },
+        {
+          "episode_number": 3,
+          "runtime": 23
+        },
+        {
+          "episode_number": 4,
+          "runtime": 23
+        },
+        {
+          "episode_number": 5,
+          "runtime": 23
+        },
+        {
+          "episode_number": 6,
+          "runtime": 23
+        },
+        {
+          "episode_number": 7,
+          "runtime": 23
+        },
+        {
+          "episode_number": 8,
+          "runtime": 23
+        },
+        {
+          "episode_number": 9,
+          "runtime": 23
+        },
+        {
+          "episode_number": 10,
+          "runtime": 23
+        },
+        {
+          "episode_number": 11,
+          "runtime": 23
+        },
+        {
+          "episode_number": 12,
+          "runtime": 23
+        },
+        {
+          "episode_number": 13,
+          "runtime": 23
+        },
+        {
+          "episode_number": 14,
+          "runtime": 23
+        }
+      ]
+    },
+    "episodes": [
+      {
+        "key": "s05_001",
+        "episode": 5,
+        "runtime_seconds": 1326
+      },
+      {
+        "key": "s05_002",
+        "episode": 3,
+        "runtime_seconds": 1326
+      },
+      {
+        "key": "s05_003",
+        "episode": 2,
+        "runtime_seconds": 1326
+      },
+      {
+        "key": "s05_004",
+        "episode": 7,
+        "runtime_seconds": 1326
+      },
+      {
+        "key": "s05_005",
+        "episode": 1,
+        "runtime_seconds": 1326
+      },
+      {
+        "key": "s05_006",
+        "episode": 6,
+        "runtime_seconds": 1326
+      },
+      {
+        "key": "s05_007",
+        "episode": 4,
+        "runtime_seconds": 1326
+      }
+    ]
+  },
+  {
+    "name": "Star Trek: The Next Generation S1 D2",
+    "disc_number": 2,
+    "season": {
+      "episodes": [
+        {
+          "episode_number": 1,
+          "runtime": 91
+        },
+        {
+          "episode_number": 2,
+          "runtime": 46
+        },
+        {
+          "episode_number": 3,
+          "runtime": 46
+        },
+        {
+          "episode_number": 4,
+          "runtime": 46
+        },
+        {
+          "episode_number": 5,
+          "runtime": 46
+        },
+        {
+          "episode_number": 6,
+          "runtime": 46
+        },
+        {
+          "episode_number": 7,
+          "runtime": 46
+        },
+        {
+          "episode_number": 8,
+          "runtime": 46
+        },
+        {
+          "episode_number": 9,
+          "runtime": 46
+        },
+        {
+          "episode_number": 10,
+          "runtime": 46
+        },
+        {
+          "episode_number": 11,
+          "runtime": 46
+        },
+        {
+          "episode_number": 12,
+          "runtime": 46
+        },
+        {
+          "episode_number": 13,
+          "runtime": 46
+        },
+        {
+          "episode_number": 14,
+          "runtime": 46
+        },
+        {
+          "episode_number": 15,
+          "runtime": 46
+        },
+        {
+          "episode_number": 16,
+          "runtime": 46
+        },
+        {
+          "episode_number": 17,
+          "runtime": 46
+        },
+        {
+          "episode_number": 18,
+          "runtime": 46
+        },
+        {
+          "episode_number": 19,
+          "runtime": 46
+        },
+        {
+          "episode_number": 20,
+          "runtime": 46
+        },
+        {
+          "episode_number": 21,
+          "runtime": 46
+        },
+        {
+          "episode_number": 22,
+          "runtime": 46
+        },
+        {
+          "episode_number": 23,
+          "runtime": 46
+        },
+        {
+          "episode_number": 24,
+          "runtime": 46
+        },
+        {
+          "episode_number": 25,
+          "runtime": 46
+        }
+      ]
+    },
+    "episodes": [
+      {
+        "key": "s01_001",
+        "episode": 7,
+        "runtime_seconds": 2733
+      },
+      {
+        "key": "s01_002",
+        "episode": 8,
+        "runtime_seconds": 2730
+      },
+      {
+        "key": "s01_003",
+        "episode": 6,
+        "runtime_seconds": 2732
+      },
+      {
+        "key": "s01_004",
+        "episode": 5,
+        "runtime_seconds": 2734
+      },
+      {
+        "key": "s01_005",
+        "episode": 4,
+        "runtime_seconds": 2735
+      }
+    ]
+  }
+]

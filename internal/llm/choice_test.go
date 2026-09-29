@@ -17,8 +17,8 @@ import (
 	"github.com/five82/spindle/internal/config"
 )
 
-func TestChoiceAndChatShareClientWithoutChangingModel(t *testing.T) {
-	var choiceCalls, chatCalls atomic.Int32
+func TestChoiceRequestAndClientReuse(t *testing.T) {
+	var choiceCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || r.Header.Get("Authorization") != "Bearer key" || r.Header.Get("HTTP-Referer") != "https://spindle.test" || r.Header.Get("X-Title") != "Spindle test" {
 			t.Errorf("headers/method: %s %v", r.Method, r.Header)
@@ -47,12 +47,6 @@ func TestChoiceAndChatShareClientWithoutChangingModel(t *testing.T) {
 				t.Errorf("question: %+v", questions)
 			}
 			_, _ = io.WriteString(w, `{"answers":{"decision":{"type":"choice","choice":"review","confidence":0.3,"probabilities":{"accept":0.2,"review":0.7,"reject":0.1}}}}`)
-		case "/api/v1/chat/completions":
-			chatCalls.Add(1)
-			if string(body["model"]) != `"@preset/deepseek"` || string(body["reasoning"]) != `{"effort":"low"}` || len(body) != 4 {
-				t.Errorf("chat request changed: %s", body)
-			}
-			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"{\"ok\":true}"}}]}`)
 		default:
 			t.Errorf("unexpected endpoint: %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -60,7 +54,7 @@ func TestChoiceAndChatShareClientWithoutChangingModel(t *testing.T) {
 	}))
 	defer server.Close()
 	var logs bytes.Buffer
-	client := New(config.LLMConfig{APIKey: "key", BaseURL: server.URL + "/api/v1/chat/completions", Model: "@preset/deepseek", Referer: "https://spindle.test", Title: "Spindle test", TimeoutSeconds: 7}, slog.New(slog.NewTextHandler(&logs, nil)))
+	client := New(config.LLMConfig{APIKey: "key", BaseURL: server.URL + "/api/v1/", Referer: "https://spindle.test", Title: "Spindle test", TimeoutSeconds: 7}, slog.New(slog.NewTextHandler(&logs, nil)))
 	if client.client.Timeout != 7*time.Second {
 		t.Fatal("timeout not shared")
 	}
@@ -69,18 +63,15 @@ func TestChoiceAndChatShareClientWithoutChangingModel(t *testing.T) {
 		if err != nil || p["review"] != 0.7 || len(p) != 3 {
 			t.Fatalf("choice=%v err=%v", p, err)
 		}
-		var out struct{ OK bool }
-		if err := client.CompleteJSON(context.Background(), "system", "user", &out); err != nil || !out.OK {
-			t.Fatalf("chat=%+v err=%v", out, err)
-		}
 	}
-	if client.model != "@preset/deepseek" || choiceCalls.Load() != 2 || chatCalls.Load() != 2 {
-		t.Fatal("route/model mutation")
+	if choiceCalls.Load() != 2 {
+		t.Fatal("incorrect request count")
 	}
-	for _, model := range []string{"typesafe/jev-1.13", "@preset/deepseek"} {
-		if !strings.Contains(logs.String(), "model="+model) {
-			t.Errorf("missing model logging: %s", logs.String())
-		}
+	if !strings.Contains(logs.String(), "model=typesafe/jev-1.13") {
+		t.Errorf("missing model logging: %s", logs.String())
+	}
+	if New(config.LLMConfig{}, nil) != nil {
+		t.Fatal("missing API key must disable client")
 	}
 }
 
@@ -90,6 +81,11 @@ func TestChoiceRejectsMalformedDistributions(t *testing.T) {
 		"null", `{}`, `{"type":"noul","noul":0.9}`,
 		strings.Replace(valid, `"confidence":0.7`, `"confidence":null`, 1),
 		strings.Replace(valid, `"confidence":0.7`, `"confidence":1.7`, 1),
+		strings.Replace(valid, `"confidence":0.7`, `"confidence":-0.1`, 1),
+		strings.Replace(valid, `"confidence":0.7,`, ``, 1),
+		strings.Replace(valid, `"yes":0.85`, `"yes":NaN`, 1),
+		strings.Replace(valid, `"yes":0.85`, `"yes":Infinity`, 1),
+		strings.Replace(valid, `"yes":0.85`, `"yes":1e309`, 1),
 		strings.Replace(valid, `"yes":0.85`, `"yes":null`, 1),
 		strings.Replace(valid, `"yes":0.85`, `"yes":-0.1`, 1),
 		strings.Replace(valid, `"yes":0.85`, `"yes":1.1`, 1),

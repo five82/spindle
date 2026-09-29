@@ -144,21 +144,13 @@ func defaultConfig() *Config {
 			KeyDBDownloadTimeout: 300,
 		},
 		LLM: LLMConfig{
-			BaseURL:        "https://openrouter.ai/api/v1/chat/completions",
-			Model:          "deepseek/deepseek-v4.1-flash",
+			BaseURL:        "https://openrouter.ai/api/v1",
 			Referer:        "https://github.com/five82/spindle",
 			Title:          "Spindle",
 			TimeoutSeconds: 60,
 		},
 		Commentary: CommentaryConfig{
 			SimilarityThreshold: 0.92,
-		},
-		ContentID: ContentIDConfig{
-			MinSimilarityScore:           0.58,
-			ClearMatchMargin:             0.05,
-			LowConfidenceReviewThreshold: 0.70,
-			DecisiveAutoAcceptThreshold:  0.80,
-			ClearConfidenceThreshold:     0.85,
 		},
 		Logging: LoggingConfig{
 			RetentionDays: 60,

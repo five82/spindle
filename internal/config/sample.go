@@ -138,16 +138,15 @@ api_key = ""
 # Encoding uses Reel target-quality mode with Reel defaults.
 
 [llm]
-# OpenRouter is used for ambiguous episode verification and commentary
-# detection. An empty key disables those LLM operations.
+# Jev through OpenRouter identifies TV episodes from full WhisperX transcripts
+# and TMDB overviews, and detects commentary. An empty key sends TV episodes
+# to review and disables commentary classification.
+# Episode identification uses a fixed probability threshold of 0.90.
 # OpenRouter API key (or set OPENROUTER_API_KEY env var)
 # api_key = ""
 
-# Chat completions endpoint; Jev uses its sibling /systemone endpoint
-# base_url = "https://openrouter.ai/api/v1/chat/completions"
-
-# Episode-verification model or preset; low reasoning effort (commentary uses Jev)
-# model = "deepseek/deepseek-v4.1-flash"
+# API origin and prefix; requests use /systemone beneath this URL
+# base_url = "https://openrouter.ai/api/v1"
 
 # HTTP-Referer header for OpenRouter
 # referer = "https://github.com/five82/spindle"
@@ -166,23 +165,7 @@ api_key = ""
 # similarity_threshold = 0.92
 
 # Uses Jev through OpenRouter with a fixed, evaluated commentary-probability
-# threshold of 0.65. The [llm] API key and timeout apply; its chat model does not.
-
-[content_id]
-# Minimum cosine similarity required to keep a candidate claim
-# min_similarity_score = 0.58
-
-# Minimum separation required for a direct clear match
-# clear_match_margin = 0.05
-
-# Matches below this are routed to review
-# low_confidence_review_threshold = 0.70
-
-# Strong-margin matches at or above this are accepted without LLM verification
-# decisive_auto_accept_threshold = 0.80
-
-# Strong-margin matches at or above this are labeled clear instead of decisive_low_similarity
-# clear_confidence_threshold = 0.85
+# threshold of 0.65. The [llm] API key and timeout apply.
 
 [logging]
 # Days to retain daemon log files

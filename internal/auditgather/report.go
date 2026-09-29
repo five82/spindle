@@ -400,17 +400,15 @@ type GrainTreatmentEntry struct {
 	ripspec.GrainTreatment
 }
 
-// EpisodeStats holds episode identification summary.
+// EpisodeStats holds episode identification coverage and resolved-only probabilities.
 type EpisodeStats struct {
 	Count              int     `json:"count"`
 	Matched            int     `json:"matched"`
 	Unresolved         int     `json:"unresolved"`
 	PlaceholderOnly    bool    `json:"placeholder_only,omitempty"`
-	ConfidenceMin      float64 `json:"confidence_min,omitempty"`
-	ConfidenceMax      float64 `json:"confidence_max,omitempty"`
-	ConfidenceMean     float64 `json:"confidence_mean,omitempty"`
-	Below070           int     `json:"below_070"`
-	Below080           int     `json:"below_080"`
+	ProbabilityMin     float64 `json:"probability_min,omitempty"`
+	ProbabilityMax     float64 `json:"probability_max,omitempty"`
+	ProbabilityMean    float64 `json:"probability_mean,omitempty"`
 	Below090           int     `json:"below_090"`
 	SequenceContiguous bool    `json:"sequence_contiguous"`
 	EpisodeRange       string  `json:"episode_range,omitempty"`

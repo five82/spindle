@@ -108,13 +108,10 @@ func renderContentID(w fieldWriter, item spindle.QueueItem) {
 	if c == nil || strings.TrimSpace(c.Method) == "" {
 		return
 	}
-	w.field("ID", fmt.Sprintf("%s; %d matched; %d unresolved; %d low confidence", c.Method, c.MatchedEpisodes, c.UnresolvedEpisodes, c.LowConfidenceCount), w.styles.Text)
-	w.field("Ref", fmt.Sprintf("%s; %d reference episodes", c.ReferenceSource, c.ReferenceEpisodes), w.styles.Text)
+	w.field("ID", fmt.Sprintf("%s; %d matched; %d unresolved; %d for review", c.Method, c.MatchedEpisodes, c.UnresolvedEpisodes, c.ReviewEpisodes), w.styles.Text)
+	w.field("Catalog", fmt.Sprintf("%s; %d candidate episodes", c.ReferenceSource, c.ReferenceEpisodes), w.styles.Text)
 	if c.Completed && !c.SequenceContiguous {
 		w.field("Sequence", "Episode sequence not contiguous", w.styles.WarningText)
-	}
-	if c.Completed && !c.EpisodesSynchronized {
-		w.field("Identity", "Episodes not synchronized", w.styles.WarningText)
 	}
 }
 

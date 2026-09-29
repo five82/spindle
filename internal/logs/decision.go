@@ -14,7 +14,6 @@ const (
 	DecisionCommentaryRemapping      = "commentary_remapping"
 	DecisionCommentaryStereoFilter   = "commentary_stereo_filter"
 	DecisionConfigLoad               = "config_load"
-	DecisionContentIDCandidates      = "contentid_candidates"
 	DecisionContentIDMatches         = "contentid_matches"
 	DecisionCropDetection            = "crop_detection"
 	DecisionDaemonDrain              = "daemon_drain"

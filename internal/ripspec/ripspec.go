@@ -68,20 +68,19 @@ type Title struct {
 
 // Episode tracks the mapping between a disc title and a series episode.
 type Episode struct {
-	Key             string  `json:"key"`
-	TitleID         int     `json:"title_id"`
-	Season          int     `json:"season"`
-	Episode         int     `json:"episode"`
-	EpisodeEnd      int     `json:"episode_end,omitempty"`
-	EpisodeTitle    string  `json:"episode_title,omitempty"`
-	EpisodeAirDate  string  `json:"episode_air_date,omitempty"`
-	RuntimeSeconds  int     `json:"runtime_seconds,omitempty"`
-	TitleHash       string  `json:"title_hash,omitempty"`
-	OutputBasename  string  `json:"output_basename,omitempty"`
-	MatchScore      float64 `json:"match_score,omitempty"`
-	MatchConfidence float64 `json:"match_confidence,omitempty"`
-	NeedsReview     bool    `json:"needs_review,omitempty"`
-	ReviewReason    string  `json:"review_reason,omitempty"`
+	Key              string  `json:"key"`
+	TitleID          int     `json:"title_id"`
+	Season           int     `json:"season"`
+	Episode          int     `json:"episode"`
+	EpisodeEnd       int     `json:"episode_end,omitempty"`
+	EpisodeTitle     string  `json:"episode_title,omitempty"`
+	EpisodeAirDate   string  `json:"episode_air_date,omitempty"`
+	RuntimeSeconds   int     `json:"runtime_seconds,omitempty"`
+	TitleHash        string  `json:"title_hash,omitempty"`
+	OutputBasename   string  `json:"output_basename,omitempty"`
+	MatchProbability float64 `json:"match_probability,omitempty"`
+	NeedsReview      bool    `json:"needs_review,omitempty"`
+	ReviewReason     string  `json:"review_reason,omitempty"`
 }
 
 // Asset represents a single file artifact at a pipeline stage.
@@ -202,17 +201,16 @@ type SubtitleGenRecord struct {
 // identification stage without duplicating per-episode outcomes already stored
 // in Episodes.
 type ContentIDSummary struct {
-	Method               string  `json:"method,omitempty"`
-	ReferenceSource      string  `json:"reference_source,omitempty"`
-	ReferenceEpisodes    int     `json:"reference_episodes,omitempty"`
-	TranscribedEpisodes  int     `json:"transcribed_episodes,omitempty"`
-	MatchedEpisodes      int     `json:"matched_episodes,omitempty"`
-	UnresolvedEpisodes   int     `json:"unresolved_episodes,omitempty"`
-	LowConfidenceCount   int     `json:"low_confidence_count,omitempty"`
-	ReviewThreshold      float64 `json:"review_threshold,omitempty"`
-	SequenceContiguous   bool    `json:"sequence_contiguous,omitempty"`
-	EpisodesSynchronized bool    `json:"episodes_synchronized,omitempty"`
-	Completed            bool    `json:"completed,omitempty"`
+	Method              string  `json:"method,omitempty"`
+	ReferenceSource     string  `json:"reference_source,omitempty"`
+	ReferenceEpisodes   int     `json:"reference_episodes,omitempty"`
+	TranscribedEpisodes int     `json:"transcribed_episodes,omitempty"`
+	MatchedEpisodes     int     `json:"matched_episodes,omitempty"`
+	UnresolvedEpisodes  int     `json:"unresolved_episodes,omitempty"`
+	ReviewEpisodes      int     `json:"review_episodes,omitempty"`
+	ReviewThreshold     float64 `json:"review_threshold,omitempty"`
+	SequenceContiguous  bool    `json:"sequence_contiguous,omitempty"`
+	Completed           bool    `json:"completed,omitempty"`
 }
 
 // FinalValidation is the apply stage's verdict on the files the organizer
@@ -651,11 +649,8 @@ func countUnresolved(episodes []Episode) int {
 	return count
 }
 
-// Double-length episode detection is a cross-stage contract: identify orders
-// a probable double-length title first in the episode list, and contentid's
-// opening-double inference fires only when the double leads that order. Both
-// sides must therefore agree on what "double length" means, so the single
-// definition lives here.
+// Physical title ordering recognizes double-length programs. This runtime
+// heuristic must never assign canonical episode numbers or invent ranges.
 const (
 	doubleEpisodeMinRatio = 1.80
 	doubleEpisodeMaxRatio = 2.40

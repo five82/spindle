@@ -24,7 +24,6 @@ type Config struct {
 	MakeMKV       MakeMKVConfig       `toml:"makemkv"`
 	LLM           LLMConfig           `toml:"llm"`
 	Commentary    CommentaryConfig    `toml:"commentary"`
-	ContentID     ContentIDConfig     `toml:"content_id"`
 	Logging       LoggingConfig       `toml:"logging"`
 }
 
@@ -114,7 +113,6 @@ func (m MakeMKVConfig) KeyDBTimeout() time.Duration {
 type LLMConfig struct {
 	APIKey         string `toml:"api_key"`
 	BaseURL        string `toml:"base_url"`
-	Model          string `toml:"model"`
 	Referer        string `toml:"referer"`
 	Title          string `toml:"title"`
 	TimeoutSeconds int    `toml:"timeout_seconds"`
@@ -127,15 +125,6 @@ type LLMConfig struct {
 type CommentaryConfig struct {
 	Enabled             bool    `toml:"enabled"`
 	SimilarityThreshold float64 `toml:"similarity_threshold"`
-}
-
-// ContentIDConfig defines episode identification policy thresholds.
-type ContentIDConfig struct {
-	MinSimilarityScore           float64 `toml:"min_similarity_score"`
-	ClearMatchMargin             float64 `toml:"clear_match_margin"`
-	LowConfidenceReviewThreshold float64 `toml:"low_confidence_review_threshold"`
-	DecisiveAutoAcceptThreshold  float64 `toml:"decisive_auto_accept_threshold"`
-	ClearConfidenceThreshold     float64 `toml:"clear_confidence_threshold"`
 }
 
 // LoggingConfig defines log retention settings.

@@ -246,17 +246,16 @@ type SubtitleGenerationStatus struct {
 
 // ContentID summarizes episode-identification provenance.
 type ContentID struct {
-	Method               string  `json:"method"`
-	ReferenceSource      string  `json:"referenceSource"`
-	ReferenceEpisodes    int     `json:"referenceEpisodes"`
-	TranscribedEpisodes  int     `json:"transcribedEpisodes"`
-	MatchedEpisodes      int     `json:"matchedEpisodes"`
-	UnresolvedEpisodes   int     `json:"unresolvedEpisodes"`
-	LowConfidenceCount   int     `json:"lowConfidenceCount"`
-	ReviewThreshold      float64 `json:"reviewThreshold"`
-	SequenceContiguous   bool    `json:"sequenceContiguous"`
-	EpisodesSynchronized bool    `json:"episodesSynchronized"`
-	Completed            bool    `json:"completed"`
+	Method              string  `json:"method"`
+	ReferenceSource     string  `json:"referenceSource"`
+	ReferenceEpisodes   int     `json:"referenceEpisodes"`
+	TranscribedEpisodes int     `json:"transcribedEpisodes"`
+	MatchedEpisodes     int     `json:"matchedEpisodes"`
+	UnresolvedEpisodes  int     `json:"unresolvedEpisodes"`
+	ReviewEpisodes      int     `json:"reviewEpisodes"`
+	ReviewThreshold     float64 `json:"reviewThreshold"`
+	SequenceContiguous  bool    `json:"sequenceContiguous"`
+	Completed           bool    `json:"completed"`
 }
 
 // SourceTitle summarizes the primary rip-spec title (movie main title).
@@ -370,8 +369,7 @@ type EpisodeStatus struct {
 	SubtitleSevereIssues []string         `json:"subtitleSevereIssues"`
 	CommentaryTracks     int              `json:"commentaryTracks"`
 	ExcludedTracks       int              `json:"excludedTracks"`
-	MatchScore           float64          `json:"matchScore"`
-	MatchConfidence      float64          `json:"matchConfidence"`
+	MatchProbability     float64          `json:"matchProbability"`
 	MatchedEpisode       int              `json:"matchedEpisode"`
 	NeedsReview          bool             `json:"needsReview"`
 	ReviewReason         string           `json:"reviewReason"`

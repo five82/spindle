@@ -116,10 +116,15 @@ The generated sample shows every option, environment override, and default. Use
 `spindle --help` / `spindle <command> --help` for the current command and flag
 reference.
 
-Commentary detection uses Jev through OpenRouter with the same API key as
-ambiguous episode verification. The configured chat model applies only to
-verification; commentary reports its probability and decision rule instead of
-a generated explanation.
+Automatic TV episode identification and commentary detection use Jev through
+OpenRouter, configured with the `[llm]` API key. Episode identification compares
+full primary-audio WhisperX transcripts with the entire TMDB season's titles
+and overviews; it does not download reference subtitles. Uncertain matches,
+incomplete metadata, missing or oversized transcripts, and classifier failures
+send titles to review rather than guessing from disc order. Duplicate episode
+assignments and runtime inconsistencies also trigger review; runtime alone
+never renumbers episodes or creates an episode range. Both classifiers report
+option probabilities and decision rules instead of generated explanations.
 
 To expose the daemon API to the read-only
 [Flyer](flyer/README.md) monitor, configure a TCP listener and,

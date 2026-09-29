@@ -1,0 +1,653 @@
+[
+  {
+    "name": "main-7-options",
+    "request_sha256": "f219ae73fdd71bccc7b3c75f52e4b9ff64a7bd2f9e95795ed9245003b6f8cf27",
+    "criteria": [
+      "E02",
+      "E03",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "none"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "none",
+          "probabilities": {
+            "E06": 0.2,
+            "E04": 0.07,
+            "none": 0.28,
+            "E03": 0.08,
+            "E02": 0.1,
+            "E07": 0.17,
+            "E05": 0.09
+          },
+          "confidence": 0.17
+        }
+      }
+    }
+  },
+  {
+    "name": "main-24-options",
+    "request_sha256": "ef0b9d41b7cc65a0866e2a32f5b8be2b17b3c871544b37f9d8b2a94720520b14",
+    "criteria": [
+      "E08",
+      "E06",
+      "E11",
+      "E04",
+      "E07",
+      "E23",
+      "E16",
+      "E22",
+      "E18",
+      "E17",
+      "E19",
+      "E14",
+      "E12",
+      "E13",
+      "none",
+      "E10",
+      "E15",
+      "E01",
+      "E20",
+      "E09",
+      "E24",
+      "E21",
+      "E05",
+      "E03"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "none",
+          "probabilities": {
+            "E23": 0,
+            "E16": 0,
+            "E20": 0,
+            "E18": 0.04,
+            "E07": 0,
+            "E14": 0.01,
+            "E19": 0,
+            "E06": 0,
+            "E15": 0,
+            "E24": 0,
+            "E13": 0,
+            "E10": 0,
+            "E09": 0,
+            "E17": 0,
+            "E21": 0,
+            "E05": 0.01,
+            "E11": 0,
+            "E03": 0,
+            "E04": 0,
+            "E22": 0,
+            "E08": 0,
+            "E01": 0,
+            "E12": 0,
+            "none": 0.93
+          },
+          "confidence": 0.91
+        }
+      }
+    }
+  },
+  {
+    "name": "main-25-options",
+    "request_sha256": "98c96afbf761f3ae7aab49c90fd28ed7c3b32d2898a3ad6ebbff61bbe38f7c39",
+    "criteria": [
+      "E02",
+      "E17",
+      "E20",
+      "E23",
+      "E10",
+      "E19",
+      "E14",
+      "E09",
+      "E22",
+      "E08",
+      "E07",
+      "E16",
+      "E06",
+      "E03",
+      "E15",
+      "E21",
+      "E01",
+      "E04",
+      "none",
+      "E12",
+      "E13",
+      "E05",
+      "E24",
+      "E11",
+      "E18"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "E03",
+          "probabilities": {
+            "E23": 0,
+            "E16": 0,
+            "E20": 0,
+            "E07": 0,
+            "E03": 0.81,
+            "E14": 0,
+            "E19": 0,
+            "E06": 0,
+            "E11": 0.01,
+            "E24": 0,
+            "E13": 0,
+            "E10": 0.01,
+            "E15": 0,
+            "E21": 0,
+            "E18": 0.02,
+            "E05": 0,
+            "E12": 0,
+            "E09": 0,
+            "E04": 0,
+            "E22": 0,
+            "E08": 0,
+            "E01": 0,
+            "none": 0.14,
+            "E02": 0,
+            "E17": 0
+          },
+          "confidence": 0.79
+        }
+      }
+    }
+  },
+  {
+    "name": "main-14-options",
+    "request_sha256": "60b92164216dc4b04aa04fe01e19eced110cd9aec1c45ab0a680e41bf8f86163",
+    "criteria": [
+      "E01",
+      "E02",
+      "E03",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "E08",
+      "E09",
+      "E11",
+      "E12",
+      "E13",
+      "E14",
+      "none"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "none",
+          "probabilities": {
+            "E03": 0,
+            "E12": 0,
+            "E08": 0,
+            "E07": 0.02,
+            "E11": 0,
+            "E01": 0,
+            "E04": 0,
+            "E05": 0,
+            "none": 0.93,
+            "E02": 0.01,
+            "E13": 0.03,
+            "E06": 0,
+            "E14": 0,
+            "E09": 0
+          },
+          "confidence": 0.91
+        }
+      }
+    }
+  },
+  {
+    "name": "main-12-options",
+    "request_sha256": "130cc988f341a9760f7816e404de6e6a3751a3290e86614f4d3312c35a5c4df0",
+    "criteria": [
+      "E01",
+      "E02",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "E08",
+      "E09",
+      "E10",
+      "E11",
+      "E12",
+      "none"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "none",
+          "probabilities": {
+            "E08": 0,
+            "E01": 0,
+            "E05": 0,
+            "E07": 0.01,
+            "E02": 0,
+            "none": 0.93,
+            "E11": 0.01,
+            "E09": 0,
+            "E12": 0,
+            "E06": 0,
+            "E10": 0.04,
+            "E04": 0
+          },
+          "confidence": 0.92
+        }
+      }
+    }
+  },
+  {
+    "name": "winner-inversion",
+    "request_sha256": "56d8771f1517ffbb12a3e3e6f34ea8177a29306e880417c18d517c2f043b2d73",
+    "criteria": [
+      "E01",
+      "E03",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "E08",
+      "E09",
+      "E10",
+      "E11",
+      "E12",
+      "none"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "E05",
+          "probabilities": {
+            "E03": 0.01,
+            "none": 0.39,
+            "E10": 0.01,
+            "E04": 0.01,
+            "E11": 0.03,
+            "E08": 0.01,
+            "E09": 0.02,
+            "E06": 0.11,
+            "E01": 0.01,
+            "E05": 0.38,
+            "E12": 0.01,
+            "E07": 0.01
+          },
+          "confidence": 0.32
+        }
+      }
+    }
+  },
+  {
+    "name": "main-8-options",
+    "request_sha256": "77635eab5f9ffb445ad6f61886510baed795620d2efdc39a36238450c5117c9d",
+    "criteria": [
+      "E01",
+      "E02",
+      "E03",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "none"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "E03",
+          "probabilities": {
+            "none": 0.02,
+            "E01": 0.04,
+            "E07": 0,
+            "E02": 0.1,
+            "E05": 0,
+            "E04": 0.01,
+            "E03": 0.81,
+            "E06": 0.01
+          },
+          "confidence": 0.78
+        }
+      }
+    }
+  },
+  {
+    "name": "main-26-options",
+    "request_sha256": "ff9c043b8339be89b6ea4d1f6f2690fea0ea13793b886398caabf14e2e04c66b",
+    "criteria": [
+      "E09",
+      "E01",
+      "E18",
+      "E19",
+      "E21",
+      "E08",
+      "E25",
+      "E11",
+      "E24",
+      "E16",
+      "E03",
+      "E22",
+      "E23",
+      "E17",
+      "none",
+      "E10",
+      "E04",
+      "E20",
+      "E14",
+      "E02",
+      "E15",
+      "E13",
+      "E05",
+      "E12",
+      "E06",
+      "E07"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "E06",
+          "probabilities": {
+            "E18": 0,
+            "E01": 0,
+            "E14": 0,
+            "none": 0.09999999999999999,
+            "E25": 0,
+            "E19": 0,
+            "E04": 0,
+            "E21": 0,
+            "E02": 0.01,
+            "E24": 0.01,
+            "E12": 0.02,
+            "E06": 0.8200000000000001,
+            "E10": 0,
+            "E20": 0,
+            "E11": 0,
+            "E13": 0,
+            "E07": 0,
+            "E05": 0.01,
+            "E22": 0.01,
+            "E16": 0,
+            "E09": 0,
+            "E17": 0.01,
+            "E08": 0,
+            "E03": 0,
+            "E15": 0,
+            "E23": 0
+          },
+          "confidence": 0.8
+        }
+      }
+    }
+  },
+  {
+    "name": "followup-24-options",
+    "request_sha256": "59802654f45de024818c550b57a98548f149267dec4899973e45ce4cbf82554e",
+    "criteria": [
+      "E01",
+      "E03",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "E08",
+      "E09",
+      "E10",
+      "E11",
+      "E12",
+      "E13",
+      "E14",
+      "E15",
+      "E16",
+      "E17",
+      "E18",
+      "E19",
+      "E20",
+      "E21",
+      "E22",
+      "E23",
+      "E24",
+      "none"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "none",
+          "probabilities": {
+            "none": 0.93,
+            "E24": 0,
+            "E07": 0,
+            "E21": 0,
+            "E03": 0,
+            "E20": 0,
+            "E06": 0,
+            "E18": 0.01,
+            "E10": 0,
+            "E05": 0,
+            "E12": 0,
+            "E09": 0,
+            "E01": 0,
+            "E08": 0.04,
+            "E19": 0,
+            "E17": 0,
+            "E23": 0,
+            "E11": 0,
+            "E22": 0,
+            "E16": 0,
+            "E04": 0,
+            "E15": 0,
+            "E14": 0.01,
+            "E13": 0
+          },
+          "confidence": 0.92
+        }
+      }
+    }
+  },
+  {
+    "name": "followup-14-options",
+    "request_sha256": "06351f87e9d98f97e9c996958f467e01d0666547598ccfc0f46c24c26d0942bc",
+    "criteria": [
+      "E01",
+      "E02",
+      "E03",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "E08",
+      "E09",
+      "E10",
+      "E11",
+      "E12",
+      "none",
+      "duplicate"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "E05",
+          "probabilities": {
+            "E07": 0,
+            "E05": 0.6900000000000001,
+            "E02": 0.01,
+            "E12": 0,
+            "E10": 0,
+            "duplicate": 0.25,
+            "none": 0.02,
+            "E11": 0.01,
+            "E04": 0,
+            "E08": 0.01,
+            "E03": 0,
+            "E06": 0,
+            "E09": 0,
+            "E01": 0
+          },
+          "confidence": 0.66
+        }
+      }
+    }
+  },
+  {
+    "name": "followup-16-options",
+    "request_sha256": "178130049f4cf192c3b5d4ee031355ef0a9445195abd9ca8ed4732efb65c9519",
+    "criteria": [
+      "E01",
+      "E02",
+      "E03",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "E08",
+      "E09",
+      "E10",
+      "E11",
+      "E12",
+      "E13",
+      "E14",
+      "none",
+      "duplicate"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "duplicate",
+          "probabilities": {
+            "E06": 0.38,
+            "E11": 0,
+            "E07": 0,
+            "E10": 0,
+            "E08": 0,
+            "E05": 0,
+            "E09": 0,
+            "E03": 0,
+            "E14": 0,
+            "none": 0.02,
+            "E02": 0.01,
+            "duplicate": 0.56,
+            "E12": 0,
+            "E01": 0.01,
+            "E13": 0,
+            "E04": 0.01
+          },
+          "confidence": 0.52
+        }
+      }
+    }
+  },
+  {
+    "name": "followup-25-options",
+    "request_sha256": "ed5d90722e84f3a706544f851a3a579cc19dd5aab7d57a167aeec958eaafafe0",
+    "criteria": [
+      "E01",
+      "E02",
+      "E04",
+      "E05",
+      "E06",
+      "E07",
+      "E08",
+      "E09",
+      "E10",
+      "E11",
+      "E12",
+      "E13",
+      "E14",
+      "E15",
+      "E16",
+      "E17",
+      "E18",
+      "E19",
+      "E20",
+      "E21",
+      "E22",
+      "E23",
+      "E24",
+      "E25",
+      "none"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "none",
+          "probabilities": {
+            "E14": 0,
+            "E25": 0,
+            "E13": 0.08,
+            "E01": 0,
+            "E21": 0.06,
+            "E06": 0,
+            "E18": 0,
+            "E08": 0,
+            "E22": 0,
+            "E17": 0,
+            "E02": 0,
+            "E23": 0,
+            "E20": 0,
+            "E19": 0,
+            "E07": 0.04,
+            "E10": 0,
+            "none": 0.81,
+            "E09": 0,
+            "E16": 0,
+            "E11": 0,
+            "E15": 0,
+            "E12": 0,
+            "E24": 0,
+            "E04": 0,
+            "E05": 0
+          },
+          "confidence": 0.79
+        }
+      }
+    }
+  },
+  {
+    "name": "robustness-8-options",
+    "request_sha256": "4d4bfe933c0104436e286ad06c122c7df08ce7b7e4ff7ac67588260e17a47b06",
+    "criteria": [
+      "candidate_00",
+      "candidate_01",
+      "candidate_02",
+      "candidate_03",
+      "none",
+      "candidate_05",
+      "candidate_06",
+      "candidate_07"
+    ],
+    "response": {
+      "answers": {
+        "decision": {
+          "type": "choice",
+          "choice": "candidate_01",
+          "probabilities": {
+            "candidate_03": 0.01,
+            "candidate_05": 0.01,
+            "none": 0.01,
+            "candidate_02": 0.03,
+            "candidate_07": 0,
+            "candidate_00": 0,
+            "candidate_01": 0.93,
+            "candidate_06": 0
+          },
+          "confidence": 0.92
+        }
+      }
+    }
+  }
+]

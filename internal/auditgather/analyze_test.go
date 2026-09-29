@@ -329,10 +329,10 @@ func TestComputeRoutingSummaryClassifiesLibraryAndReview(t *testing.T) {
 
 func TestComputeEpisodeStats_Thresholds(t *testing.T) {
 	episodes := []ripspec.Episode{
-		{Key: "s01e01", Episode: 1, MatchConfidence: 0.95},
-		{Key: "s01e02", Episode: 2, MatchConfidence: 0.75},
-		{Key: "s01e03", Episode: 3, MatchConfidence: 0.65},
-		{Key: "s01e04", Episode: 4, MatchConfidence: 0.85},
+		{Key: "s01e01", Episode: 1, MatchProbability: 0.95},
+		{Key: "s01e02", Episode: 2, MatchProbability: 0.75},
+		{Key: "s01e03", Episode: 3, MatchProbability: 0.65},
+		{Key: "s01e04", Episode: 4, MatchProbability: 0.85},
 	}
 
 	stats := computeEpisodeStats(episodes)
@@ -345,28 +345,22 @@ func TestComputeEpisodeStats_Thresholds(t *testing.T) {
 	if stats.Matched != 4 {
 		t.Errorf("matched: got %d, want 4", stats.Matched)
 	}
-	if stats.Below070 != 1 {
-		t.Errorf("below070: got %d, want 1 (0.65)", stats.Below070)
-	}
-	if stats.Below080 != 2 {
-		t.Errorf("below080: got %d, want 2 (0.65, 0.75)", stats.Below080)
-	}
 	if stats.Below090 != 3 {
 		t.Errorf("below090: got %d, want 3 (0.65, 0.75, 0.85)", stats.Below090)
 	}
-	if stats.ConfidenceMin != 0.65 {
-		t.Errorf("min: got %f, want 0.65", stats.ConfidenceMin)
+	if stats.ProbabilityMin != 0.65 {
+		t.Errorf("min: got %f, want 0.65", stats.ProbabilityMin)
 	}
-	if stats.ConfidenceMax != 0.95 {
-		t.Errorf("max: got %f, want 0.95", stats.ConfidenceMax)
+	if stats.ProbabilityMax != 0.95 {
+		t.Errorf("max: got %f, want 0.95", stats.ProbabilityMax)
 	}
 }
 
 func TestComputeEpisodeStats_Contiguity(t *testing.T) {
 	contiguous := []ripspec.Episode{
-		{Key: "s01e01", Episode: 1, MatchConfidence: 0.9},
-		{Key: "s01e02", Episode: 2, MatchConfidence: 0.9},
-		{Key: "s01e03", Episode: 3, MatchConfidence: 0.9},
+		{Key: "s01e01", Episode: 1, MatchProbability: 0.9},
+		{Key: "s01e02", Episode: 2, MatchProbability: 0.9},
+		{Key: "s01e03", Episode: 3, MatchProbability: 0.9},
 	}
 	stats := computeEpisodeStats(contiguous)
 	if !stats.SequenceContiguous {
@@ -377,9 +371,9 @@ func TestComputeEpisodeStats_Contiguity(t *testing.T) {
 	}
 
 	gapped := []ripspec.Episode{
-		{Key: "s01e01", Episode: 1, MatchConfidence: 0.9},
-		{Key: "s01e03", Episode: 3, MatchConfidence: 0.9},
-		{Key: "s01e05", Episode: 5, MatchConfidence: 0.9},
+		{Key: "s01e01", Episode: 1, MatchProbability: 0.9},
+		{Key: "s01e03", Episode: 3, MatchProbability: 0.9},
+		{Key: "s01e05", Episode: 5, MatchProbability: 0.9},
 	}
 	stats = computeEpisodeStats(gapped)
 	if stats.SequenceContiguous {
@@ -647,10 +641,9 @@ func TestDetectAnomalies_ContentIDSummaryPresent(t *testing.T) {
 			Metadata: ripspec.Metadata{MediaType: "tv"},
 			Episodes: []ripspec.Episode{{Key: "s01e01", Episode: 1}},
 			Attributes: ripspec.EnvelopeAttributes{ContentID: &ripspec.ContentIDSummary{
-				Method:               "whisperx_tfidf_hungarian",
-				ReferenceSource:      "opensubtitles",
-				EpisodesSynchronized: true,
-				Completed:            true,
+				Method:          "whisperx_jev_episode_choice",
+				ReferenceSource: "tmdb",
+				Completed:       true,
 			}},
 		},
 	}
@@ -713,33 +706,5 @@ func TestCompressMediaProbes_NilConsistency(t *testing.T) {
 	}
 	if len(result) != 1 {
 		t.Errorf("result count: got %d, want 1", len(result))
-	}
-}
-
-func TestCountDecisionConfidenceQualitiesIncludesDecisiveLowSimilarity(t *testing.T) {
-	decisions := []LogDecision{
-		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "clear"}},
-		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "decisive_low_similarity", "match_confidence": 0.821}},
-		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "ambiguous"}},
-		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "contested"}},
-		{DecisionType: "tmdb_match", Extras: map[string]any{"confidence_quality": "clear"}},
-	}
-
-	contested, ambiguous, decisive := countDecisionConfidenceQualities(decisions)
-	if contested != 1 || ambiguous != 1 || decisive != 1 {
-		t.Fatalf("counts = contested:%d ambiguous:%d decisive:%d", contested, ambiguous, decisive)
-	}
-}
-
-func TestCountDecisiveLowSimilarityInConfidenceBand(t *testing.T) {
-	decisions := []LogDecision{
-		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "decisive_low_similarity", "match_confidence": 0.821}},
-		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "decisive_low_similarity", "match_confidence": 0.945}},
-		{DecisionType: "episode_match", Extras: map[string]any{"confidence_quality": "ambiguous", "match_confidence": 0.830}},
-	}
-
-	got := countDecisiveLowSimilarityInConfidenceBand(decisions, 0.80, 0.90)
-	if got != 1 {
-		t.Fatalf("decisive low-similarity count = %d, want 1", got)
 	}
 }

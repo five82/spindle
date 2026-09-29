@@ -322,15 +322,14 @@ func writeDigestEpisodeID(b *strings.Builder, r *Report) {
 	}
 	fmt.Fprintln(b)
 	if cid := r.Envelope.Attributes.ContentID; cid != nil {
-		fmt.Fprintf(b, "Content ID: method=%s references=%s (%d) | transcribed=%d matched=%d unresolved=%d low_conf=%d | synchronized=%v completed=%v\n",
+		fmt.Fprintf(b, "Content ID: method=%s catalog=%s (%d) | transcribed=%d matched=%d unresolved=%d review=%d | completed=%v\n",
 			cid.Method, cid.ReferenceSource, cid.ReferenceEpisodes, cid.TranscribedEpisodes,
-			cid.MatchedEpisodes, cid.UnresolvedEpisodes, cid.LowConfidenceCount,
-			cid.EpisodesSynchronized, cid.Completed)
+			cid.MatchedEpisodes, cid.UnresolvedEpisodes, cid.ReviewEpisodes, cid.Completed)
 	}
 	if es := statsOrNil(r); es != nil {
-		fmt.Fprintf(b, "Stats: %d matched, %d unresolved | confidence min=%.2f mean=%.2f max=%.2f | <0.70: %d, <0.80: %d, <0.90: %d | contiguous=%v range=%s\n",
-			es.Matched, es.Unresolved, es.ConfidenceMin, es.ConfidenceMean, es.ConfidenceMax,
-			es.Below070, es.Below080, es.Below090, es.SequenceContiguous, es.EpisodeRange)
+		fmt.Fprintf(b, "Stats: %d matched, %d unresolved | resolved episode probability min=%.2f mean=%.2f max=%.2f | resolved <0.90: %d | contiguous=%v range=%s\n",
+			es.Matched, es.Unresolved, es.ProbabilityMin, es.ProbabilityMean, es.ProbabilityMax,
+			es.Below090, es.SequenceContiguous, es.EpisodeRange)
 	}
 	for _, ep := range r.Envelope.Episodes {
 		se := fmt.Sprintf("S%02dE%02d", ep.Season, ep.Episode)
@@ -340,8 +339,8 @@ func writeDigestEpisodeID(b *strings.Builder, r *Report) {
 		if ep.Episode == 0 {
 			se = "UNRESOLVED"
 		}
-		line := fmt.Sprintf("- %s title_id=%d %s conf=%.2f score=%.2f",
-			ep.Key, ep.TitleID, se, ep.MatchConfidence, ep.MatchScore)
+		line := fmt.Sprintf("- %s title_id=%d %s probability=%.2f",
+			ep.Key, ep.TitleID, se, ep.MatchProbability)
 		if ep.EpisodeTitle != "" {
 			line += fmt.Sprintf(" %q", ep.EpisodeTitle)
 		}

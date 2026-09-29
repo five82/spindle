@@ -9,8 +9,8 @@ argument-hint: <scenario description>
 
 Manually orchestrate the Spindle pipeline (rip -> encode -> subtitle -> name ->
 place -> refresh) for content the automated daemon workflow does not cover.
-The daemon handles the standard case: one disc, one feature (or one TV
-season), fully automated. Everything else - extras, shorts, alternate cuts,
+The daemon handles the standard case: one movie disc or a standard TV disc
+from one season, fully automated. Everything else - extras, shorts, alternate cuts,
 foreign-language features, foreign-dialogue forced subtitles, discs that need
 troubleshooting - is this skill's job. You are the orchestrator: you make the
 judgment calls (what each title is, what it should be named, where it belongs)
@@ -121,9 +121,20 @@ workflows do not write there.
   feature gets the full automated treatment (identification, commentary
   detection, subtitle audit, organization). Orchestrate manually only the
   parts the pipeline can't do.
+- **TV identity is not runtime matching.** Standard TV discs belong in the
+  automated pipeline: Jev compares full primary-audio transcripts against
+  the complete canonical TMDB season plus `none`, accepting episode
+  probabilities >= 0.90. An unresolved result does not establish an extra;
+  diagnose catalog, transcript, classifier, and structural review reasons
+  before deciding manual handling is needed. Fix upstream bugs rather than
+  relabeling their outputs. High probability can identify only a composite's
+  dominant episode, not its complete contents. Genuine unsupported composites
+  need manual identification of all constituent episodes before naming or
+  placement; runtime alone must never invent ranges or shift TMDB numbering.
 - Web research (runtimes, extras listings, edition details) should be
-  cross-checked against actual title runtimes from `spindle disc scan` -
-  runtime agreement within ~1-2% is the primary matching signal.
+  cross-checked against actual title runtimes from `spindle disc scan`.
+  Runtime agreement within ~1-2% supports matching listed extras or cuts;
+  it is not sufficient to establish TV episode identity or file completeness.
 - Finish with `spindle loom scan`, then `spindle start`.
 
 ## Scenario routing
@@ -150,8 +161,9 @@ Every scenario follows the same skeleton:
 2. Inventory: `spindle disc scan --json`, plus `spindle disc identify` for
    TMDB identity when naming needs it.
 3. Research: web-search the release (blu-ray.com disc reviews list extras
-   with runtimes; TMDB for runtimes/editions) and map titles to content by
-   runtime.
+   with runtimes; TMDB for canonical episode identity/runtimes/editions).
+   Corroborate title mappings with disc-specific evidence; use runtime as
+   supporting evidence, not proof of episode identity or composite coverage.
 4. Rip the selected titles with `spindle rip` into a scratch directory.
 5. Join or otherwise assemble sources when the scenario requires it.
 6. Run commentary detection and remux each source to primary audio plus only

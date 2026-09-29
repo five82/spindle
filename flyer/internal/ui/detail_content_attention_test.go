@@ -17,8 +17,8 @@ func TestContentIDCompletedAndPending(t *testing.T) {
 	}{
 		{"missing", nil, nil, []string{"ID", "Ref"}},
 		{"empty method", &spindle.ContentID{Method: "  "}, nil, []string{"Ref"}},
-		{"pending", &spindle.ContentID{Method: "audio", MatchedEpisodes: 3, UnresolvedEpisodes: 2, LowConfidenceCount: 1, ReferenceSource: "catalog", ReferenceEpisodes: 5}, []string{"audio", "3 matched", "2 unresolved", "1 low confidence", "catalog", "5 reference episodes"}, []string{"not contiguous", "not synchronized"}},
-		{"completed", &spindle.ContentID{Method: "fingerprint", Completed: true}, []string{"fingerprint", "not contiguous", "not synchronized"}, nil},
+		{"pending", &spindle.ContentID{Method: "audio", MatchedEpisodes: 3, UnresolvedEpisodes: 2, ReviewEpisodes: 1, ReferenceSource: "catalog", ReferenceEpisodes: 5}, []string{"audio", "3 matched", "2 unresolved", "1 for review", "catalog", "5 candidate episodes"}, []string{"not contiguous", "not synchronized"}},
+		{"completed", &spindle.ContentID{Method: "whisperx_jev_episode_choice", Completed: true}, []string{"whisperx_jev_episode_choice", "not contiguous"}, []string{"not synchronized"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var b strings.Builder

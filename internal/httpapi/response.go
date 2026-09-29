@@ -108,8 +108,7 @@ type EpisodeResponse struct {
 	SubtitleSevereIssues []string                      `json:"subtitleSevereIssues,omitempty"`
 	CommentaryTracks     int                           `json:"commentaryTracks,omitempty"`
 	ExcludedTracks       int                           `json:"excludedTracks,omitempty"`
-	MatchScore           float64                       `json:"matchScore,omitempty"`
-	MatchConfidence      float64                       `json:"matchConfidence,omitempty"`
+	MatchProbability     float64                       `json:"matchProbability,omitempty"`
 	MatchedEpisode       int                           `json:"matchedEpisode,omitempty"`
 	MatchedEpisodeEnd    int                           `json:"matchedEpisodeEnd,omitempty"`
 	NeedsReview          bool                          `json:"needsReview,omitempty"`
@@ -135,17 +134,16 @@ type SubGenResponse struct {
 // ContentIDResponse mirrors the envelope's episode-identification summary so
 // clients never parse the raw rip spec for it.
 type ContentIDResponse struct {
-	Method               string  `json:"method,omitempty"`
-	ReferenceSource      string  `json:"referenceSource,omitempty"`
-	ReferenceEpisodes    int     `json:"referenceEpisodes,omitempty"`
-	TranscribedEpisodes  int     `json:"transcribedEpisodes,omitempty"`
-	MatchedEpisodes      int     `json:"matchedEpisodes,omitempty"`
-	UnresolvedEpisodes   int     `json:"unresolvedEpisodes,omitempty"`
-	LowConfidenceCount   int     `json:"lowConfidenceCount,omitempty"`
-	ReviewThreshold      float64 `json:"reviewThreshold,omitempty"`
-	SequenceContiguous   bool    `json:"sequenceContiguous,omitempty"`
-	EpisodesSynchronized bool    `json:"episodesSynchronized,omitempty"`
-	Completed            bool    `json:"completed,omitempty"`
+	Method              string  `json:"method,omitempty"`
+	ReferenceSource     string  `json:"referenceSource,omitempty"`
+	ReferenceEpisodes   int     `json:"referenceEpisodes,omitempty"`
+	TranscribedEpisodes int     `json:"transcribedEpisodes,omitempty"`
+	MatchedEpisodes     int     `json:"matchedEpisodes,omitempty"`
+	UnresolvedEpisodes  int     `json:"unresolvedEpisodes,omitempty"`
+	ReviewEpisodes      int     `json:"reviewEpisodes,omitempty"`
+	ReviewThreshold     float64 `json:"reviewThreshold,omitempty"`
+	SequenceContiguous  bool    `json:"sequenceContiguous,omitempty"`
+	Completed           bool    `json:"completed,omitempty"`
 }
 
 // StatusAPIResponse is the top-level /api/status response.
@@ -425,17 +423,16 @@ func populateRipSpecDerived(resp *ItemResponse, env *ripspec.Envelope, activeKey
 	// Episode identification provenance
 	if cid := env.Attributes.ContentID; cid != nil {
 		resp.ContentID = &ContentIDResponse{
-			Method:               cid.Method,
-			ReferenceSource:      cid.ReferenceSource,
-			ReferenceEpisodes:    cid.ReferenceEpisodes,
-			TranscribedEpisodes:  cid.TranscribedEpisodes,
-			MatchedEpisodes:      cid.MatchedEpisodes,
-			UnresolvedEpisodes:   cid.UnresolvedEpisodes,
-			LowConfidenceCount:   cid.LowConfidenceCount,
-			ReviewThreshold:      cid.ReviewThreshold,
-			SequenceContiguous:   cid.SequenceContiguous,
-			EpisodesSynchronized: cid.EpisodesSynchronized,
-			Completed:            cid.Completed,
+			Method:              cid.Method,
+			ReferenceSource:     cid.ReferenceSource,
+			ReferenceEpisodes:   cid.ReferenceEpisodes,
+			TranscribedEpisodes: cid.TranscribedEpisodes,
+			MatchedEpisodes:     cid.MatchedEpisodes,
+			UnresolvedEpisodes:  cid.UnresolvedEpisodes,
+			ReviewEpisodes:      cid.ReviewEpisodes,
+			ReviewThreshold:     cid.ReviewThreshold,
+			SequenceContiguous:  cid.SequenceContiguous,
+			Completed:           cid.Completed,
 		}
 	}
 }
@@ -469,19 +466,18 @@ func buildEpisodes(env *ripspec.Envelope, activeKeys map[string]bool) []EpisodeR
 	episodes := make([]EpisodeResponse, 0, len(manifest))
 	for _, ep := range manifest {
 		resp := EpisodeResponse{
-			Key:             ep.Key,
-			Season:          ep.Season,
-			Episode:         ep.Episode,
-			EpisodeEnd:      ep.EpisodeEnd,
-			Title:           ep.EpisodeTitle,
-			Stage:           "planned",
-			RuntimeSeconds:  ep.RuntimeSeconds,
-			SourceTitleID:   ep.TitleID,
-			OutputBasename:  ep.OutputBasename,
-			MatchScore:      ep.MatchScore,
-			MatchConfidence: ep.MatchConfidence,
-			NeedsReview:     ep.NeedsReview,
-			ReviewReason:    ep.ReviewReason,
+			Key:              ep.Key,
+			Season:           ep.Season,
+			Episode:          ep.Episode,
+			EpisodeEnd:       ep.EpisodeEnd,
+			Title:            ep.EpisodeTitle,
+			Stage:            "planned",
+			RuntimeSeconds:   ep.RuntimeSeconds,
+			SourceTitleID:    ep.TitleID,
+			OutputBasename:   ep.OutputBasename,
+			MatchProbability: ep.MatchProbability,
+			NeedsReview:      ep.NeedsReview,
+			ReviewReason:     ep.ReviewReason,
 		}
 
 		if ep.Episode > 0 {

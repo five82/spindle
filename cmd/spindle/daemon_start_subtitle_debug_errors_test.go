@@ -81,7 +81,6 @@ func TestDebugCommentaryClassificationWithStubTranscripts(t *testing.T) {
 	cfg = &config.Config{}
 	cfg.LLM.APIKey = "test"
 	cfg.LLM.BaseURL = server.URL
-	cfg.LLM.Model = "test"
 	cfg.Commentary.SimilarityThreshold = 0.8
 	dir := t.TempDir()
 	file := filepath.Join(dir, "film.mkv")

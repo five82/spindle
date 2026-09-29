@@ -1,5 +1,4 @@
-// Package contentid provides TV episode matching by correlating WhisperX
-// transcripts against OpenSubtitles reference subtitles with a content-first
-// matcher, narrow pairwise LLM verification, and strict single-hole
-// reconciliation.
+// Package contentid identifies TV episodes by comparing full WhisperX
+// transcripts to the canonical TMDB season with Jev. Uncertain classifications
+// and unsafe episode sets go to review; disc order never supplies identities.
 package contentid

@@ -76,7 +76,7 @@ The `analysis` object (always present; sub-fields omitted when empty) contains p
 | `episode_consistency` | 2+ TV probes | `majority_profile` (video_codec, width, height, audio_streams, subtitle_streams with codec/language/is_forced), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. Commentary-only deviations remain visible but do not trigger a consistency warning. |
 | `crop_analysis` | Crop data exists | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`. |
 | `grain_treatments` | Reel reported a grain-gate verdict | Per-encode `episode_key`, `mode` (auto/off/override), `treated`, `tier` (light/med), `resolution_class`, `denoise`, `grain_table`, `reason`, `gate_crf`, `sample_chunks`/`sample_bpp`, `median_bpp` against `light_bpp_cutoff`/`med_bpp_cutoff`, `gate_seconds`/`ceiling_seconds`, and `denoise_ceiling_jod_mean`/`denoise_ceiling_jod_min`. Lifted from `envelope.attributes.encode_stats[].grain_treatment`. |
-| `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `placeholder_only`, `confidence_min/max/mean`, `below_070/080/090` (cumulative), `sequence_contiguous`, `episode_range`. |
+| `episode_stats` | Episodes exist | `count`, `matched`, `unresolved`, `placeholder_only`, `probability_min/max/mean` and `below_090` (resolved identities only), `sequence_contiguous`, `episode_range`. These are episode option probabilities, not Jev's separate confidence statistic. |
 | `media_stats` | Valid probes exist | `file_count`, `duration_min_sec/max_sec`, `size_min_bytes/max_bytes`. |
 | `asset_health` | Assets exist | Per-stage (ripped/encoded/subtitled/final/transcript) `total/ok/failed/muxed` counts. `transcript` counts the shared per-episode WhisperX transcript artifacts reused across episode-ID, commentary, and subtitle generation. |
 | `anomalies` | Issues/context detected | Pre-flagged signals with `severity` (critical/warning/info), `category`, `message`. |
@@ -114,7 +114,7 @@ The `stage_gate` object in the audit output contains:
 Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors`, `analysis.stage_timings`, and the full JSON's `transitions`. **Go beyond simple error counts.** Native transitions remain available even if a daemon log file has rotated away or is missing.
 
 1. **Decision anomalies** (from `analysis.decision_groups`):
-   - Scores that contradict the decision's own acceptance rule. Jev commentary uses P(commentary) >= 0.65, not an LLM confidence gate or the episode-match confidence bands below.
+   - Scores that contradict the decision's own acceptance rule. Jev commentary uses P(commentary) >= 0.65; episode identification requires P(episode) >= 0.90. Neither uses Jev's separate confidence statistic.
    - Unexpected fallbacks (encoding retries)
    - Decisions that contradict expected behavior for the content type
    - Look up groups by `decision_type` to find specific categories (`commentary_classification`, `tmdb_match`, etc.)
@@ -138,12 +138,12 @@ Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors
    - What IS a finding around a stop/restart: an item marked failed by the interruption itself (e.g. `error_message` containing `signal: killed` or `context canceled` — cancellation must revert tasks to pending, never fail the item), or reel's "discarded stale resume state" warning when neither the source was re-ripped nor reel/encode settings changed (after a reel upgrade or a rip re-run it is the designed auto-reset, costing a from-scratch encode but producing correct output).
    - Level layout: the stage executor records `stage_start` and exactly one terminal outcome per run in the queue journal, NOT at DEBUG in daemon logs. `stage_complete` has numeric `durationSeconds`; failed, cancelled, stopped, or degraded runs have their own terminal type. The workflow still writes INFO "stage started/completed" decision logs, with a human-readable `stage_duration`; "item stage derived" remains DEBUG.
    - Transcription is BATCHED: expect one `transcription_whisperx[_complete]` pair per batch (with a `batch_files` extra), not one per episode; `transcription_extract` still fires per file. A missing per-episode WhisperX event is not an anomaly.
-   - Episode-ID reference fetching runs CONCURRENTLY with transcription (`decision_result=fetch_overlapped`), so OpenSubtitles and WhisperX log lines legitimately interleave — do not flag the interleaving as disorder.
+   - Episode identification uses full primary-audio WhisperX transcripts and the complete TMDB season catalog, not downloaded subtitle references. OpenSubtitles acquisition belongs to subtitle adoption, not episode classification.
    - Rip-cache restores and stores hardlink when cache and staging share a filesystem: near-instant `copy_progress` (a single jump to 100%) is expected, not a truncated copy.
 
 3. **Data flow anomalies**:
    - Track counts changing unexpectedly between stages
-   - Reconcile TV counts across `makemkv_scan_complete.titles_found`, title-selection decisions, `episode_placeholders`, the episode manifest, and ripped assets. A contiguous resolved sequence does not prove the first or last episode is present. If a disc listing includes E1 but content ID calls the first rip a probable extra, investigate the reference-selection metadata and similarity gate before accepting the missing-E1 conclusion; a high metadata score alone does not prove a content match.
+   - Reconcile TV counts across `makemkv_scan_complete.titles_found`, title-selection decisions, `episode_placeholders`, the episode manifest, and ripped assets. A contiguous resolved sequence does not prove the first or last episode is present. If a disc listing includes E1 but a selected title remains unresolved, trace the title selection, trusted show/season identity, catalog completeness, transcript asset status, and Jev decision before accepting a missing-E1 conclusion. An unresolved title is not a probable extra; high episode probability alone does not prove complete file coverage.
    - Title-level TV deduplication only runs on Blu-ray segment maps: DVD maps are title-local and TitleHash is metadata-only, so identification refuses to dedup non-Blu-ray titles at all. A `duplicate_detection` decision carrying `title_id`/`duplicate_of` on a DVD should never appear — if one does, treat it as a CRITICAL missing-episode risk and a bug in the dedup gate.
    - Episode counts not matching expectations. For TV, cross-check against a credible disc-specific web listing when available, even on DVDs; trace any excess/missing titles to the selection decision and disc structure rather than assuming every episode-length scan title is an episode.
    - File sizes that seem wrong for the content
@@ -151,19 +151,17 @@ Analyze `analysis.decision_groups`, `logs.events`, `logs.warnings`, `logs.errors
 4. **LLM decision review** (from `analysis.decision_groups`):
    - `decision_type=commentary_classification` entries
    - `decision_type=tmdb_match` and `decision_type=tmdb_match_preference` entries — verify acceptance thresholds are reasonable
-   - Evaluate scores against the rule and model that produced them. Jev commentary reasons intentionally report the probability comparison, not a generated explanation; this is not missing rationale. Episode verification still uses the configured chat model.
+   - Evaluate probabilities against the rule that produced them: commentary 0.65, episode identification 0.90. Both use typed Jev Choice; probability comparisons and fixed decision reasons are intentional, not missing generated explanations. There is no chat pair-verification fallback.
    - Exclude subtitle/transcript wording from this review; use decisions, failure events, track metadata, and applicable external disc evidence.
 
 5. **TV episode pipeline checks** (TV only, from `analysis.decision_groups`, `logs.warnings`, and native `transitions`):
    - Transitions with `stage=episode_identification` — verify the stage started/completed or identify where it failed
    - `decision_type=episode_id_skip` entries — explain legitimate skips for non-TV content
    - `decision_type=episode_placeholders` — confirm placeholders were created before content ID
-   - `event_type=episode_id_no_transcripts` or item review/error messages about missing references — degraded episode-ID failures
-   - `event_type=low_confidence_match` — episodes with `MatchConfidence` below 0.70
-   - `decision_type=contentid_matches` — final episode-to-reference matching results; compare `ambiguous_rips`, `decisive_low_similarity_rips`, and `contested_rips`
-   - `decision_type=episode_match` with `decision_result=<key> -> unresolved` — per-rip unresolved lines carry `best_candidate_episode/score/confidence` and runner-up; the full pending-claim matrix is at DEBUG (`content ID pending claim`)
+   - `event_type=tmdb_season_error` stops season acquisition for retry; `event_type=episode_classification_failed` leaves the affected title unresolved for review. Missing/incomplete catalogs degrade the stage; per-title evidence problems, abstentions, and low probabilities can leave review outcomes even when the stage completes.
+   - `decision_type=contentid_matches` with `decision_result=classify_full_season` or `review` records the plan; `resolved_episodes_routed_to_review` records a structural safety failure affecting the resolved set.
+   - `decision_type=episode_match` uses `decision_result=matched` or `review`; inspect `episode_key`, `title_id`, `candidate`, `match_probability`, `probability_threshold`, and `decision_reason` in each entry's extras/reason. When `candidate=none`, the logged probability belongs to `none`, not an episode. On evidence/API failure it is zero, not a successful negative classification.
    - TV title exclusions carry their evidence: `outlier_bar_seconds`/`weighted_median_seconds` on `gross_runtime_outlier`, `expected_runtimes_seconds` on `expected_runtime_mismatch`/`over_expected_episode_count` — compare the excluded title's `duration` against these to judge the exclusion
-   - `decision_type=reference_search` — reference subtitle candidate quality and suspect/fallback selections
    - Asset keys are PERMANENT placeholder identifiers (stable-key model): `episodeid` never renames `s01_001`-style keys. Episode identity lives in `envelope.episodes[]` fields (`season`, `episode`, `episode_end`) -- join assets to episodes by key and read identity from those fields. Placeholder-looking keys in logs, review reasons, and final routing are correct, not a defect
    - **Do not stop at episode-ID quality.** If organizer/review routing is implicated, compare per-episode review state against final destinations.
 
@@ -200,24 +198,24 @@ Analyze the `rip_cache` section from the audit output:
 **TV only.** Analyze `envelope.episodes`, `envelope.attributes`, and `item.needs_review`:
 
 1. **Content ID provenance**: Check `envelope.attributes.content_id`
-   - `method` should describe the matching path used
-   - `reference_source` should explain where references came from
-   - `episodes_synchronized` should be `true` after successful identification
-   - `completed` distinguishes successful completion from degraded early exit
+   - Expect `method=whisperx_jev_episode_choice`, `reference_source=tmdb`, and `review_threshold=0.90`. `reference_episodes` counts catalog entries, not subtitle downloads or titles expected on this disc.
+   - The classifier uses one typed Choice per full primary-audio transcript against every canonical episode in the trusted TMDB season plus `none`. There is no reference-subtitle, similarity, disc-position shortlist, or forced hole-filling fallback.
+   - Read `transcribed_episodes`, `matched_episodes`, `unresolved_episodes`, and `review_episodes`. `completed=true` means the classification pass finished, not that every title matched or cleared review. Current per-episode review flags remain authoritative: concurrent encoding can add review flags after the summary was calculated.
 
-2. **Episode manifest review**: `analysis.episode_stats` provides pre-computed `confidence_min/max/mean`, `below_070/080/090` counts, `unresolved` count, `placeholder_only`, and `sequence_contiguous` for the overview. Use these for the summary, but still review the full `envelope.episodes[]` manifest for per-episode details. Confidence thresholds:
-   - **CRITICAL** (< 0.70): Episode ordering likely wrong. Check `item.needs_review`
-   - **WARNING** (0.70-0.80): Marginal confidence
-   - **OK** (> 0.80): High confidence match
-   - **Zero** (0.0): Unresolved episode
-   - For `decision_type=episode_match` groups, inspect `confidence_quality` before treating an accepted score as risky. `decisive_low_similarity` means text similarity is lower than a clear match but runner-up margins are strong enough for deterministic acceptance; it should not require `decision_reason=llm_verified`. `ambiguous` means margins were not decisive. `contested` is review-worthy.
+2. **Episode manifest review**: Use `analysis.episode_stats.probability_min/max/mean`, `below_090`, `unresolved`, `placeholder_only`, and `sequence_contiguous` for the overview, then inspect every `envelope.episodes[]` entry.
+   - Probability aggregates and `below_090` cover resolved identities only. A resolved identity below 0.90 (including zero) is **CRITICAL**: it violates the acceptance rule. A probability of exactly 0.90 is accepted; it is not Jev's separate confidence statistic.
+   - `episode=0` means unresolved. A positive stored `match_probability` on such an entry is a rejected candidate's probability, not an accepted identity. Zero can mean abstention or unavailable evidence/classification; distinguish these using the decision reason.
+   - Unresolved titles are **WARNING** review outcomes, not proof of mislabeling or extras. Investigate missing/unreadable/empty transcripts, incomplete titles/overviews, invalid catalogs, classifier failures, or insufficient distinctive evidence. Catalogs allow at most 254 episodes plus `none`; transcript text plus catalog/instructions must fit 96 KiB, with no truncation. Server token-limit failures also route to review.
 
 3. **Canonical match outcomes live in `episodes[]`**:
-   - Verify all episodes have sensible resolved/unresolved state
-   - Review `match_confidence`, `needs_review`, and `review_reason` per episode
-   - Minimum accepted similarity score is 0.58 — scores near this floor warrant scrutiny
+   - Review `season`, `episode`, `episode_end`, `episode_title`, `match_probability`, `needs_review`, and `review_reason`. Never infer episode identity from a placeholder key.
+   - Preserve canonical TMDB numbering. Runtime must not invent episode ranges or shift later episode numbers. High probability may identify only the dominant episode in a composite; it does not prove that the entire file is one episode.
+   - Do not read transcript/subtitle cue text to verify a match. This read-only metadata audit can verify decision integrity and structural evidence, not independently prove semantic episode identity; state that limit when relevant.
 
-4. **Episode sequence continuity**: `analysis.episode_stats.sequence_contiguous` and `episode_range` are pre-computed. If not contiguous, inspect `envelope.episodes[]` for gaps or duplicates indicating matching errors
+4. **Structural safety and persistence**:
+   - Inspect overlaps/duplicate assignments, missing source or TMDB runtimes, and runtime differences exceeding `max(300 seconds, 25% of expected runtime)`. Disc 1 starting after E1 or a resolved subset with multiple gaps also triggers review. These safeguards flag every resolved title in an unsafe set without changing identities; they cannot detect every composite.
+   - Use `analysis.episode_stats.sequence_contiguous` and `episode_range` to investigate gaps, not to force a permutation. A contiguous sequence alone does not prove disc completeness.
+   - Check that all uncertainty/safety reasons survive into per-episode review flags and final routing, along with review flags and assets written by concurrent encoding. A lost review flag or overwritten encoding asset is a persistence bug, not a reason to hand-edit the output.
 
 ### Phase 3c: Final Output Routing Validation (post-organizing items, especially TV with review flags)
 
@@ -413,9 +411,9 @@ Analyze commentary decisions from `analysis.decision_groups` and audio streams f
 | Extra/forced/default subtitle | Apply | `final_validation` failed check naming the stream count, the forced flag, or the default flag | Incorrect subtitle output; the apply stage routes it to review. Without a matching failed check the file is stale, not pipeline output |
 | Subtitles not muxed | Apply | WARN `event_type=mux_error` with a `subtitle_mux:` review reason, or a `final_validation` failed check reporting 0 subtitle streams for an adopted title | Loom ignores sidecar subtitle files, so the delivered file has no visible subtitles; a `source=none` title with no subtitle stream is NOT this pattern |
 | Unlabeled subtitles | Apply | `final_validation` failed check `subtitle label ... does not identify language ...` | Subtitle display issue; output routed to review |
-| Low episode match confidence | Episode ID | `envelope.episodes[].match_confidence` < 0.70 | Episodes may be mislabeled |
-| Decisive low-similarity episode match | Episode ID | `decision_type=episode_match` with `confidence_quality=decisive_low_similarity` and strong margins | Usually not a defect; explain as lower transcript/reference overlap rather than confusion with another episode |
-| Episodes unresolved | Episode ID | `item.needs_review=true`, episodes with `episode=0` | Placeholder names in review_dir |
+| Accepted identity below threshold | Episode ID | Resolved `envelope.episodes[]` entry with `match_probability` < 0.90 | CRITICAL acceptance-rule violation, even at 0.89 |
+| Unsafe episode set | Episode ID | `contentid_matches` result `resolved_episodes_routed_to_review`; overlapping assignments, runtime or sequence review reasons | All resolved titles require review; high probability does not override structural safety |
+| Episodes unresolved | Episode ID | `episode_match` result `review`, episodes with `episode=0` | WARNING; diagnose abstention/evidence failure, never assume extras |
 | Episode sequence gaps | Episode ID | Non-sequential episode numbers in `envelope.episodes[]` | Missing episodes or matching error |
 | Per-episode rip failure | Ripping | `envelope.assets.ripped[]` with `status: "failed"` | Episode missing from pipeline |
 | Per-episode encode failure | Encoding | `envelope.assets.encoded[]` with `status: "failed"` | Episode will not appear in Loom |
@@ -445,7 +443,6 @@ These details are optional context. Some are parsed into decision groups when de
 | TMDB candidate scoring | Identification | DEBUG `decision_type=tmdb_search`; final selection is visible at INFO as `tmdb_match` |
 | TV `below_min_title_length` exclusions | Identification | DEBUG `tv title excluded` (other exclusion reasons are INFO with evidence attrs) |
 | Audio candidate scoring | Audio Analysis | Raw DEBUG `audio candidate scored`; final selection is visible at INFO as `audio_selection` |
-| Content-ID pending claims | Episode ID | DEBUG `content ID pending claim` — full per-rip candidate scores behind unresolved/contested outcomes |
 | Reel internals (chunk plan, CVVDP target-quality config, CRF search, timings) | Encoding | DEBUG `reel verbose` |
 | SRT validation observations | Subtitles | DEBUG `SRT validation observation` (per-check detail); the INFO `SRT validation QC summary` and `SRT validation issue` lines carry the verdicts |
 | Item stage derived | All | DEBUG; native stage start/terminal events are in `transitions`, while the INFO narrative is the workflow decision pair + `item_complete` |
@@ -475,10 +472,10 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 
 **Decision traces:**
 - `analysis.decision_groups` already provides the deduplication -- show identical repeats as `"type x{count}: result (reason)"`; expand a group's `entries` only for decisions with different outcomes, notable parameter variations, or anomalous confidence/scores
-- For episode matches below 0.90, use `confidence_quality` and margins from `episode_match` extras to distinguish true ambiguity from `decisive_low_similarity` (strong margins, weaker transcript overlap). Do not file a finding for `decisive_low_similarity` when margins are strong and no review routing occurred.
+- For episode decisions, show candidate, probability, the 0.90 rule, and match/review reason. Distinguish an accepted identity below threshold (a bug) from an unresolved candidate below threshold (correct abstention requiring review); `candidate=none` carries P(none).
 
 **Episode manifest:**
-- Always show the full per-episode table with confidence scores, matched episode numbers, and titles. Episode identification is a core pipeline feature and the manifest is the primary evidence of correctness. This table is never compressed.
+- Always show the full per-episode table with episode probabilities, canonical episode numbers, titles, and review flags/reasons. The manifest records the pipeline's decisions, not independent semantic verification. This table is never compressed.
 
 **External validation:**
 - When all checks confirm, use a compact paragraph rather than multi-level section/subsection structure
@@ -553,10 +550,11 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 
 #### Episode Identification (if phase_episode_id)
 - Content ID method: <envelope.attributes.content_id.method>
-- Episodes synchronized: <envelope.attributes.content_id.episodes_synchronized>
-- Confidence overview: <from analysis.episode_stats: min/max/mean, below thresholds, unresolved count>
-- Episode manifest: <full per-episode table with confidence scores; if `placeholder_only=true` and episodeid has not run yet, label this as a placeholder episode inventory>
-- Sequence continuity: <analysis.episode_stats.sequence_contiguous, episode_range>
+- Catalog/completion: <content_id.reference_source, reference_episodes, completed; completion does not mean every title cleared review>
+- Probability overview: <analysis.episode_stats.probability_min/max/mean and below_090 for resolved identities; unresolved count; content_id.review_episodes snapshot>
+- Episode manifest: <full per-episode table with match_probability, canonical numbers/titles, and current review flags/reasons; pre-episodeid placeholders are an inventory, not failed matches>
+- Structural safety: <runtime, overlap, and sequence reasons; sequence_contiguous and episode_range; review routing and concurrent asset/flag preservation>
+- Verification scope: <decision/metadata integrity only; semantic identity and file completeness are not independently established by probability>
 
 #### Encoded File (if phase_encoded)
 
@@ -587,7 +585,7 @@ The analysis must remain exhaustive, but the *presentation* should be proportion
 - Content review: <not performed; subtitle text is out of scope. For skips, name the upstream cause; recommend subtitle-specific recovery only for a genuine no-verified-candidate outcome>
 
 #### Commentary (if phase_commentary)
-- Decisions: <from analysis.decision_groups; for Jev include P(commentary) and its 0.65 rule, not episode-confidence bands>
+- Decisions: <from analysis.decision_groups; for Jev include P(commentary) and its 0.65 rule, not the episode-identification 0.90 gate>
 - Conservative fallbacks: <classification/transcription failures, if any; zero stored confidence is not a successful negative decision>
 - Tracks in output: <count from media probes>
 
@@ -619,11 +617,11 @@ After running `spindle queue audit`, check only the phases flagged as `true` in 
 - [ ] If TV: validated per-episode ripped assets in `envelope.assets.ripped`
 
 ### Post-Episode-Identification (phase_episode_id)
-- [ ] Checked content ID method in `envelope.attributes`
-- [ ] Reviewed episode manifest with MatchConfidence scores
-- [ ] Verified episode sequence continuity
-- [ ] Checked `content_id_matches` attribute completeness
-- [ ] Verified `envelope.attributes.content_id.episodes_synchronized` flag
+- [ ] Checked `envelope.attributes.content_id` method, TMDB catalog, completion, and matched/unresolved/review counts
+- [ ] Reviewed every manifest entry's `match_probability` against 0.90; distinguished rejected candidates and `none` from accepted identities
+- [ ] Traced unresolved outcomes to catalog/evidence/classifier reasons without inspecting transcript text or assuming extras
+- [ ] Checked runtime, overlap, sequence, and canonical-numbering safeguards; did not infer completeness from high probability
+- [ ] Verified current per-episode review flags, concurrent encoding assets, and final routing; did not treat summary completion as review clearance
 
 ### Post-Encoding (phase_encoded, phase_crop)
 - [ ] Read `analysis.final_validation`: confirmed a verdict exists for every output, investigated failed checks and unavailable entries, and did not rely solely on Reel's persisted validation verdict

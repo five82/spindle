@@ -45,7 +45,7 @@ func digestReport() *Report {
 		},
 		Envelope: &ripspec.Envelope{
 			Episodes: []ripspec.Episode{
-				{Key: "s01_001", TitleID: 1, Season: 1, Episode: 3, MatchConfidence: 0.95, EpisodeTitle: "Third"},
+				{Key: "s01_001", TitleID: 1, Season: 1, Episode: 3, MatchProbability: 0.95, EpisodeTitle: "Third"},
 				{Key: "s01_002", TitleID: 2, NeedsReview: true, ReviewReason: "unresolved"},
 			},
 		},
@@ -130,7 +130,7 @@ func TestRenderDigestCoreSections(t *testing.T) {
 		"08-11 22:20:01 ripped title 0",
 		"08-11 22:30:01 ripped title 1",
 		// Episode manifest with unresolved flagged.
-		"s01_001 title_id=1 S01E03 conf=0.95",
+		"s01_001 title_id=1 S01E03 probability=0.95",
 		"s01_002 title_id=2 UNRESOLVED",
 		"REVIEW: unresolved",
 		"## Final output validation (apply stage, against ripped source)",

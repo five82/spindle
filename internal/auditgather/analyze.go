@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/five82/spindle/internal/contentid"
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
@@ -224,7 +223,6 @@ func selectNotableDecisions(decisions []LogDecision) []LogDecision {
 		logs.DecisionEpisodeIDSkip:            true,
 		logs.DecisionEpisodePlaceholders:      true,
 		logs.DecisionEpisodeMatch:             true,
-		logs.DecisionContentIDCandidates:      true,
 		logs.DecisionContentIDMatches:         true,
 		logs.DecisionReferenceSearch:          true,
 		logs.DecisionTranscriptionAsset:       true,
@@ -572,44 +570,6 @@ func computeRoutingSummary(r *Report) *RoutingSummary {
 	return summary
 }
 
-func countDecisionConfidenceQualities(decisions []LogDecision) (contested, ambiguous, decisiveLowSimilarity int) {
-	for _, d := range decisions {
-		if d.DecisionType != logs.DecisionEpisodeMatch || d.Extras == nil {
-			continue
-		}
-		quality, _ := d.Extras["confidence_quality"].(string)
-		switch quality {
-		case contentid.ConfidenceQualityContested:
-			contested++
-		case contentid.ConfidenceQualityAmbiguous:
-			ambiguous++
-		case contentid.ConfidenceQualityDecisiveLowSimilarity:
-			decisiveLowSimilarity++
-		}
-	}
-	return contested, ambiguous, decisiveLowSimilarity
-}
-
-func countDecisiveLowSimilarityInConfidenceBand(decisions []LogDecision, minConfidence, maxConfidence float64) int {
-	count := 0
-	for _, d := range decisions {
-		if d.DecisionType != logs.DecisionEpisodeMatch || d.Extras == nil {
-			continue
-		}
-		if quality, _ := d.Extras["confidence_quality"].(string); quality != contentid.ConfidenceQualityDecisiveLowSimilarity {
-			continue
-		}
-		confidence, ok := d.Extras["match_confidence"].(float64)
-		if !ok {
-			continue
-		}
-		if confidence >= minConfidence && confidence < maxConfidence {
-			count++
-		}
-	}
-	return count
-}
-
 // computeEpisodeConsistency compares media profiles across TV episodes.
 // Returns nil if fewer than 2 valid probes exist.
 func computeEpisodeConsistency(probes []MediaFileProbe) *EpisodeConsistency {
@@ -825,55 +785,44 @@ func analyzeCrop(snap *encodingstate.Snapshot) *CropAnalysis {
 	return ca
 }
 
-// computeEpisodeStats summarizes confidence and coverage for episodes.
+// computeEpisodeStats summarizes resolved-identity probabilities and coverage.
+// Abstentions can retain a rejected candidate's probability, not a match.
 func computeEpisodeStats(episodes []ripspec.Episode) *EpisodeStats {
 	if len(episodes) == 0 {
 		return nil
 	}
 
 	stats := &EpisodeStats{Count: len(episodes), PlaceholderOnly: true}
-	var confidences []float64
+	var probabilities []float64
 	var episodeNumbers []int
 
 	for _, ep := range episodes {
 		if ep.Episode > 0 {
 			stats.Matched++
-			episodeNumbers = append(episodeNumbers, ep.Episode)
-			if ep.EpisodeLast() > ep.Episode {
-				episodeNumbers = append(episodeNumbers, ep.EpisodeLast())
+			probabilities = append(probabilities, ep.MatchProbability)
+			for n := ep.Episode; n <= ep.EpisodeLast(); n++ {
+				episodeNumbers = append(episodeNumbers, n)
 			}
 			stats.PlaceholderOnly = false
 		} else {
 			stats.Unresolved++
 		}
-		if ep.MatchConfidence > 0 || ep.NeedsReview || ep.ReviewReason != "" {
+		if ep.MatchProbability > 0 || ep.NeedsReview || ep.ReviewReason != "" {
 			stats.PlaceholderOnly = false
-		}
-		if ep.MatchConfidence > 0 {
-			confidences = append(confidences, ep.MatchConfidence)
 		}
 	}
 
-	if len(confidences) > 0 {
-		stats.ConfidenceMin = slices.Min(confidences)
-		stats.ConfidenceMax = slices.Max(confidences)
+	if len(probabilities) > 0 {
+		stats.ProbabilityMin = slices.Min(probabilities)
+		stats.ProbabilityMax = slices.Max(probabilities)
 		var sum float64
-		for _, c := range confidences {
-			sum += c
-		}
-		stats.ConfidenceMean = math.Round(sum/float64(len(confidences))*1000) / 1000
-
-		for _, c := range confidences {
-			if c < 0.90 {
+		for _, p := range probabilities {
+			sum += p
+			if p < 0.90 {
 				stats.Below090++
 			}
-			if c < 0.80 {
-				stats.Below080++
-			}
-			if c < 0.70 {
-				stats.Below070++
-			}
 		}
+		stats.ProbabilityMean = math.Round(sum/float64(len(probabilities))*1000) / 1000
 	}
 
 	if len(episodeNumbers) > 0 {
@@ -1046,28 +995,6 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 				})
 			}
 		}
-		contested, ambiguous, decisiveLowSimilarity := countDecisionConfidenceQualities(r.Logs.Decisions)
-		if contested > 0 {
-			anomalies = append(anomalies, Anomaly{
-				Severity: "warning",
-				Category: "episodes",
-				Message:  fmt.Sprintf("%d episode match decision(s) marked contested", contested),
-			})
-		}
-		if ambiguous > 0 {
-			anomalies = append(anomalies, Anomaly{
-				Severity: "info",
-				Category: "episodes",
-				Message:  fmt.Sprintf("%d episode match decision(s) marked ambiguous", ambiguous),
-			})
-		}
-		if decisiveLowSimilarity > 0 {
-			anomalies = append(anomalies, Anomaly{
-				Severity: "info",
-				Category: "episodes",
-				Message:  fmt.Sprintf("%d episode match decision(s) had decisive margins but lower transcript similarity", decisiveLowSimilarity),
-			})
-		}
 	}
 
 	if r.Envelope != nil {
@@ -1112,12 +1039,6 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 					Category: "episodes",
 					Message:  "episode identification provenance summary is incomplete",
 				})
-			case !summary.Completed && summary.EpisodesSynchronized:
-				anomalies = append(anomalies, Anomaly{
-					Severity: "warning",
-					Category: "episodes",
-					Message:  "episode identification provenance summary has inconsistent completion state",
-				})
 			}
 		}
 	}
@@ -1132,36 +1053,16 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 			})
 		} else if a.EpisodeStats.Unresolved > 0 {
 			anomalies = append(anomalies, Anomaly{
-				Severity: "critical",
+				Severity: "warning",
 				Category: "episodes",
 				Message:  fmt.Sprintf("%d unresolved episode(s)", a.EpisodeStats.Unresolved),
 			})
 		}
-		if a.EpisodeStats.Below070 > 0 {
+		if a.EpisodeStats.Below090 > 0 {
 			anomalies = append(anomalies, Anomaly{
 				Severity: "critical",
 				Category: "episodes",
-				Message:  fmt.Sprintf("%d episode(s) with confidence below 0.70", a.EpisodeStats.Below070),
-			})
-		}
-		below080only := a.EpisodeStats.Below080 - a.EpisodeStats.Below070
-		if below080only > 0 {
-			anomalies = append(anomalies, Anomaly{
-				Severity: "warning",
-				Category: "episodes",
-				Message:  fmt.Sprintf("%d episode(s) with confidence below 0.80", below080only),
-			})
-		}
-		below090only := a.EpisodeStats.Below090 - a.EpisodeStats.Below080
-		if below090only > 0 {
-			message := fmt.Sprintf("%d episode(s) with confidence below 0.90", below090only)
-			if r.Logs != nil && countDecisiveLowSimilarityInConfidenceBand(r.Logs.Decisions, 0.80, 0.90) == below090only {
-				message = fmt.Sprintf("%d decisive episode match(es) below 0.90 with strong margins", below090only)
-			}
-			anomalies = append(anomalies, Anomaly{
-				Severity: "info",
-				Category: "episodes",
-				Message:  message,
+				Message:  fmt.Sprintf("%d resolved episode(s) below the 0.90 acceptance probability", a.EpisodeStats.Below090),
 			})
 		}
 		if !a.EpisodeStats.SequenceContiguous && a.EpisodeStats.Matched > 0 {

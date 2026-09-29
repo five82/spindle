@@ -18,7 +18,7 @@ func TestDetectAnomaliesReportsOperationalFailures(t *testing.T) {
 		Media:     []MediaFileProbe{{Path: "bad.mkv", Error: "probe failed"}},
 	}
 	analysis := &Analysis{
-		EpisodeStats: &EpisodeStats{Matched: 1, Unresolved: 1, Below070: 1, Below080: 2, Below090: 3, EpisodeRange: "1,3"},
+		EpisodeStats: &EpisodeStats{Matched: 3, Unresolved: 1, Below090: 3, EpisodeRange: "1,3"},
 		AssetHealth:  &AssetHealth{Ripped: &AssetCounts{Failed: 1}, Encoded: &AssetCounts{Failed: 2}, Subtitled: &AssetCounts{Failed: 1}, Final: &AssetCounts{Failed: 1}, Transcript: &AssetCounts{Failed: 1}},
 	}
 	anomalies := detectAnomalies(report, analysis)
@@ -29,9 +29,8 @@ func TestDetectAnomaliesReportsOperationalFailures(t *testing.T) {
 	for text, severity := range map[string]string{
 		"item failed at ripping: drive lost": "critical", "item needs review: inspect source": "warning",
 		"1 error(s) in item log": "critical", "1 warning(s) in item log": "warning",
-		"1 episode(s) explicitly flagged for review": "warning", "1 unresolved episode(s)": "critical",
-		"1 episode(s) with confidence below 0.70": "critical", "1 episode(s) with confidence below 0.80": "warning",
-		"1 episode(s) with confidence below 0.90": "info", "non-contiguous episode sequence: 1,3": "warning",
+		"1 episode(s) explicitly flagged for review": "warning", "1 unresolved episode(s)": "warning",
+		"3 resolved episode(s) below the 0.90 acceptance probability": "critical", "non-contiguous episode sequence: 1,3": "warning",
 		"encoding validation failed": "critical", "encoding error: encode crashed": "critical", "encoding warning: slow disk": "warning",
 		"1 failed ripped asset(s)": "critical", "2 failed encoded asset(s)": "critical", "1 failed transcript asset(s)": "critical",
 		"1 media probe(s) failed": "warning",
@@ -47,7 +46,7 @@ func TestDetectAnomaliesReportsOperationalFailures(t *testing.T) {
 
 func TestDetectAnomaliesFlagsIncompleteContentIDProvenance(t *testing.T) {
 	report := &Report{StageGate: StageGate{MediaType: "tv", PhaseEpisodeID: true}, Envelope: &ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "tv"}}}
-	for _, summary := range []*ripspec.ContentIDSummary{{}, {Method: "transcript", ReferenceSource: "reference", EpisodesSynchronized: true}} {
+	for _, summary := range []*ripspec.ContentIDSummary{{}, {Method: "whisperx_jev_episode_choice"}} {
 		report.Envelope.Attributes.ContentID = summary
 		anomalies := detectAnomalies(report, &Analysis{})
 		if len(anomalies) != 1 || anomalies[0].Category != "episodes" || anomalies[0].Severity != "warning" {

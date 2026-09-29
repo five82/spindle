@@ -53,14 +53,11 @@ func TestLoadNoConfigReturnsDefaults(t *testing.T) {
 	if cfg.Library.ShortsDir != "shorts" {
 		t.Errorf("expected shorts directory %q, got %q", "shorts", cfg.Library.ShortsDir)
 	}
-	if cfg.LLM.Model != "deepseek/deepseek-v4.1-flash" {
-		t.Errorf("expected default LLM model deepseek/deepseek-v4.1-flash, got %q", cfg.LLM.Model)
+	if cfg.LLM.BaseURL != "https://openrouter.ai/api/v1" {
+		t.Errorf("unexpected LLM API prefix: %q", cfg.LLM.BaseURL)
 	}
 	if cfg.Commentary.SimilarityThreshold != 0.92 {
 		t.Errorf("expected default similarity threshold 0.92, got %f", cfg.Commentary.SimilarityThreshold)
-	}
-	if cfg.ContentID.ClearMatchMargin != 0.05 {
-		t.Errorf("expected clear_match_margin default 0.05, got %f", cfg.ContentID.ClearMatchMargin)
 	}
 }
 
@@ -324,7 +321,7 @@ func TestSampleConfigIsValidTOML(t *testing.T) {
 	expectedSections := []string{
 		"tmdb", "paths", "api", "loom", "library",
 		"notifications", "subtitles", "rip_cache", "disc_id_cache",
-		"makemkv", "llm", "commentary", "content_id", "logging",
+		"makemkv", "llm", "commentary", "logging",
 	}
 	for _, section := range expectedSections {
 		if _, ok := parsed[section]; !ok {
@@ -532,58 +529,6 @@ func TestMakeMKVMinTitleLengthValidation(t *testing.T) {
 	if !strings.Contains(err.Error(), "min_title_length") {
 		t.Errorf("expected error about min_title_length, got: %s", err.Error())
 	}
-}
-
-func TestLoadContentIDDefaultsAndOverride(t *testing.T) {
-	dir := t.TempDir()
-
-	t.Run("default when absent", func(t *testing.T) {
-		configPath := filepath.Join(dir, "contentid-default.toml")
-		content := `
-[tmdb]
-api_key = "from-file"
-`
-		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		cfg, err := Load(configPath, nil)
-		if err != nil {
-			t.Fatalf("Load failed: %v", err)
-		}
-		if cfg.ContentID.ClearMatchMargin != 0.05 {
-			t.Fatalf("expected clear_match_margin default 0.05, got %f", cfg.ContentID.ClearMatchMargin)
-		}
-		if cfg.ContentID.DecisiveAutoAcceptThreshold != 0.80 {
-			t.Fatalf("expected decisive_auto_accept_threshold default 0.80, got %f", cfg.ContentID.DecisiveAutoAcceptThreshold)
-		}
-	})
-
-	t.Run("explicit override preserved", func(t *testing.T) {
-		configPath := filepath.Join(dir, "contentid-override.toml")
-		content := `
-[tmdb]
-api_key = "from-file"
-
-[content_id]
-clear_match_margin = 0.08
-decisive_auto_accept_threshold = 0.82
-`
-		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		cfg, err := Load(configPath, nil)
-		if err != nil {
-			t.Fatalf("Load failed: %v", err)
-		}
-		if cfg.ContentID.ClearMatchMargin != 0.08 {
-			t.Fatalf("expected explicit clear_match_margin to be preserved, got %f", cfg.ContentID.ClearMatchMargin)
-		}
-		if cfg.ContentID.DecisiveAutoAcceptThreshold != 0.82 {
-			t.Fatalf("expected explicit decisive_auto_accept_threshold to be preserved, got %f", cfg.ContentID.DecisiveAutoAcceptThreshold)
-		}
-	})
 }
 
 func TestSourcePathPopulated(t *testing.T) {

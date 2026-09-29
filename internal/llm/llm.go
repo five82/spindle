@@ -8,20 +8,16 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/logs"
 )
 
-const defaultModel = "deepseek/deepseek-v4.1-flash"
-
-// Client sends chat completions and typed decisions through OpenRouter.
+// Client sends typed Jev decisions through OpenRouter.
 type Client struct {
 	apiKey  string
 	baseURL string
-	model   string
 	referer string
 	title   string
 	client  *http.Client
@@ -36,11 +32,7 @@ func New(cfg config.LLMConfig, logger *slog.Logger) *Client {
 	}
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
-		baseURL = "https://openrouter.ai/api/v1/chat/completions"
-	}
-	model := cfg.Model
-	if model == "" {
-		model = defaultModel
+		baseURL = "https://openrouter.ai/api/v1"
 	}
 	logger = logs.Default(logger)
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
@@ -50,7 +42,6 @@ func New(cfg config.LLMConfig, logger *slog.Logger) *Client {
 	return &Client{
 		apiKey:  cfg.APIKey,
 		baseURL: baseURL,
-		model:   model,
 		referer: cfg.Referer,
 		title:   cfg.Title,
 		client:  &http.Client{Timeout: timeout},
@@ -58,39 +49,7 @@ func New(cfg config.LLMConfig, logger *slog.Logger) *Client {
 	}
 }
 
-// CompleteJSON sends a chat completion request with system and user messages,
-// then parses the response content as JSON into result.
-// Returns an error if the client is nil (not configured).
-func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt string, result any) error {
-	if c == nil {
-		return fmt.Errorf("llm client not configured")
-	}
-
-	request := map[string]any{
-		"model":           c.model,
-		"messages":        []map[string]string{{"role": "system", "content": systemPrompt}, {"role": "user", "content": userPrompt}},
-		"response_format": map[string]string{"type": "json_object"},
-		// Keep classification at low effort even when a preset selects the model.
-		"reasoning": map[string]string{"effort": "low"},
-	}
-	return c.complete(ctx, c.baseURL, c.model, request, func(body []byte) error {
-		var resp struct {
-			Choices []struct{ Message struct{ Content string } }
-		}
-		if err := json.Unmarshal(body, &resp); err != nil {
-			return fmt.Errorf("unmarshal chat response: %w", err)
-		}
-		if len(resp.Choices) == 0 {
-			return fmt.Errorf("no choices in response")
-		}
-		if err := json.Unmarshal([]byte(sanitizeJSON(resp.Choices[0].Message.Content)), result); err != nil {
-			return fmt.Errorf("unmarshal response: %w", err)
-		}
-		return nil
-	})
-}
-
-// complete shares transport, retries and request logging across API surfaces.
+// complete performs a typed request with retries and request logging.
 func (c *Client) complete(ctx context.Context, endpoint, model string, request any, decode func([]byte) error) error {
 	bodyBytes, err := json.Marshal(request)
 	if err != nil {
@@ -205,14 +164,4 @@ func (c *Client) doRequest(ctx context.Context, endpoint string, bodyBytes []byt
 		return nil, httpErr
 	}
 	return respBody, nil
-}
-
-// sanitizeJSON strips markdown code fences and surrounding whitespace from s.
-func sanitizeJSON(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	s = strings.TrimSpace(s)
-	return s
 }
