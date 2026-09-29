@@ -107,6 +107,10 @@ where anomalies exist.
   ceiling measured, is worth reporting
 - A movie's encoding task holding the `encode` claim with no encoded output
   while its rip runs — the deferred plan is expected; see Stage Gating above
+- A resolved `disk_space_wait` followed by `disk_space_available` when the
+  item later succeeds — report the pause as context, not a processing defect.
+  An active `disk_space` warning needs an operator-facing free-space action;
+  an actual later ENOSPC needs its own root-cause investigation
 - An identification-failed item having no rip, encode, or staging artifacts —
   that is the fatal no-TMDB-match rule working, not missing work
 

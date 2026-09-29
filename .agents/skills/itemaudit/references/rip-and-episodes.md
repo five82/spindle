@@ -4,6 +4,10 @@ Analyze the `rip_cache` section from the audit output:
 
 1. **Verify** `rip_cache.found` is true — if false, check `rip_cache.disabled`
    first (cache turned off in config); otherwise the entry may have been pruned
+   before a new cache write to preserve the cap and 100 GiB staging cushion,
+   or the new copy may have been skipped. Correlate with `rip cache copy skipped`
+   (`decision_result=skipped`) and `cache_prune_error`/`cache_space_check_error`
+   logs; absence from cache alone is not a failed item.
 2. **Check metadata**:
    - `disc_title` matches expected content
    - `cached_at`, `title_count`, and `total_bytes` look plausible

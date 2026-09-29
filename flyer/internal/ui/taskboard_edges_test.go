@@ -9,6 +9,19 @@ import (
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
+func TestDiskWaitIsVisibleInFlyerTaskBoard(t *testing.T) {
+	m := newAppTestModel(t)
+	for _, state := range []string{"pending", "running"} {
+		item := spindle.QueueItem{Tasks: []spindle.Task{{Type: "ripping", State: state, Activities: []spindle.Activity{{Operation: "disk_space", State: "waiting", Message: "Waiting for disk space: need 188 GiB, available 90 GiB"}}}}}
+		var b strings.Builder
+		m.renderTaskBoard(&b, item, m.theme.Styles(), 100)
+		got := stripANSI(b.String())
+		if !strings.Contains(got, "Waiting for disk space") || !strings.Contains(got, "188 GiB") || !strings.Contains(got, "90 GiB") {
+			t.Fatalf("%s disk warning missing: %s", state, got)
+		}
+	}
+}
+
 func TestOperationAgeControlsDisclosure(t *testing.T) {
 	now := time.Date(2026, 9, 28, 1, 0, 0, 0, time.UTC)
 	for _, age := range []time.Duration{100 * time.Millisecond, 999 * time.Millisecond, time.Second, 4 * time.Second, 9999 * time.Millisecond, 10 * time.Second, 10 * time.Minute} {

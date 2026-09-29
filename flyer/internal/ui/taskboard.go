@@ -98,9 +98,14 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 		now = m.snapshot.LastUpdated
 	}
 	var activities []spindle.Activity
+	diskWaiting := false
 	for _, a := range task.Activities {
 		if a.State == "waiting" && (task.State == "pending" || task.State == "running") && !item.UserStopped {
 			status, detail = "Waiting", a.Message
+			if a.Operation == "disk_space" {
+				diskWaiting = true
+				style = styles.WarningText
+			}
 			if !a.Started().IsZero() {
 				detail += " (" + formatDuration(now.Sub(a.Started())) + ")"
 			}
@@ -109,7 +114,7 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 			activities = append(activities, a)
 		}
 	}
-	if len(activities) > 0 && status == "Waiting" {
+	if len(activities) > 0 && status == "Waiting" && !diskWaiting {
 		status, style = "Running", styles.AccentText
 	}
 	row := fmt.Sprintf("%-7s %-12s", status, info.label)

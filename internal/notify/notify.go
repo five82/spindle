@@ -22,6 +22,7 @@ const (
 	EventReviewRequired         Event = "review_required"
 	EventPipelineComplete       Event = "pipeline_complete"
 	EventError                  Event = "error"
+	EventDiskSpaceLow           Event = "disk_space_low"
 	EventTest                   Event = "test"
 )
 
@@ -115,7 +116,7 @@ func tags(event Event) string {
 		return "mag"
 	case EventRipCacheHit, EventRipComplete:
 		return "cd"
-	case EventReviewRequired:
+	case EventReviewRequired, EventDiskSpaceLow:
 		return "warning"
 	case EventPipelineComplete:
 		return "heavy_check_mark"

@@ -15,6 +15,7 @@ import (
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
+	"github.com/five82/spindle/internal/ripcache"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
 )
@@ -90,6 +91,14 @@ type Manager struct {
 	// metricsPath, when set, is the JSONL file that receives one record per
 	// completed item (see metrics.go). Empty disables metrics.
 	metricsPath string
+	stagingDir  string
+	ripCache    *ripcache.Store
+	diskFree    func(string) (int64, error) // test override; nil uses statfs
+}
+
+// SetDiskSpacePath enables disk admission on the staging volume.
+func (m *Manager) SetDiskSpacePath(path string, cache *ripcache.Store) {
+	m.stagingDir, m.ripCache = path, cache
 }
 
 // SetMetricsPath enables the per-item completion metrics log at path.
@@ -586,6 +595,10 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 			continue
 		}
 		ps := p.stages[idx]
+
+		if m.waitForDisk(ctx, task, item) {
+			continue
+		}
 
 		claims := ps.Claims
 		if ps.ClaimsFunc != nil {

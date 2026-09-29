@@ -12,12 +12,15 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/five82/spindle/reel"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/encodingstate"
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/notify"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
@@ -25,7 +28,8 @@ import (
 
 // Handler implements stage.Handler for encoding.
 type Handler struct {
-	cfg *config.Config
+	cfg            *config.Config
+	availableSpace func(string) (int64, error) // test override; nil uses statfs
 }
 
 // New creates an encoding handler.
@@ -165,7 +169,6 @@ func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encodedDi
 	logger := sess.Logger
 	env := sess.Env
 	var summary encodeSummary
-
 	for _, job := range jobs {
 		if ctx.Err() != nil {
 			return summary, ctx.Err()
@@ -179,6 +182,49 @@ func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encodedDi
 				"episode_key", job.Key,
 			)
 			continue
+		}
+
+		// A TV encode can remain scheduled while successive titles rip. Check
+		// again for each job, not just when the scheduler starts this stage.
+		if h.cfg.Paths.StagingDir != "" {
+			check := h.availableSpace
+			if check == nil {
+				check = func(path string) (int64, error) {
+					var fs unix.Statfs_t
+					err := unix.Statfs(path, &fs)
+					return int64(fs.Bavail) * int64(fs.Bsize), err
+				}
+			}
+			var warned bool
+			for {
+				free, spaceErr := check(h.cfg.Paths.StagingDir)
+				if spaceErr == nil && free >= 100*(1<<30) {
+					if warned {
+						logger.Info("disk space available for encoding", "decision_type", logs.DecisionStageExecution,
+							"decision_result", "unblocked", "decision_reason", "staging volume has 100 GiB free")
+						_ = sess.Store.RecordEvent(queue.Event{ItemID: sess.Item.ID, TaskID: sess.Task.ID, Type: "disk_space_available", Stage: queue.StageEncoding})
+					}
+					break
+				}
+				message := fmt.Sprintf("Waiting for disk space: need 100 GiB, available %.1f GiB on %s", float64(free)/(1<<30), h.cfg.Paths.StagingDir)
+				if spaceErr != nil {
+					message = fmt.Sprintf("Waiting for disk space: cannot check %s: %v", h.cfg.Paths.StagingDir, spaceErr)
+				}
+				if !warned {
+					warned = true
+					sess.Activity(queue.Activity{Operation: "disk_space", State: "waiting", Message: message})
+					logger.Info("encoding waiting for disk space", "decision_type", logs.DecisionStageExecution,
+						"decision_result", "blocked", "decision_reason", message)
+					_ = sess.Store.RecordEvent(queue.Event{ItemID: sess.Item.ID, TaskID: sess.Task.ID, Type: "disk_space_wait", Stage: queue.StageEncoding, Message: message})
+					_ = notify.SendLogged(ctx, notify.New(h.cfg.Notifications.NtfyTopic, h.cfg.Notifications.RequestTimeout),
+						logger, notify.EventDiskSpaceLow, fmt.Sprintf("Spindle: item %d waiting for disk space", sess.Item.ID), message)
+				}
+				select {
+				case <-ctx.Done():
+					return summary, ctx.Err()
+				case <-time.After(5 * time.Second):
+				}
+			}
 		}
 
 		result, err := h.encodeJob(ctx, sess, encodedDir, job)

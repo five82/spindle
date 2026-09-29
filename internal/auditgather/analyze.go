@@ -962,6 +962,21 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 		})
 	}
 
+	// A disk admission wait is operator-actionable even though it is not a
+	// failed stage or a WARN log; keep it visible in an active item's audit.
+	for _, task := range r.Item.Tasks {
+		if task.State != "pending" && task.State != "running" {
+			continue
+		}
+		for _, activity := range task.Activities {
+			if activity.Operation == "disk_space" && activity.State == "waiting" {
+				anomalies = append(anomalies, Anomaly{
+					Severity: "warning", Category: "disk_space", Message: activity.Message,
+				})
+			}
+		}
+	}
+
 	// Log error/warning counts.
 	if r.Logs != nil {
 		if n := len(r.Logs.Errors); n > 0 {

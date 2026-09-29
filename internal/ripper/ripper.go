@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ type Handler struct {
 	cfg           *config.Config
 	notifier      *notify.Notifier
 	cache         *ripcache.Store
+	cacheFree     func(string) int64 // test override; nil uses statfs
 	monitor       *discmonitor.Monitor
 	titleOverride int // NoTitleOverride = auto-select; >=0 = rip only this MakeMKV title ID
 }
@@ -537,6 +539,58 @@ func (h *Handler) cacheFreshRip(logger *slog.Logger, sess *stage.Session, ripped
 		for _, de := range dirEntries {
 			if info, err := de.Info(); err == nil {
 				totalBytes += info.Size()
+			}
+		}
+	}
+	// The cache cap is a retention limit, not a reservation: prune before
+	// copying so an otherwise healthy rip cannot exhaust the encode cushion.
+	if h.cfg != nil && h.cfg.Paths.StagingDir != "" && h.cfg.RipCache.MaxGiB > 0 {
+		var stagingFS, cacheFS unix.Statfs_t
+		if unix.Statfs(h.cfg.Paths.StagingDir, &stagingFS) == nil &&
+			unix.Statfs(h.cfg.RipCacheDir(), &cacheFS) == nil && stagingFS.Fsid == cacheFS.Fsid {
+			entries, err := h.cache.List()
+			if err != nil {
+				logger.Warn("rip cache space check failed", "event_type", "cache_space_check_error", "error_hint", err.Error(), "impact", "rip not cached")
+				return
+			}
+			var cached int64
+			for _, entry := range entries {
+				cached += entry.TotalBytes
+			}
+			sort.Slice(entries, func(i, j int) bool { return entries[i].CachedAt.Before(entries[j].CachedAt) })
+			limit := int64(h.cfg.RipCache.MaxGiB) << 30
+			free := int64(stagingFS.Bavail) * int64(stagingFS.Bsize)
+			if h.cacheFree != nil {
+				free = h.cacheFree(h.cfg.Paths.StagingDir)
+			}
+			if totalBytes > limit {
+				logger.Info("rip cache copy skipped", "decision_type", logs.DecisionRipCache,
+					"decision_result", "skipped", "decision_reason", "rip exceeds cache cap", "rip_bytes", totalBytes)
+				return
+			}
+			for _, entry := range entries {
+				if cached+totalBytes <= limit {
+					break
+				}
+				if entry.Fingerprint == item.DiscFingerprint {
+					continue
+				}
+				if err := h.cache.Remove(entry.Fingerprint); err != nil {
+					logger.Warn("rip cache prune failed", "event_type", "cache_prune_error", "error_hint", err.Error(), "impact", "rip not cached")
+					return
+				}
+				cached -= entry.TotalBytes
+				if h.cacheFree != nil {
+					free = h.cacheFree(h.cfg.Paths.StagingDir)
+				} else if unix.Statfs(h.cfg.Paths.StagingDir, &stagingFS) == nil {
+					free = int64(stagingFS.Bavail) * int64(stagingFS.Bsize)
+				}
+			}
+			if cached+totalBytes > limit || free < totalBytes+100*(1<<30) {
+				logger.Info("rip cache copy skipped", "decision_type", logs.DecisionRipCache,
+					"decision_result", "skipped", "decision_reason", "cache cap or 100 GiB working-space cushion would be exceeded",
+					"free_bytes", free, "rip_bytes", totalBytes)
+				return
 			}
 		}
 	}

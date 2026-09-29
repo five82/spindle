@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/queue"
@@ -118,6 +119,21 @@ func TestEncodeJobDrainCancellationDoesNotFailAsset(t *testing.T) {
 	}
 	if len(env.Assets.Encoded) != 0 {
 		t.Fatalf("cancellation persisted a failed asset: %+v", env.Assets.Encoded)
+	}
+}
+
+func TestEncodingLowSpaceWaitIsCancelableWithoutRunningWorker(t *testing.T) {
+	h := New(&config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}})
+	h.availableSpace = func(string) (int64, error) { return 1 << 30, nil }
+	sess := encoderSession(t, ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "movie"}})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err := h.encodeJobs(ctx, sess, t.TempDir(), []stage.AssetJob{{Key: "main", Input: ripspec.Asset{Path: "absent.mkv"}}})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("disk wait should stop on deadline before worker starts: %v", err)
+	}
+	if len(sess.Task.Activities) != 1 || sess.Task.Activities[0].Operation != "disk_space" || sess.Task.Activities[0].State != "waiting" {
+		t.Fatalf("disk wait not visible: %+v", sess.Task.Activities)
 	}
 }
 

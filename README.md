@@ -276,6 +276,14 @@ Locations come from the generated configuration:
 - XDG cache: rip cache, disc-ID cache, and OpenSubtitles cache
 - XDG runtime directory, with `/tmp` fallback: daemon socket and lock
 
+The rip-cache size cap controls retention, not free working space. When staging
+space is low, an item waits instead of starting identification (150 GiB floor),
+ripping (at least 150 GiB, or 1.1x the selected title estimate plus 100 GiB),
+or an encode (100 GiB floor). Flyer marks the waiting task in amber; Spindle
+sends one ntfy warning
+when each wait begins. Free space on the staging volume to let processing resume
+automatically. A cache copy is skipped if it would consume the 100 GiB cushion.
+
 Identified library paths include Loom TMDB IDs:
 
 ```text

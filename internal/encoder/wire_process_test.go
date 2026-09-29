@@ -61,6 +61,9 @@ func TestRunEncodingWithWorkerProcess(t *testing.T) {
 			})
 			sess.Logger = testEncoderLogger()
 			h := New(&config.Config{Paths: config.PathsConfig{StagingDir: base}})
+			// /tmp is often a small tmpfs in CI. Model sufficient space while
+			// this test exercises the worker boundary, not disk admission.
+			h.availableSpace = func(string) (int64, error) { return 200 << 30, nil }
 			err := h.Run(context.Background(), sess)
 			if tc.wantError == "" && err != nil || tc.wantError != "" && (err == nil || !strings.Contains(err.Error(), tc.wantError)) {
 				t.Fatalf("Run: %v, want error %q", err, tc.wantError)

@@ -51,6 +51,19 @@ daemon log file has rotated away or is missing.
      are ordered by item `created_at`, so the claim always goes to the oldest
      item still needing it, and under sequential ripping that is also the item
      whose rip completes first.
+   - Disk admission waits: `decision_type=stage_execution` with
+     `decision_result=blocked` / `unblocked` and `disk_space_wait` /
+     `disk_space_available` transitions mean the item paused before a write,
+     not that ripping or encoding failed. Check the persisted task activity
+     (`operation=disk_space`) for required/available GiB, the staging filesystem,
+     and whether the wait is still active. A blocked identification needs 150 GiB;
+     a fresh rip needs max(150 GiB, 1.1x selected title bytes + 100 GiB);
+     encoding needs 100 GiB before dispatch and before each asset. A cache hit
+     uses its cached size instead of selected title estimates. Distinguish an
+     expected low-space wait (operator action) from an actual ENOSPC after the
+     check (check concurrent writes and per-encode scratch usage). The rip
+     cache cap is retention, not a free-space reservation. One ntfy warning
+     is sent on entry into each wait; do not count polling as repeated failures.
    - Warnings/errors and decision entries include `extras` maps with
      non-standard log fields for diagnostic context, including the underlying
      `extras.error` when logged. Jev commentary decisions carry
