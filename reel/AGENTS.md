@@ -2,15 +2,9 @@
 
 Common repository rules live in [../AGENTS.md](../AGENTS.md).
 
-From the monorepo root, use `./deploy.sh reel` for deployments and run
-`./check-ci.sh` before handing work back. Do not reproduce deployment steps
-manually. Do not create branches unless explicitly instructed.
-
 ## Project
 
 Reel is an **AV1 encoding tool** using the SVT-AV1 and FFmpeg/libav libraries (linked in-process via cgo) for parallel chunked encoding. It provides opinionated defaults, automatic crop detection, HDR preservation, and post-encode validation.
-
-Single-developer hobby project - prefer simple, maintainable solutions over clever abstractions.
 
 Spindle embeds `github.com/five82/spindle/reel` directly from this module.
 There is no workspace or external Reel dependency pin. Keep the library-first
@@ -19,12 +13,8 @@ Flyer remains an independent HTTP monitor.
 
 ## Critical Expectations
 
-- Apply YAGNI ("You Aren't Gonna Need It") and KISS ("Keep It Simple, Stupid"). Build only what the current task requires -- do not add abstractions, generality, or "future-proofing" for needs that do not yet exist. When two approaches work, take the simpler one. (Configuration/knobs are covered by the next bullet.)
 - Prefer self-documenting code and local comments over separate documentation. Comments should explain the non-obvious why: constraints, tradeoffs, invariants, historical context, or surprising decisions that cannot be understood from reading the code alone. Avoid comments that merely restate what the code does. Use separate docs only for cross-cutting design notes, user-facing behavior, or information that would make the code noisy.
 - Prefer opinionated defaults over exposing more user-facing knobs. Add configuration only when there is a clear recurring need that cannot be handled well by Reel's default behavior.
-- Keep the library-first design suitable for Spindle embedding.
-- Coordinate major trade-offs with the user; never unilaterally defer functionality.
-- Keep edits ASCII unless the file already uses extended characters.
 - When troubleshooting, gather evidence and test. Do not blindly guess.
 - Prefer unit tests over real encodes; encoding is slow.
 - When running Reel with a timeout, use at least 120 seconds.
@@ -39,7 +29,6 @@ From the monorepo root:
 go build -trimpath -o reel/reel ./reel/cmd/reel
 go test ./reel/...
 go test -race ./reel/...
-./check-ci.sh
 ```
 
 Performance documentation and script commands use `reel/` as their working

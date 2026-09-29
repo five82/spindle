@@ -55,4 +55,5 @@ location; do not rely on filename labels to make both cuts cataloged.
 - ffprobe both files: AV1 video, one English subrip stream each, durations
   matching the researched runtimes of their respective cuts (not each
   other's).
-- `spindle loom scan`, clean scratch, `spindle start`.
+- `spindle loom scan`, clean scratch, restore the daemon's entry state as
+  described in the main skill.

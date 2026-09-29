@@ -39,8 +39,8 @@ Then per file: `spindle encode scratch/ripped/FILE -o scratch/encoded/`.
   and orchestrate only the extras manually. Do the cache rip while the
   daemon is stopped, then `spindle start` and `spindle cache process` so the
   daemon processes the feature while you wait; alternatively finish the
-  extras first. Never run `spindle rip`/`spindle encode` after the daemon is
-  back up.
+  extras first. If the daemon was initially stopped, stop it again after
+  processing. Never run `spindle rip`/`spindle encode` while the daemon is up.
 - If the movie track is explicitly excluded, do not rip it at all.
 
 ## 3. Naming and placement (Loom)
@@ -67,4 +67,5 @@ folder if it is expected to appear in Loom.
 
 - ffprobe each placed file: AV1 video, audio present, sane duration.
 - Shorts: confirm exactly one English subrip stream, not forced.
-- `spindle loom scan`, remove scratch, `spindle start`.
+- `spindle loom scan`, remove scratch, restore the daemon's entry state as
+  described in the main skill.

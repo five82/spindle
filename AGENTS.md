@@ -11,18 +11,27 @@
   while stopped before `./deploy.sh spindle`: only the stopped-daemon command
   deletes the transient DB files. The deploy script preserves stopped state,
   so run `spindle start` afterward if the daemon should be running.
-- Before handing work back, run `./check-ci.sh` (tests, race, CGO, lint, govulncheck) or explain why you couldn't.
+- For Go code or runtime behavior changes, run `./check-ci.sh` (tests,
+  race, CGO, lint, govulncheck) before handoff, or explain why you couldn't.
+  Use focused checks while iterating. For documentation or instruction-only
+  changes, validate the affected text instead; full CI is not required.
 - **Audit synchronization is mandatory for every Spindle code change.** Review
-  `internal/auditgather/` and `.agents/skills/itemaudit/SKILL.md` against the
-  change, and update both wherever affected in the same task. Check collected
+  `internal/auditgather/` and `.agents/skills/itemaudit/` (the skill and its
+  phase references) against the change, and update both wherever affected in
+  the same task. Check collected
   evidence, JSON/digest fields, stage gates, anomaly rules/severity, decision
   names, thresholds, and the skill's report template/checklist. Remove obsolete
   assumptions and add/update audit regression tests when behavior changes.
   Auditing is part of the implementation, not optional follow-up work. In the
   handoff, state what was updated or why neither needed changes; passing CI
   alone does not establish that auditing is in sync.
-- Finish the work you start; ask before dropping scope or leaving TODOs.
-- Coordinate major trade-offs with the user; never unilaterally defer functionality.
+- Finish and verify the agreed task, including fixing failures caused by your
+  changes; ask before dropping scope or leaving TODOs. Local inspection,
+  edits, tests, and rerunning affected checks do not need approval.
+- Coordinate major trade-offs with the user; never unilaterally defer
+  functionality. Ask before deployments, destructive queue operations,
+  optional system installs, or other externally consequential actions unless
+  explicitly requested.
 - Keep edits ASCII unless the file already uses extended characters.
 - When asked to commit, commit to the current branch - normally `main`. Do not
   create a branch, open a PR, or push elsewhere unless explicitly told to.

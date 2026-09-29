@@ -52,4 +52,5 @@ in the report why no Loom-cataloged movie was produced.
 ## 3. Verify and finish
 
 - ffprobe: AV1 video, duration ≈ TMDB runtime, one English subrip stream.
-- `spindle loom scan`, clean scratch, `spindle start`.
+- `spindle loom scan`, clean scratch, restore the daemon's entry state as
+  described in the main skill.

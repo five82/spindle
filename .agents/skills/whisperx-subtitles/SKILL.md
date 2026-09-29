@@ -18,10 +18,10 @@ what is clearly wrong, leave everything else alone.
 Probe the media before starting. If it has no non-commentary English primary
 audio, stop and route the task to the orchestrate skill's
 `references/foreign-language-feature.md` scenario. Do not use this skill to
-translate a foreign-language feature, do not pass `--task translate`, and do
-not switch from the configured Turbo model to a full Large model for that
-purpose. The orchestration scenario tries a verified OpenSubtitles translation
-first and OCRs the disc's authoritative full English PGS when needed.
+translate a foreign-language feature, pass `--task translate`, or switch
+models to attempt a translation. The orchestration scenario tries a verified
+OpenSubtitles translation first and OCRs the disc's authoritative full English
+PGS when needed.
 
 ## Before starting
 
@@ -46,7 +46,9 @@ uvx whisperx work/audio.wav --model large-v3 --language en \
   --device cpu --compute_type int8   # cuda/float16 when whisperx_cuda_enabled
 ```
 
-WhisperX aligns word timings itself; the emitted SRT timing is good.
+The command shows the default model and VAD method; substitute the configured
+`whisperx_model` and `whisperx_vad_method` if they differ. WhisperX aligns word
+timings itself; the emitted SRT timing is good.
 
 ## 2. Edit the transcript (you are the audit)
 

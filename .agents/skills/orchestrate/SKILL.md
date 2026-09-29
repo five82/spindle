@@ -22,16 +22,17 @@ do the mechanical work.
 Spindle and this skill must never work at the same time - they compete for
 the optical drive, the encoder, and the library.
 
-1. `spindle status --json`
-2. If `{"running": false}`: proceed.
+1. `spindle status --json`; record whether the daemon was running.
+2. If stopped: proceed without starting it.
 3. If running: `spindle stop`. It drains before exiting: nothing new is
    dispatched, encode/GPU stages are cancelled (they resume from persisted
    state on the next start), and any in-flight disc rip finishes first. The
    command blocks until the daemon has exited, which can take as long as the
    current rip. Do not use `--force` here: it kills the rip.
-4. When the orchestration task is fully done (including verification):
-   `spindle start` to hand control back to the daemon; interrupted queue
-   work resumes where it left off.
+4. After verification (or if work fails), restore the original daemon state:
+   `spindle start` only if it was running on entry. If a scenario temporarily
+   starts it to process a cached feature, stop it after processing when it was
+   initially stopped. Confirm its state before handing control back.
 
 `spindle rip` and `spindle encode` refuse to run while the daemon is up, so a
 forgotten stop fails loudly rather than corrupting anything.
@@ -135,7 +136,7 @@ workflows do not write there.
   cross-checked against actual title runtimes from `spindle disc scan`.
   Runtime agreement within ~1-2% supports matching listed extras or cuts;
   it is not sufficient to establish TV episode identity or file completeness.
-- Finish with `spindle loom scan`, then `spindle start`.
+- Finish with `spindle loom scan`, then restore the daemon's original state.
 
 ## Scenario routing
 
@@ -174,7 +175,7 @@ Every scenario follows the same skeleton:
    for a separate sparse English forced track.
 9. Verify video, audio policy, SRT subtitles, and duration with `ffprobe`.
 10. Name and place into the library per the reference file's conventions.
-11. `spindle loom scan`, clean scratch, `spindle start`.
+11. `spindle loom scan`, clean scratch, restore the daemon's original state.
 12. Report what was produced: each output path, what it is, and how each
     disc title was identified (runtime match, web source).
 

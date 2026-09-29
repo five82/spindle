@@ -22,10 +22,8 @@ From the monorepo root:
 ```bash
 go run ./flyer/cmd/flyer
 go test ./flyer/...
-./check-ci.sh
-./deploy.sh flyer
+./deploy.sh flyer  # when deploying
 ```
 
-Use the deploy script, not manual installation steps. Run full checks before
-handoff. When considering features, ask whether they solve a real daily-use
-problem; do not add speculative abstractions.
+When considering features, ask whether they solve a real daily-use problem;
+do not add speculative abstractions.
