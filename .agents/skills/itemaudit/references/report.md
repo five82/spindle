@@ -85,7 +85,9 @@ where anomalies exist.
   designed `spindle stop` behavior (see the drain signature in Phase 2)
 - Reel's "discarded stale resume state" warning right after a reel upgrade or a
   re-ripped source — the designed auto-reset; a finding only when nothing
-  changed to explain it
+  changed to explain it. For a newly queued disc, check prior runs of the same
+  fingerprint for disk/write failures; fresh items now discard inherited
+  encode state when they have no recorded completed rip
 - Subtitle `qc_observations` that are below review thresholds and have
   `validation_result=passed`
 - An adopted subtitle ending before long credits, or a `reference_tail_gap_s` at
@@ -228,7 +230,8 @@ After running `spindle queue audit`, check only the phases flagged as `true` in
 - [ ] Reported any `keydb_download_error` stale-catalog fallback as a WARNING
 - [ ] Analyzed logs/decisions for anomalies beyond simple error counts, drilling
       into the full JSON wherever the digest flagged an omission or something
-      looked off
+      looked off; for a fresh-item resume warning, checked prior same-fingerprint
+      runs outside the current item's clamped log window
 - [ ] Read full JSON `transitions` for stage starts/terminal outcomes and
       encoding substages; used `analysis.stage_timings` for the timing table,
       not nonexistent `logs.stages`

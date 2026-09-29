@@ -487,6 +487,44 @@ func TestStagingResetPreservesResumableState(t *testing.T) {
 	}
 }
 
+func TestStagingResetDiscardsEncodedStateWithoutCompletedRip(t *testing.T) {
+	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	item, err := store.NewDisc("Test", "fingerprint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := t.TempDir()
+	root := filepath.Join(staging, "FINGERPRINT")
+	oldRip := filepath.Join(root, "ripped", "title_t00.mkv")
+	oldResume := filepath.Join(root, "encoded", ".reel-title_t00-abcdef012345", "resume.json")
+	for _, path := range []string{oldRip, oldResume} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("old run"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sess, err := stage.NewSession(context.Background(), store, item, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.Logger = testLogger()
+	h := &Handler{cfg: &config.Config{Paths: config.PathsConfig{StagingDir: staging}}}
+	if _, err := h.prepareRipStaging(sess); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{oldRip, oldResume} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("previous run's state survived: %s (%v)", path, err)
+		}
+	}
+}
+
 func TestRipTitlesSkipsCompletedTitles(t *testing.T) {
 	store, err := queue.Open(filepath.Join(t.TempDir(), "queue.db"))
 	if err != nil {

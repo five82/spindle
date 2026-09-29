@@ -30,6 +30,18 @@ func TestAggregateDecisions_IdenticalCollapse(t *testing.T) {
 	}
 }
 
+func TestAggregateDecisionsPreservesStagingResetEvidence(t *testing.T) {
+	groups := aggregateDecisions([]LogDecision{
+		{DecisionType: "staging_cleanup", DecisionResult: "reset", Extras: map[string]any{"kept_ripped_titles": 0, "kept_encoded_state": false}},
+		{DecisionType: "staging_cleanup", DecisionResult: "reset", Extras: map[string]any{"kept_ripped_titles": 1, "kept_encoded_state": true}},
+	})
+	if len(groups) != 1 || len(groups[0].Entries) != 2 ||
+		groups[0].Entries[0].Extras["kept_encoded_state"] != false ||
+		groups[0].Entries[1].Extras["kept_encoded_state"] != true {
+		t.Fatalf("staging reset decisions lost encoded-state evidence: %+v", groups)
+	}
+}
+
 func TestAggregateDecisions_VaryingMessages(t *testing.T) {
 	decisions := []LogDecision{
 		{DecisionType: "commentary", DecisionResult: "detected", Message: "track 2 is commentary"},

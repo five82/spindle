@@ -109,11 +109,11 @@ func (h *Handler) prepareRipStaging(sess *stage.Session) (string, error) {
 
 	// Staging is mostly ephemeral, but a rip re-run (daemon restart, retry)
 	// must not destroy restart-resumable state: completed title files in
-	// ripped/ (recorded in the envelope; ripTitles skips them) and all of
-	// encoded/ (finished encodes plus reel's chunk-level resume dirs for the
-	// encoding branch that overlaps this stage). Everything else -- partial
-	// rips, leftovers from a previous pipeline run of the same disc -- is
-	// wiped so file discovery starts clean.
+	// ripped/ (recorded in the envelope; ripTitles skips them) and encoded/
+	// (finished encodes plus reel's chunk-level resume dirs). Without a
+	// recorded completed rip, encoded/ belongs to an earlier queue item for
+	// this fingerprint and cannot be resumed. Wipe it along with partial rips
+	// and other leftovers so file discovery starts clean.
 	completed := make(map[string]bool)
 	for _, asset := range sess.Env.Assets.Ripped {
 		if asset.IsCompleted() {
@@ -129,6 +129,12 @@ func (h *Handler) prepareRipStaging(sess *stage.Session) (string, error) {
 		path := filepath.Join(stagingRoot, entry.Name())
 		switch entry.Name() {
 		case "encoded":
+			if len(completed) == 0 {
+				if err := os.RemoveAll(path); err != nil {
+					return "", fmt.Errorf("reset staging dir: %w", err)
+				}
+				removed++
+			}
 		case "ripped":
 			inner, readErr := os.ReadDir(path)
 			if readErr != nil {
@@ -154,9 +160,10 @@ func (h *Handler) prepareRipStaging(sess *stage.Session) (string, error) {
 	logger.Info("staging directory reset for rip",
 		"decision_type", logs.DecisionStagingCleanup,
 		"decision_result", "reset",
-		"decision_reason", "wiped non-resumable staging state; kept completed rips and encode resume state",
+		"decision_reason", "wiped non-resumable staging state; kept completed rips and encode state only with completed rips",
 		"removed_entries", removed,
 		"kept_ripped_titles", len(completed),
+		"kept_encoded_state", len(completed) > 0,
 	)
 	return rippedDir, nil
 }

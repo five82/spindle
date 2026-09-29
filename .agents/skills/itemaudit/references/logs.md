@@ -108,9 +108,13 @@ daemon log file has rotated away or is missing.
      `encode_start` for the same episode with reel resuming from completed
      chunks (`encoding_progress` starting at nonzero `chunks_complete`);
      `decision_type=staging_cleanup` reporting `kept_ripped_titles` and
+     `kept_encoded_state=true` when completed rips are recorded, and
      `decision_type=title_rip` with `decision_result=skipped` for titles
      preserved across the restart; `event_type=makemkv_rip_cancelled` when a
-     force-stop killed a rip. Timing caveat: a resumed run's native
+     force-stop killed a rip. A fresh queue item for the same fingerprint
+     with no recorded completed rips discards inherited encoded state
+     (`kept_encoded_state=false`); it cannot resume the previous item's
+     encode. Timing caveat: a resumed run's native
      `durationSeconds`/task timing covers only that run, while `total_wall_time`
      includes time the daemon was stopped — do not flag that mismatch as a hang.
    - A drain during commentary transcription can log
@@ -129,7 +133,11 @@ daemon log file has rotated away or is missing.
      the item), or reel's "discarded stale resume state" warning when neither
      the source was re-ripped nor reel/encode settings changed (after a reel
      upgrade or a rip re-run it is the designed auto-reset, costing a
-     from-scratch encode but producing correct output).
+     from-scratch encode but producing correct output). When this warning
+     appears on a fresh item for the same fingerprint, inspect earlier daemon
+     logs for a previous queue run and disk/write failures; the current item's
+     audit logs intentionally exclude earlier items. With the fresh-item
+     staging reset, inherited resume state should no longer cause this warning.
    - Level layout: the stage executor records `stage_start` and exactly one
      terminal outcome per run in the queue journal, NOT at DEBUG in daemon logs.
      `stage_complete` has numeric `durationSeconds`; failed, cancelled, stopped,
