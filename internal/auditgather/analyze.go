@@ -1048,11 +1048,17 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 					Category: "episodes",
 					Message:  "episode identification provenance summary missing from envelope attributes",
 				})
-			case summary.Method == "" || summary.ReferenceSource == "":
+			case summary.Method != "whisperx_jev_reference_choice" || summary.ReferenceSource != "opensubtitles":
 				anomalies = append(anomalies, Anomaly{
 					Severity: "warning",
 					Category: "episodes",
-					Message:  "episode identification provenance summary is incomplete",
+					Message:  "episode identification provenance does not describe the dialogue-reference classifier",
+				})
+			case summary.ReferenceEpisodes == 0 && a.EpisodeStats != nil && a.EpisodeStats.Matched > 0:
+				anomalies = append(anomalies, Anomaly{
+					Severity: "critical",
+					Category: "episodes",
+					Message:  "resolved episode identities have no usable dialogue references",
 				})
 			}
 		}

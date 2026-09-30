@@ -148,10 +148,12 @@ daemon log file has rotated away or is missing.
      pair per batch (with a `batch_files` extra), not one per episode;
      `transcription_extract` still fires per file. A missing per-episode
      WhisperX event is not an anomaly.
-   - Episode identification uses full primary-audio WhisperX transcripts and the
-     complete TMDB season catalog, not downloaded subtitle references.
-     OpenSubtitles acquisition belongs to subtitle adoption, not episode
-     classification.
+   - Episode identification acquires title-vetted OpenSubtitles references
+     across the TMDB season, then compares five-minute middle excerpts in one
+     Jev Choice per source. Full primary-audio WhisperX transcripts and word
+     timestamps remain shared with downstream analysis/subtitle adoption.
+     Acquisition logs belong to episode identification as well as adoption;
+     reference reuse does not bypass display-subtitle verification.
    - Rip-cache restores and stores hardlink when cache and staging share a
      filesystem: near-instant `copy_progress` (a single jump to 100%) is
      expected, not a truncated copy.
@@ -163,7 +165,8 @@ daemon log file has rotated away or is missing.
      and ripped assets. A contiguous resolved sequence does not prove the first
      or last episode is present. If a disc listing includes E1 but a selected
      title remains unresolved, trace the title selection, trusted show/season
-     identity, catalog completeness, transcript asset status, and Jev decision
+     identity, catalog/reference coverage and title trust, transcript asset status,
+     and Jev decision
      before accepting a missing-E1 conclusion. An unresolved title is not a
      probable extra; high episode probability alone does not prove complete file
      coverage.

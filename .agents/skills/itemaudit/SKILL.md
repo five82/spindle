@@ -68,4 +68,7 @@ need to interpret; the JSON schema is diagnostic, not a stable API.
 
 Report only applicable phases. Lead with root causes and evidence, separate fact
 from inference, and keep clean sections compact. Do not claim semantic
-verification of TV identity from probability or subtitle text from metadata.
+verification of TV identity from probability or reference-label metadata, or
+subtitle wording from stream metadata. For dialogue-reference episode matching,
+trace title trust, acquisition, and per-episode review routing separately from
+the classifier probability.

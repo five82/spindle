@@ -46,7 +46,7 @@ func TestDetectAnomaliesReportsOperationalFailures(t *testing.T) {
 
 func TestDetectAnomaliesFlagsIncompleteContentIDProvenance(t *testing.T) {
 	report := &Report{StageGate: StageGate{MediaType: "tv", PhaseEpisodeID: true}, Envelope: &ripspec.Envelope{Metadata: ripspec.Metadata{MediaType: "tv"}}}
-	for _, summary := range []*ripspec.ContentIDSummary{{}, {Method: "whisperx_jev_episode_choice"}} {
+	for _, summary := range []*ripspec.ContentIDSummary{{}, {Method: "whisperx_jev_reference_choice"}} {
 		report.Envelope.Attributes.ContentID = summary
 		anomalies := detectAnomalies(report, &Analysis{})
 		if len(anomalies) != 1 || anomalies[0].Category != "episodes" || anomalies[0].Severity != "warning" {

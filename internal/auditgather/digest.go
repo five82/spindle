@@ -322,7 +322,7 @@ func writeDigestEpisodeID(b *strings.Builder, r *Report) {
 	}
 	fmt.Fprintln(b)
 	if cid := r.Envelope.Attributes.ContentID; cid != nil {
-		fmt.Fprintf(b, "Content ID: method=%s catalog=%s (%d) | transcribed=%d matched=%d unresolved=%d review=%d | completed=%v\n",
+		fmt.Fprintf(b, "Content ID: method=%s references=%s (%d) | transcribed=%d matched=%d unresolved=%d review=%d | completed=%v\n",
 			cid.Method, cid.ReferenceSource, cid.ReferenceEpisodes, cid.TranscribedEpisodes,
 			cid.MatchedEpisodes, cid.UnresolvedEpisodes, cid.ReviewEpisodes, cid.Completed)
 	}

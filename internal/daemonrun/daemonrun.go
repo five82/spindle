@@ -171,7 +171,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Create stage handlers.
 	identifyHandler := identify.New(cfg, tmdbClient, notifier, discIDStore)
 	ripperHandler := ripper.New(cfg, notifier, ripCacheStore, discMon, ripper.NoTitleOverride)
-	contentidHandler := contentid.New(cfg, llmClient, tmdbClient, transcriber)
+	contentidHandler := contentid.New(cfg, llmClient, tmdbClient, transcriber, osClient)
 	encoderHandler := encoder.New(cfg)
 	analysisHandler := audioanalysis.New(cfg, llmClient, transcriber)
 	subtitleHandler := subtitle.New(cfg, transcriber, osClient)

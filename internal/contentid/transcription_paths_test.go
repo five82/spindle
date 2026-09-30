@@ -44,7 +44,7 @@ func TestGenerateEpisodeTranscriptsRecordsBatchTranscripts(t *testing.T) {
 		env.Assets.AddAsset(ripspec.AssetKindRipped, ripspec.Asset{EpisodeKey: key, Path: key + ".mkv", Status: ripspec.AssetStatusCompleted})
 	}
 	sess.SetEnvelope(env)
-	h := New(&config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}}, nil, nil, transcription.New(transcription.Params{}, nil))
+	h := New(&config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}}, nil, nil, transcription.New(transcription.Params{}, nil), nil)
 	if err := h.generateEpisodeTranscripts(context.Background(), sess); err != nil {
 		t.Fatal(err)
 	}

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/tmdb"
 )
@@ -117,7 +116,7 @@ func TestClassifyEpisodesPersistsStructuralSafety(t *testing.T) {
 				{EpisodeNumber: 2, Name: "Canonical second", Overview: "Second adventure.", Runtime: 45},
 				{EpisodeNumber: 3, Name: "Canonical third", Overview: "Third adventure.", Runtime: 45},
 			}}
-			h := New(&config.Config{}, episodeTestClient(t, func(text string) (string, float64) { return text, 1 }), nil, nil)
+			h := episodeTestHandler(t, episodeTestClient(t, func(text string) (string, float64) { return text, 1 }), season)
 			if err := h.classifyEpisodes(context.Background(), sess, season); err != nil {
 				t.Fatal(err)
 			}

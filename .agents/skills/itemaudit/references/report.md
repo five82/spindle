@@ -170,7 +170,7 @@ where anomalies exist.
 
 #### Episode Identification (if phase_episode_id)
 - Content ID method: <envelope.attributes.content_id.method>
-- Catalog/completion: <content_id.reference_source, reference_episodes, completed; completion does not mean every title cleared review>
+- References/completion: <content_id.reference_source, usable reference_episodes, completed; reference_search selected/omitted reasons and file IDs; completion does not mean every title cleared review>
 - Probability overview: <analysis.episode_stats.probability_min/max/mean and below_090 for resolved identities; unresolved count; content_id.review_episodes snapshot>
 - Episode manifest: <full per-episode table with match_probability, canonical numbers/titles, and current review flags/reasons; pre-episodeid placeholders are an inventory, not failed matches>
 - Structural safety: <runtime, overlap, and sequence reasons; sequence_contiguous and episode_range; review routing and concurrent asset/flag preservation>
@@ -250,11 +250,14 @@ After running `spindle queue audit`, check only the phases flagged as `true` in
 
 ### Post-Episode-Identification (phase_episode_id)
 
-- [ ] Checked `envelope.attributes.content_id` method, TMDB catalog, completion,
-      and matched/unresolved/review counts
+- [ ] Checked `envelope.attributes.content_id` method, canonical TMDB catalog,
+      usable OpenSubtitles references, completion, and matched/unresolved/review counts
+- [ ] Traced `reference_search` selection/omission and file IDs; checked title
+      trust, retry cleanup, and full-reference/full-transcript handoff without
+      reading cue text; did not mistake dialogue agreement for label verification
 - [ ] Reviewed every manifest entry's `match_probability` against 0.90;
       distinguished rejected candidates and `none` from accepted identities
-- [ ] Traced unresolved outcomes to catalog/evidence/classifier reasons without
+- [ ] Traced unresolved outcomes to catalog/reference/evidence/classifier reasons without
       inspecting transcript text or assuming extras
 - [ ] Checked runtime, overlap, sequence, and canonical-numbering safeguards;
       did not infer completeness from high probability

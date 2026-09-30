@@ -77,20 +77,22 @@ func TestJevEpisodeEvidenceSurvivesAuditJSONAndDigest(t *testing.T) {
 				{Key: "s01_001", Season: 1, Episode: 1, MatchProbability: 0.90},
 				{Key: "s01_002", Season: 1, Episode: 2, MatchProbability: 0.98, NeedsReview: true, ReviewReason: "encoding review"},
 				{Key: "s01_003", Season: 1, MatchProbability: 0.74, NeedsReview: true, ReviewReason: "episode probability below acceptance threshold"},
-				{Key: "s01_004", Season: 1, NeedsReview: true, ReviewReason: "no listed episode has distinctive plot support"},
+				{Key: "s01_004", Season: 1, NeedsReview: true, ReviewReason: "no reference has distinctive overlapping dialogue"},
 			},
 			Attributes: ripspec.EnvelopeAttributes{ContentID: &ripspec.ContentIDSummary{
-				Method: "whisperx_jev_episode_choice", ReferenceSource: "tmdb", ReferenceEpisodes: 20,
+				Method: "whisperx_jev_reference_choice", ReferenceSource: "opensubtitles", ReferenceEpisodes: 20,
 				TranscribedEpisodes: 4, MatchedEpisodes: 2, UnresolvedEpisodes: 2,
 				ReviewEpisodes: 2, ReviewThreshold: 0.90, Completed: true,
 			}},
 		},
 	}
 	for _, line := range []string{
-		`{"level":"INFO","item_id":7,"msg":"episode identification plan","decision_type":"contentid_matches","decision_result":"classify_full_season","decision_reason":"full transcripts matched to canonical TMDB episode overviews","candidate_episodes":20,"probability_threshold":0.9}`,
-		`{"level":"INFO","item_id":7,"msg":"episode classification decided","decision_type":"episode_match","decision_result":"matched","decision_reason":"distinctive plot evidence meets episode probability threshold","episode_key":"s01_001","title_id":1,"candidate":"E01","match_probability":0.9,"probability_threshold":0.9}`,
+		`{"level":"INFO","item_id":7,"msg":"episode identification plan","decision_type":"contentid_matches","decision_result":"classify_full_season","decision_reason":"five-minute middle excerpts matched to title-consistent dialogue references across the canonical TMDB season","candidate_episodes":20,"probability_threshold":0.9}`,
+		`{"level":"INFO","item_id":7,"msg":"episode classification decided","decision_type":"episode_match","decision_result":"matched","decision_reason":"distinctive dialogue overlap meets episode probability threshold","episode_key":"s01_001","title_id":1,"candidate":"E01","reference_file_id":77,"match_probability":0.9,"probability_threshold":0.9}`,
 		`{"level":"INFO","item_id":7,"msg":"episode classification decided","decision_type":"episode_match","decision_result":"review","decision_reason":"episode probability below acceptance threshold","episode_key":"s01_003","title_id":3,"candidate":"E03","match_probability":0.74,"probability_threshold":0.9}`,
-		`{"level":"INFO","item_id":7,"msg":"episode classification decided","decision_type":"episode_match","decision_result":"review","decision_reason":"no listed episode has distinctive plot support","episode_key":"s01_004","title_id":4,"candidate":"none","match_probability":0.99,"probability_threshold":0.9}`,
+		`{"level":"INFO","item_id":7,"msg":"episode classification decided","decision_type":"episode_match","decision_result":"review","decision_reason":"no reference has distinctive overlapping dialogue","episode_key":"s01_004","title_id":4,"candidate":"none","match_probability":0.99,"probability_threshold":0.9}`,
+		`{"level":"INFO","item_id":7,"msg":"episode reference decided","decision_type":"reference_search","decision_result":"selected","decision_reason":"canonical title present, no competing episode title, single English full-subtitle file","season":1,"episode":1,"episode_title":"First","reference_file_id":77,"release":"Show First","file_name":"First.srt"}`,
+		`{"level":"INFO","item_id":7,"msg":"episode reference decided","decision_type":"reference_search","decision_result":"omitted","decision_reason":"no unambiguous canonical title in a single-file English full-subtitle candidate","season":1,"episode":21,"reference_file_id":0}`,
 	} {
 		parseLogLine(line, &httpapi.ItemResponse{ID: 7}, r.Logs, time.Time{})
 	}
@@ -119,8 +121,11 @@ func TestJevEpisodeEvidenceSurvivesAuditJSONAndDigest(t *testing.T) {
 			t.Fatalf("abstentions polluted accepted probabilities: %+v", es)
 		}
 		decisions := report.Analysis.NotableDecisions
-		if len(decisions) != 4 || decisions[3].Extras["candidate"] != "none" || decisions[3].Extras["match_probability"] != 0.99 {
+		if len(decisions) != 6 || decisions[3].Extras["candidate"] != "none" || decisions[3].Extras["match_probability"] != 0.99 {
 			t.Fatalf("lost choice evidence: %+v", decisions)
+		}
+		if decisions[4].Extras["reference_file_id"] != float64(77) || decisions[4].Extras["file_name"] != "First.srt" || decisions[5].DecisionResult != "omitted" {
+			t.Fatalf("lost reference acquisition evidence: %+v", decisions)
 		}
 		for _, a := range report.Analysis.Anomalies {
 			if a.Severity == "critical" {
@@ -129,10 +134,11 @@ func TestJevEpisodeEvidenceSurvivesAuditJSONAndDigest(t *testing.T) {
 		}
 		digest := RenderDigest(report, "/tmp/audit.json")
 		for _, want := range []string{
-			"method=whisperx_jev_episode_choice catalog=tmdb (20)", "matched=2 unresolved=2 review=2 | completed=true",
+			"method=whisperx_jev_reference_choice references=opensubtitles (20)", "matched=2 unresolved=2 review=2 | completed=true",
 			"resolved episode probability min=0.90 mean=0.94 max=0.98 | resolved <0.90: 0",
 			"3 episode(s) explicitly flagged for review", "2 unresolved episode(s)",
 			"candidate=none", "match_probability=0.99", "probability_threshold=0.9",
+			"reference_file_id=77", "file_name=First.srt", "reference_search", "omitted",
 			"UNRESOLVED probability=0.74 REVIEW: episode probability below acceptance threshold",
 			"S01E02 probability=0.98 REVIEW: encoding review",
 		} {

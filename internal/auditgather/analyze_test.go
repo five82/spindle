@@ -653,8 +653,8 @@ func TestDetectAnomalies_ContentIDSummaryPresent(t *testing.T) {
 			Metadata: ripspec.Metadata{MediaType: "tv"},
 			Episodes: []ripspec.Episode{{Key: "s01e01", Episode: 1}},
 			Attributes: ripspec.EnvelopeAttributes{ContentID: &ripspec.ContentIDSummary{
-				Method:          "whisperx_jev_episode_choice",
-				ReferenceSource: "tmdb",
+				Method:          "whisperx_jev_reference_choice",
+				ReferenceSource: "opensubtitles",
 				Completed:       true,
 			}},
 		},
@@ -662,7 +662,7 @@ func TestDetectAnomalies_ContentIDSummaryPresent(t *testing.T) {
 	anomalies := detectAnomalies(r, &Analysis{})
 	for _, an := range anomalies {
 		if an.Message == "episode identification provenance summary missing from envelope attributes" ||
-			an.Message == "episode identification provenance summary is incomplete" {
+			an.Message == "episode identification provenance does not describe the dialogue-reference classifier" {
 			t.Fatalf("unexpected provenance anomaly: %+v", an)
 		}
 	}

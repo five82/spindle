@@ -16,8 +16,8 @@ import (
 // adopting a wrong one ships bad subtitles, so every threshold errs toward
 // rejection.
 const (
-	// adoptMinTextSimilarity sits above contentid's 0.58 episode-match floor:
-	// adoption demands more confidence than identification.
+	// Whole-program similarity is independent of episode ID: a matching short
+	// excerpt cannot establish that this is the right full display subtitle.
 	adoptMinTextSimilarity = 0.60
 	// adoptMinAnchorCues is the minimum number of exact-text cue matches for
 	// the anchor timing check; below it the interval-overlap check applies.

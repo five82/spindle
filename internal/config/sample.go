@@ -138,9 +138,9 @@ api_key = ""
 # Encoding uses Reel target-quality mode with Reel defaults.
 
 [llm]
-# Jev through OpenRouter identifies TV episodes from full WhisperX transcripts
-# and TMDB overviews, and detects commentary. An empty key sends TV episodes
-# to review and disables commentary classification.
+# Jev through OpenRouter matches TV dialogue excerpts to title-vetted English
+# OpenSubtitles references (also requires its API key), and detects commentary.
+# An empty LLM key sends TV episodes to review and disables commentary classification.
 # Episode identification uses a fixed probability threshold of 0.90.
 # OpenRouter API key (or set OPENROUTER_API_KEY env var)
 # api_key = ""

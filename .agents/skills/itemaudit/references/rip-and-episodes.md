@@ -61,13 +61,30 @@ Analyze the `rip_cache` section from the audit output:
 `item.needs_review`:
 
 1. **Content ID provenance**: Check `envelope.attributes.content_id`
-   - Expect `method=whisperx_jev_episode_choice`, `reference_source=tmdb`, and
-     `review_threshold=0.90`. `reference_episodes` counts catalog entries, not
-     subtitle downloads or titles expected on this disc.
-   - The classifier uses one typed Choice per full primary-audio transcript
-     against every canonical episode in the trusted TMDB season plus `none`.
-     There is no reference-subtitle, similarity, disc-position shortlist, or
-     forced hole-filling fallback.
+   - Expect `method=whisperx_jev_reference_choice`,
+     `reference_source=opensubtitles`, and `review_threshold=0.90`.
+     `reference_episodes` counts usable, title-vetted dialogue references, not
+     all TMDB entries or titles expected on this disc. Resolved identities with
+     zero usable references are **CRITICAL**. Unexpected/missing provenance is
+     a **WARNING**; check the producing binary and logs.
+   - One typed Choice compares the five-minute middle source excerpt against
+     available references from the entire canonical TMDB season plus `none`.
+     Source/reference caps are 6000/3000 UTF-8 bytes. The midpoint is half the
+     last cue end, not the file duration. Full SRT and word-timestamp artifacts
+     are retained for commentary and subtitle verification.
+   - Check `reference_search` decisions: `selected` records canonical
+     season/episode/title, `reference_file_id`, release/file names, and the
+     selection reason; `omitted` records untrusted/unavailable references.
+     Selection requires English, not foreign-parts-only, exactly one file, the
+     canonical title in release/file names, and no other season episode title.
+     Remaining candidates rank by non-HI, downloads, then file ID. API numbers
+     and popularity alone are not trust evidence. All-suspect searches must
+     omit the episode, not select a suspect fallback.
+   - `contentid_matches` records catalog/usable-candidate counts and excerpt
+     limits. `episode_match` records the candidate and reference file ID with
+     its probability. There is no synopsis, similarity, disc-position, or
+     forced hole-filling fallback. Title checks cannot independently certify
+     every external label, and matching dialogue cannot repair a bad label.
    - Read `transcribed_episodes`, `matched_episodes`, `unresolved_episodes`, and
      `review_episodes`. `completed=true` means the classification pass finished,
      not that every title matched or cleared review. Current per-episode review
@@ -88,10 +105,13 @@ Analyze the `rip_cache` section from the audit output:
      distinguish these using the decision reason.
    - Unresolved titles are **WARNING** review outcomes, not proof of mislabeling
      or extras. Investigate missing/unreadable/empty transcripts, incomplete
-     titles/overviews, invalid catalogs, classifier failures, or insufficient
-     distinctive evidence. Catalogs allow at most 254 episodes plus `none`;
-     transcript text plus catalog/instructions must fit 96 KiB, with no
-     truncation. Server token-limit failures also route to review.
+     canonical titles, invalid catalogs, missing/rejected references, acquisition
+     or classifier failures, or insufficient distinctive evidence. Catalogs
+     allow at most 254 episodes plus `none`; bounded excerpts plus
+     catalog/instructions must fit 96 KiB. Server token-limit failures also
+     route to review. Missing references are excluded choices, not synopsis
+     fallbacks. An omitted reference for an unused episode is not itself a
+     delivered-output defect.
 
 3. **Canonical match outcomes live in `episodes[]`**:
    - Review `season`, `episode`, `episode_end`, `episode_title`,
@@ -116,8 +136,12 @@ Analyze the `rip_cache` section from the audit output:
    - Use `analysis.episode_stats.sequence_contiguous` and `episode_range` to
      investigate gaps, not to force a permutation. A contiguous sequence alone
      does not prove disc completeness.
+   - Check that retries clear old staged references before acquisition, even
+     when configuration/catalog validation fails. Subtitle adoption may reuse
+     only the current attempt's full reference; it must still verify it.
    - Check that all uncertainty/safety reasons survive into per-episode review
-     flags and final routing, along with review flags and assets written by
+     flags and final routing (an item-level warning alone does not route TV),
+     along with review flags and assets written by
      concurrent encoding. A lost review flag or overwritten encoding asset is a
      persistence bug, not a reason to hand-edit the output.
 

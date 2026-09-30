@@ -14,6 +14,7 @@ import (
 
 	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/llm"
+	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
@@ -83,6 +84,11 @@ func episodeTestClient(t *testing.T, choose func(string) (string, float64)) *llm
 		if req.Model != "typesafe/jev-1.13" || len(req.Questions) != 1 || q.Type != "choice" || q.Instructions != episodeInstructions || q.Criteria["none"] == "" {
 			t.Errorf("invalid request %+v", req)
 		}
+		for key, value := range q.Criteria {
+			if key != "none" && (!strings.HasPrefix(value, "Reference ") || len(value) > 3000) {
+				t.Errorf("choice %s is not bounded reference dialogue: %q", key, value)
+			}
+		}
 		winner, p := choose(req.State)
 		probabilities := map[string]float64{}
 		for key := range q.Criteria {
@@ -100,21 +106,59 @@ func episodeTestClient(t *testing.T, choose func(string) (string, float64)) *llm
 	return llm.New(config.LLMConfig{APIKey: "test", BaseURL: server.URL}, nil)
 }
 
-func TestClassifyFullTranscriptCanonicalIdentity(t *testing.T) {
+func episodeTestHandler(t *testing.T, client *llm.Client, catalogs ...*tmdb.Season) *Handler {
+	t.Helper()
+	season := episodeTestSeason()
+	if len(catalogs) > 0 {
+		season = catalogs[0]
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	cfg := &config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}}
+	if err := os.MkdirAll(cfg.OpenSubtitlesCacheDir(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for i, ep := range season.Episodes {
+		data := fmt.Sprintf("1\n00:00:00,000 --> 00:45:00,000\nReference %s dialogue.\n", ep.Name)
+		if err := os.WriteFile(filepath.Join(cfg.OpenSubtitlesCacheDir(), fmt.Sprintf("%d.srt", 101+i)), []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/subtitles" || r.URL.Query().Get("languages") != "en" {
+			t.Errorf("unexpected reference request %s", r.URL)
+		}
+		results := []opensubtitles.SubtitleResult{}
+		for i, ep := range season.Episodes {
+			if r.URL.Query().Get("episode_number") == fmt.Sprint(ep.EpisodeNumber) {
+				results = append(results, opensubtitles.SubtitleResult{Attributes: opensubtitles.SubtitleAttributes{
+					Language: "en", Release: ep.Name, Files: []opensubtitles.SubtitleFile{{FileID: 101 + i, FileName: ep.Name + ".srt"}},
+				}})
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": results})
+	}))
+	t.Cleanup(server.Close)
+	return New(cfg, client, nil, nil, opensubtitles.New(opensubtitles.Params{APIKey: "test", BaseURL: server.URL}, nil))
+}
+
+func TestClassifyMiddleExcerptCanonicalIdentity(t *testing.T) {
 	text := "Beginning. " + strings.Repeat("Middle dialogue. ", 600) + "Distinctive ending."
 	sess := episodeTestSession(t, text, "Other title.")
 	sess.Env.Metadata.DiscNumber = 1
 	client := episodeTestClient(t, func(got string) (string, float64) {
-		if got == text {
+		if got == text[:6000] {
 			return "E02", 0.90
 		}
 		if got != "Other title." {
-			t.Errorf("full transcript altered or truncated: %d bytes", len(got))
+			t.Errorf("unexpected transcript excerpt: %d bytes", len(got))
 		}
 		return "E01", 0.99
 	})
-	h := New(&config.Config{}, client, nil, nil)
-	if err := h.classifyEpisodes(context.Background(), sess, episodeTestSeason()); err != nil {
+	h := episodeTestHandler(t, client)
+	season := episodeTestSeason()
+	season.Episodes[0].Overview = "" // Synopses are not matching evidence.
+	season.Episodes[1].Overview = strings.Repeat("unused", maxEpisodeEvidenceBytes)
+	if err := h.classifyEpisodes(context.Background(), sess, season); err != nil {
 		t.Fatal(err)
 	}
 	for i, want := range []int{2, 1} {
@@ -127,7 +171,7 @@ func TestClassifyFullTranscriptCanonicalIdentity(t *testing.T) {
 		t.Fatal("canonical metadata missing")
 	}
 	s := sess.Env.Attributes.ContentID
-	if !s.Completed || s.MatchedEpisodes != 2 || s.ReferenceEpisodes != 2 || s.ReferenceSource != "tmdb" || s.ReviewEpisodes != 0 || !s.SequenceContiguous {
+	if !s.Completed || s.MatchedEpisodes != 2 || s.ReferenceEpisodes != 2 || s.ReferenceSource != "opensubtitles" || s.ReviewEpisodes != 0 || !s.SequenceContiguous {
 		t.Fatalf("summary %+v", s)
 	}
 }
@@ -143,7 +187,7 @@ func TestClassifyAbstentionsNeverFillHolesOrPreserveStaleMatches(t *testing.T) {
 			sess.Env.Episodes[0].EpisodeEnd = 5
 			sess.Env.Episodes[0].EpisodeTitle = "Stale"
 			sess.Env.Episodes[0].MatchProbability = 1
-			h := New(&config.Config{}, episodeTestClient(t, func(string) (string, float64) { return tt.winner, tt.p }), nil, nil)
+			h := episodeTestHandler(t, episodeTestClient(t, func(string) (string, float64) { return tt.winner, tt.p }))
 			if err := h.classifyEpisodes(context.Background(), sess, episodeTestSeason()); err != nil {
 				t.Fatal(err)
 			}
@@ -160,7 +204,7 @@ func TestClassifyAbstentionsNeverFillHolesOrPreserveStaleMatches(t *testing.T) {
 
 func TestClassifyDuplicateClaimsRouteBothToReview(t *testing.T) {
 	sess := episodeTestSession(t, "First recording.", "Second recording.")
-	h := New(&config.Config{}, episodeTestClient(t, func(string) (string, float64) { return "E01", 1 }), nil, nil)
+	h := episodeTestHandler(t, episodeTestClient(t, func(string) (string, float64) { return "E01", 1 }))
 	if err := h.classifyEpisodes(context.Background(), sess, episodeTestSeason()); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +219,7 @@ func TestClassifyDuplicateClaimsRouteBothToReview(t *testing.T) {
 }
 
 func TestClassifyMissingEvidenceAndCatalog(t *testing.T) {
-	for _, name := range []string{"nil catalog", "empty catalog", "missing overview", "missing name", "duplicate episode", "invalid episode", "too many episodes", "missing transcript", "empty transcript", "unreadable transcript", "oversized transcript", "oversized catalog", "missing show", "missing season", "missing client"} {
+	for _, name := range []string{"nil catalog", "empty catalog", "missing name", "duplicate episode", "invalid episode", "too many episodes", "missing transcript", "empty transcript", "unreadable transcript", "missing show", "missing season", "missing client"} {
 		t.Run(name, func(t *testing.T) {
 			sess := episodeTestSession(t, "Program dialogue.")
 			season := episodeTestSeason()
@@ -187,9 +231,6 @@ func TestClassifyMissingEvidenceAndCatalog(t *testing.T) {
 				degraded = true
 			case "empty catalog":
 				season = &tmdb.Season{}
-				degraded = true
-			case "missing overview":
-				season.Episodes[1].Overview = ""
 				degraded = true
 			case "missing name":
 				season.Episodes[1].Name = ""
@@ -220,14 +261,8 @@ func TestClassifyMissingEvidenceAndCatalog(t *testing.T) {
 				if err := os.WriteFile(sess.Env.Assets.Transcript[0].Path, nil, 0600); err != nil {
 					t.Fatal(err)
 				}
-			case "oversized transcript":
-				if err := os.WriteFile(sess.Env.Assets.Transcript[0].Path, []byte("1\n00:00:00,000 --> 00:45:00,000\n"+strings.Repeat("x", maxEpisodeEvidenceBytes)), 0600); err != nil {
-					t.Fatal(err)
-				}
-			case "oversized catalog":
-				season.Episodes[0].Overview = strings.Repeat("x", maxEpisodeEvidenceBytes)
 			}
-			h := New(&config.Config{}, client, nil, nil)
+			h := episodeTestHandler(t, client)
 			err := h.classifyEpisodes(context.Background(), sess, season)
 			var de *stage.ErrDegraded
 			if errors.As(err, &de) != degraded {
@@ -252,7 +287,7 @@ func TestClassifyAPIFailureAndCancellation(t *testing.T) {
 			}))
 			defer server.Close()
 			sess := episodeTestSession(t, "Evidence.")
-			h := New(&config.Config{}, llm.New(config.LLMConfig{APIKey: "test", BaseURL: server.URL}, nil), nil, nil)
+			h := episodeTestHandler(t, llm.New(config.LLMConfig{APIKey: "test", BaseURL: server.URL}, nil))
 			if err := h.classifyEpisodes(context.Background(), sess, episodeTestSeason()); err != nil {
 				t.Fatal(err)
 			}
@@ -264,7 +299,7 @@ func TestClassifyAPIFailureAndCancellation(t *testing.T) {
 	sess := episodeTestSession(t, "Evidence.")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	h := New(&config.Config{}, nil, nil, nil)
+	h := episodeTestHandler(t, nil)
 	if err := h.classifyEpisodes(ctx, sess, episodeTestSeason()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel: %v", err)
 	}

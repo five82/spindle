@@ -35,7 +35,11 @@ rather than a stable public API. It contains:
   (already in parsed `envelope`). `disabled: true` means the cache is turned off
   in config — do not report that as a pruned entry.
 - **`envelope`**: Parsed ripspec Envelope (titles, episodes, assets at each
-  stage, attributes)
+  stage, attributes). `attributes.content_id` records the dialogue-reference
+  method, `reference_source=opensubtitles`, usable `reference_episodes`,
+  probability threshold, outcome counts, and completion. Reference file IDs,
+  release/file names, and selection/omission reasons live in `reference_search`
+  decision extras; they contain provenance, not cue text.
 - **`encoding`**: Encoding details snapshot (crop, validation, config, result).
   Spindle always uses Reel target-quality mode, so the snapshot carries the full
   Reel-reported config summary (`encoder`, `quality`, `preset`, `tune`,

@@ -260,7 +260,11 @@ this audit.
    `analysis.decision_groups`):
    - The pipeline downloads the identified title's OpenSubtitles candidates,
      cleans them, retimes against the rip's WhisperX transcript with ffsubsync,
-     and adopts the first candidate that passes the verification gate. When no
+     and adopts the first candidate that passes the verification gate. TV may
+     try the current episode-ID reference first (`contentid_reference`), even
+     if fresh search fails; that reuse must not bypass cleanup, synchronization,
+     full-program similarity, coverage/tail, or timing gates. The short Jev
+     excerpt is never the display verification transcript. When no
      candidate verifies (or none exists, or the title is multi-episode), it
      records `source=none` and the title completes WITHOUT subtitles. Spindle
      never generates subtitles itself.
