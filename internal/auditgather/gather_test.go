@@ -186,7 +186,10 @@ func TestFindLogFilesIncludesLaterFilesForRestarts(t *testing.T) {
 		}
 	}
 
-	got := findLogFiles(dir, "2026-03-22T02:18:41Z")
+	got, covered := findLogFiles(dir, "2026-03-22T02:18:41Z")
+	if !covered {
+		t.Fatal("creation-time log present but coverage reported missing")
+	}
 	if len(got) != 2 {
 		t.Fatalf("expected 2 log files (creation-time + later), got %d: %v", len(got), got)
 	}
@@ -294,5 +297,16 @@ func TestParseLogLineCarriesStageAttribution(t *testing.T) {
 	writeLogEntries(&b, "Warnings", report.Warnings)
 	if !strings.Contains(b.String(), "(analysis) [llm_retry] retrying LLM request") {
 		t.Fatalf("digest warning row: %s", b.String())
+	}
+}
+
+// The field contract does not require event_type on INFO, so an untyped
+// progress line must still reach the audit.
+func TestParseLogLine_KeepsUntypedInfoLines(t *testing.T) {
+	item := &httpapi.ItemResponse{ID: 1}
+	report := &LogAnalysis{}
+	parseLogLine(`{"time":"2026-09-29T22:29:33Z","level":"INFO","msg":"Phase 1/4 - Audio refinement","item_id":1,"stage":"apply"}`, item, report, time.Time{})
+	if len(report.Events) != 1 || report.Events[0].Message != "Phase 1/4 - Audio refinement" || report.Events[0].Stage != "apply" {
+		t.Fatalf("events=%+v", report.Events)
 	}
 }

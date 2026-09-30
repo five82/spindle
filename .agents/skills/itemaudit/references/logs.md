@@ -71,17 +71,27 @@ daemon log file has rotated away or is missing.
      `extras.commentary_probability` and `extras.track_index`; full log lines
      are also available at the files in `logs.paths`.
 
-2. **Timing/progress anomalies** (from `analysis.stage_timings`, `transitions`,
-   and `logs.events`):
-   - Stages taking unusually long or short (use `transitions[].durationSeconds`
-     or the stage timing summary)
+2. **Timing/progress anomalies** (from the digest's "Stage runs" section,
+   `transitions`, and `logs.events`):
+   - Stages taking unusually long or short: each run line carries its terminal
+     outcome and duration, and "time by activity" shows where the run's time
+     went (sums of journaled activity durations, largest first)
+   - Waits: a "waited" line is a journaled `activity_waiting` (for example a
+     movie encode holding its slot until the rip completes, or a disk or
+     resource wait) with its duration
+   - "OPEN at run end" is an activity still running or waiting when a
+     non-interrupted run reached its terminal outcome. The executor closes open
+     activities at every terminal outcome, so on a current binary this is a
+     defect in the executor or activity journaling; runs recorded before that
+     fix show it routinely
    - Large gaps between native transitions suggesting hangs; compare with
      `logs.events` progress before concluding a task stalled
    - Repeated starts and terminal outcomes on retries or restarts
    - Use `logs.events` for long-running work visibility: `encoding_progress`,
-     `rip_progress`, `copy_progress`, `transcription_extract[_complete]`,
-     `transcription_whisperx[_complete]`, `commentary_llm_start/_complete`,
-     `mux_start/_complete`, `loom_scan_start`, and plan events such as `*_plan`
+     `rip_progress`, `copy_progress`, `transcription_extract`,
+     `transcription_whisperx_complete`, `commentary_llm_start/_complete`,
+     `mux_start/_complete`, `loom_scan_start`, plan events such as `*_plan`,
+     and untyped INFO progress lines (`Phase N/M - ...`, empty `event_type`)
    - Encode lifecycle evidence: `logs.events` carries `encode_init` (input
      resolution/dynamic range), `encoder_config` (preset/quality and full
      `svtav1_params` — check level/mbr cap here for playback-compat questions),
@@ -149,16 +159,18 @@ daemon log file has rotated away or is missing.
      degraded, or interrupted runs have their own terminal type. The workflow
      still writes INFO "stage started/completed" decision logs, with a
      human-readable `stage_duration`; "item stage derived" is raw DEBUG. Every
-     line logged in a stage run carries `stage`, so digest warning/error rows
-     show it in parentheses.
+     line logged in a stage run carries `stage`, so digest warning, error, and
+     event rows show it in parentheses.
    - Failed items get a durable record too: `metrics.jsonl` in the state
      directory appends `outcome=failed` with `failed_stage`, `error`, and stage
      timings when an item fails, alongside the `outcome=completed` records, so a
      failure stays findable after logs expire and the queue is cleared.
-   - Transcription is BATCHED: expect one `transcription_whisperx[_complete]`
-     pair per batch (with a `batch_files` extra), not one per episode;
-     `transcription_extract` still fires per file. A missing per-episode
-     WhisperX event is not an anomaly.
+   - Transcription is BATCHED: one WhisperX run per batch is logged as a
+     `decision_type=transcription_profile` decision (message "running WhisperX
+     transcription", `batch_files` extra), while `transcription_extract` and
+     `transcription_whisperx_complete` fire per file. Every file in a batch
+     reports the batch's shared WhisperX `duration_ms`; do not sum them as
+     separate runs.
    - Episode identification acquires title-vetted OpenSubtitles references
      across the TMDB season, then compares five-minute middle excerpts in one
      Jev Choice per source. Full primary-audio WhisperX transcripts and word

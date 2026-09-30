@@ -74,7 +74,9 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 	if eventErr := opts.Store.RecordEvent(queue.Event{ItemID: item.ID, TaskID: taskID, Attempt: attempt, Type: "stage_start", Stage: stageName}); eventErr != nil {
 		return res, &PersistenceError{Op: "persist stage start", Err: eventErr}
 	}
+	var sess *Session
 	defer func() {
+		sess.endOpenActivities()
 		kind := "stage_complete"
 		switch {
 		case res.Canceled:
@@ -99,7 +101,7 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 	attribution := []any{"item_id", item.ID, "stage", stageName, "task_id", taskID, "attempt", attempt}
 	ctx = logs.ContextWith(ctx, attribution...)
 	runLogger := logger.With(attribution...)
-	sess, err := NewSession(ctx, opts.Store, item, opts.Task)
+	sess, err = NewSession(ctx, opts.Store, item, opts.Task)
 	if err == nil {
 		sess.Logger = runLogger
 		err = opts.Handler.Run(ctx, sess)

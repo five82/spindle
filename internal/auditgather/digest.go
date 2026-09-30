@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 )
 
@@ -28,7 +29,7 @@ func RenderDigest(r *Report, jsonPath string) string {
 	writeDigestHeader(&b, r, jsonPath)
 	writeDigestAnomalies(&b, r)
 	writeDigestErrorsWarnings(&b, r)
-	writeDigestStageTimings(&b, r)
+	writeDigestStageRuns(&b, r)
 	writeDigestEvents(&b, r)
 	writeDigestDecisions(&b, r)
 	writeDigestRipCache(&b, r)
@@ -94,6 +95,7 @@ func writeDigestHeader(b *strings.Builder, r *Report, jsonPath string) {
 		fmt.Fprintf(b, "Logs: %d lines scanned, debug=%v, files: %s\n",
 			r.Logs.LinesScanned, r.Logs.IsDebug, strings.Join(r.Logs.Paths, ", "))
 	}
+	fmt.Fprintf(b, "Times: UTC (raw JSON timestamps keep their original offsets)\n")
 	fmt.Fprintf(b, "Full JSON: %s\n", jsonPath)
 	if len(r.Errors) > 0 {
 		fmt.Fprintf(b, "\nGATHERING ERRORS (data below may be incomplete):\n")
@@ -165,23 +167,119 @@ func writeLogEntries(b *strings.Builder, label string, entries []LogEntry) {
 	}
 }
 
-func writeDigestStageTimings(b *strings.Builder, r *Report) {
-	if r.Analysis == nil || len(r.Analysis.StageTimings) == 0 {
+// maxOpsPerRun caps the per-run "time by activity" list; the full journal is
+// in the JSON transitions.
+const maxOpsPerRun = 8
+
+// writeDigestStageRuns renders the queue journal, which is independent of log
+// rotation: one line per stage run (keyed by task and attempt) with its
+// terminal outcome, then the run's waits, where its time went by activity,
+// any activity still open when the run ended, and encoding substage changes.
+func writeDigestStageRuns(b *strings.Builder, r *Report) {
+	if len(r.Transitions) == 0 {
 		return
 	}
-	fmt.Fprintf(b, "\n## Stage timings\n")
-	for _, st := range r.Analysis.StageTimings {
-		line := fmt.Sprintf("- %-24s %s -> %s", st.Stage, shortTS(st.StartedAt), shortTS(st.CompletedAt))
-		if st.DurationSeconds > 0 {
-			line += "  " + fmtSeconds(st.DurationSeconds)
+	type opTotal struct {
+		name    string
+		seconds float64
+		count   int
+	}
+	type stageRun struct {
+		stage, key string
+		start      string
+		terminal   *queue.Event
+		waits      []string
+		ops        []*opTotal
+		open       map[string]queue.Event
+		substages  []string
+	}
+	var runs []*stageRun
+	byKey := map[string]*stageRun{}
+	for _, e := range r.Transitions {
+		key := fmt.Sprintf("%s task=%d attempt=%d", e.Stage, e.TaskID, e.Attempt)
+		run := byKey[key]
+		if run == nil {
+			run = &stageRun{stage: string(e.Stage), key: key, open: map[string]queue.Event{}}
+			byKey[key] = run
+			runs = append(runs, run)
 		}
-		if st.Starts > 1 || st.Completions > 1 || st.Starts != st.Completions {
-			line += fmt.Sprintf("  (starts=%d completions=%d)", st.Starts, st.Completions)
+		activity := e.Substage + "\x00" + e.EpisodeKey
+		switch {
+		case e.Type == "stage_start":
+			run.start = e.Time
+		case strings.HasPrefix(e.Type, "stage_"):
+			run.terminal = &e
+		case e.Type == "encoding_substage":
+			run.substages = append(run.substages, fmt.Sprintf("%s %s @ %s", e.EpisodeKey, e.Substage, shortTS(e.Time)))
+		case e.Type == "activity_running" || e.Type == "activity_waiting":
+			run.open[activity] = e
+		case strings.HasPrefix(e.Type, "activity_"):
+			began, wasOpen := run.open[activity]
+			delete(run.open, activity)
+			if wasOpen && began.Type == "activity_waiting" {
+				run.waits = append(run.waits, fmt.Sprintf("%s %s %q", e.Substage, fmtSeconds(e.DurationSeconds), began.Message))
+				continue
+			}
+			var op *opTotal
+			for _, o := range run.ops {
+				if o.name == e.Substage {
+					op = o
+				}
+			}
+			if op == nil {
+				op = &opTotal{name: e.Substage}
+				run.ops = append(run.ops, op)
+			}
+			op.seconds += e.DurationSeconds
+			op.count++
 		}
-		if st.Interruptions > 0 {
-			line += fmt.Sprintf("  INTERRUPTED x%d", st.Interruptions)
+	}
+
+	fmt.Fprintf(b, "\n## Stage runs (queue journal)\n")
+	for _, run := range runs {
+		line := fmt.Sprintf("- %s: %s -> ", run.key, shortTS(run.start))
+		switch t := run.terminal; {
+		case t == nil:
+			line += "(no terminal event: running)"
+		case t.Type == "stage_interrupted":
+			line += fmt.Sprintf("INTERRUPTED after %s (last: %q %.0f%%)", fmtSeconds(t.DurationSeconds), t.Message, t.Percent)
+		default:
+			outcome := strings.ToUpper(strings.TrimPrefix(t.Type, "stage_"))
+			line += fmt.Sprintf("%s %s @ %s", outcome, fmtSeconds(t.DurationSeconds), shortTS(t.Time))
 		}
 		fmt.Fprintln(b, line)
+		for _, w := range run.waits {
+			fmt.Fprintf(b, "  waited: %s\n", w)
+		}
+		if len(run.ops) > 0 {
+			sort.SliceStable(run.ops, func(i, j int) bool { return run.ops[i].seconds > run.ops[j].seconds })
+			var parts []string
+			for i, o := range run.ops {
+				if i >= maxOpsPerRun {
+					parts = append(parts, fmt.Sprintf("(+%d more in JSON)", len(run.ops)-maxOpsPerRun))
+					break
+				}
+				part := o.name + " " + fmtSeconds(o.seconds)
+				if o.count > 1 {
+					part += fmt.Sprintf(" x%d", o.count)
+				}
+				parts = append(parts, part)
+			}
+			fmt.Fprintf(b, "  time by activity: %s\n", strings.Join(parts, ", "))
+		}
+		if run.terminal != nil && run.terminal.Type != "stage_interrupted" {
+			var open []string
+			for _, e := range run.open {
+				open = append(open, fmt.Sprintf("%s %q", e.Substage, e.Message))
+			}
+			sort.Strings(open)
+			for _, o := range open {
+				fmt.Fprintf(b, "  OPEN at run end: %s\n", o)
+			}
+		}
+		for _, sub := range run.substages {
+			fmt.Fprintf(b, "  substage: %s\n", sub)
+		}
 	}
 }
 
@@ -196,6 +294,9 @@ func writeDigestEvents(b *strings.Builder, r *Report) {
 	fmt.Fprintf(b, ")\n")
 	for _, e := range r.Logs.Events {
 		line := fmt.Sprintf("- %s", shortTS(e.TS))
+		if e.Stage != "" {
+			line += " (" + e.Stage + ")"
+		}
 		if e.EventType != "" {
 			line += " [" + e.EventType + "]"
 		}
@@ -730,7 +831,9 @@ func writeDigestTrailer(b *strings.Builder, jsonPath string) {
 	fmt.Fprintln(b, "This digest is a starting point, not the audit. Investigate every anomaly, warning, error, and suspicious value in the full JSON before reporting.")
 }
 
-// shortTS compacts an RFC3339 timestamp to "01-02 15:04:05" for display.
+// shortTS compacts an RFC3339 timestamp to "01-02 15:04:05" UTC for display.
+// Daemon logs carry the local offset while queue transitions are UTC, so every
+// rendered time is normalized to one zone to keep sections comparable.
 // Unparseable or empty inputs are returned as-is.
 func shortTS(ts string) string {
 	if ts == "" {
@@ -740,7 +843,7 @@ func shortTS(ts string) string {
 	if err != nil {
 		return ts
 	}
-	return t.Format("01-02 15:04:05")
+	return t.UTC().Format("01-02 15:04:05")
 }
 
 func fmtSeconds(s float64) string {

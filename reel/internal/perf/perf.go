@@ -151,11 +151,9 @@ type GrainTreatmentStats struct {
 
 	DenoiseCeilingJODMean *float64 `json:"denoise_ceiling_jod_mean,omitempty"`
 	DenoiseCeilingJODMin  *float64 `json:"denoise_ceiling_jod_min,omitempty"`
-	// CeilingMeasured records a completed paired-frame pass. CeilingError
-	// remains for historical best-effort reports; automatic treatment now
-	// fails if this pass cannot supply a valid grain model.
-	CeilingMeasured bool   `json:"ceiling_measured,omitempty"`
-	CeilingError    string `json:"ceiling_error,omitempty"`
+	// CeilingMeasured records a completed paired-frame pass; automatic
+	// treatment fails if this pass cannot supply a valid grain model.
+	CeilingMeasured bool `json:"ceiling_measured,omitempty"`
 	// BandTopJOD is the top of the configured target-quality band, recorded
 	// so consumers can judge the ceiling against the band without
 	// duplicating the constant.

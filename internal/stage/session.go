@@ -340,10 +340,7 @@ func (s *Session) progress(percent *float64, message string, opts ...ProgressOpt
 				if s.Task.ID == 0 || a.State != "running" && a.State != "waiting" {
 					continue
 				}
-				start, _ := time.Parse(time.RFC3339Nano, a.StartedAt)
-				if err := s.Store.RecordEvent(queue.Event{ItemID: s.Item.ID, TaskID: s.Task.ID, Attempt: s.Task.Attempts, Type: "activity_ended", Stage: s.Task.Type, EpisodeKey: a.AssetKey, Substage: a.Operation, Message: a.Message, DurationSeconds: observed.Sub(start).Seconds()}); err != nil {
-					s.warnProgressFailure(err)
-				}
+				s.recordActivityEnded(a, observed)
 			}
 			s.Task.Activities = nil
 			if *update.activeEpisode != "" {
@@ -399,11 +396,7 @@ func (s *Session) progress(percent *float64, message string, opts ...ProgressOpt
 					a.Completed = max(a.Completed, previous.Completed)
 				}
 			} else if s.Task.ID != 0 && (previous.State == "running" || previous.State == "waiting") {
-				start, _ := time.Parse(time.RFC3339Nano, previous.StartedAt)
-				if err := s.Store.RecordEvent(queue.Event{ItemID: s.Item.ID, TaskID: s.Task.ID, Attempt: s.Task.Attempts, Type: "activity_ended", Stage: s.Task.Type,
-					EpisodeKey: previous.AssetKey, Substage: previous.Operation, Message: previous.Message, DurationSeconds: observed.Sub(start).Seconds()}); err != nil {
-					s.warnProgressFailure(err)
-				}
+				s.recordActivityEnded(previous, observed)
 			}
 			if a.Completed != previous.Completed {
 				a.AdvancedAt = now
@@ -434,6 +427,48 @@ func (s *Session) progress(percent *float64, message string, opts ...ProgressOpt
 		}
 	}
 	if s.Task.ID == 0 {
+		return
+	}
+	if err := s.Store.UpdateTaskProgress(s.Task); err != nil {
+		s.warnProgressFailure(err)
+	}
+}
+
+// recordActivityEnded journals an open activity that stopped without its own
+// terminal state: superseded by another operation, an asset change, or the
+// end of the run.
+func (s *Session) recordActivityEnded(a queue.Activity, observed time.Time) {
+	start, _ := time.Parse(time.RFC3339Nano, a.StartedAt)
+	if err := s.Store.RecordEvent(queue.Event{ItemID: s.Item.ID, TaskID: s.Task.ID, Attempt: s.Task.Attempts, Type: "activity_ended", Stage: s.Task.Type,
+		EpisodeKey: a.AssetKey, Substage: a.Operation, Message: a.Message, DurationSeconds: observed.Sub(start).Seconds()}); err != nil {
+		s.warnProgressFailure(err)
+	}
+}
+
+// endOpenActivities closes every activity still running or waiting when the
+// run reaches its terminal outcome, so a finished task never reports live
+// work. Closed activities stay on the row as "ended" for the record.
+func (s *Session) endOpenActivities() {
+	if s == nil || s.Store == nil || s.Item == nil || s.Task == nil || s.Task.ID == 0 {
+		return
+	}
+	s.progressMu.Lock()
+	defer s.progressMu.Unlock()
+	observed := time.Now()
+	if s.now != nil {
+		observed = s.now()
+	}
+	ended := false
+	for i, a := range s.Task.Activities {
+		if a.State != "running" && a.State != "waiting" {
+			continue
+		}
+		s.recordActivityEnded(a, observed)
+		s.Task.Activities[i].State = "ended"
+		s.Task.Activities[i].UpdatedAt = observed.UTC().Format(time.RFC3339Nano)
+		ended = true
+	}
+	if !ended {
 		return
 	}
 	if err := s.Store.UpdateTaskProgress(s.Task); err != nil {

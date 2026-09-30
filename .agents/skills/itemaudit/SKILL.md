@@ -35,8 +35,11 @@ writes the full JSON to a temp path shown in the header. Read the entire digest,
 then check gathering errors, `stage_gate`, and pre-flagged anomalies. The digest
 is a starting point, not the audit: investigate every anomaly, warning, error,
 and suspicious value, consulting the full JSON for omissions and raw evidence.
-Always read the full JSON `transitions` for stage outcomes, retries, and
-encoding substages; they are not in the digest's Events section. Use the
+The digest's "Stage runs" section renders the queue journal (`transitions`):
+every run's terminal outcome, waits, time by activity, activities left open,
+and encoding substages. Read the JSON `transitions` when you need the exact
+sequence behind a run. Digest times are UTC; raw JSON and log timestamps keep
+their own offsets. Use the
 pre-computed `stage_gate.phase_*` booleans rather than re-deriving applicability
 from the coarse item stage. For failed items, diagnose the failure without
 padding the report with phases not reached.

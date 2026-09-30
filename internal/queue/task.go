@@ -81,6 +81,8 @@ type Task struct {
 // Activity is one current operation, not a percentage of a task. IDs name
 // bounded lanes (work, video, audio, references), replaced when their scope
 // changes. A positive total identifies a measured denominator; zero is unknown.
+// State is running or waiting while live; an activity still open when its run
+// reaches a terminal outcome is closed as "ended".
 type Activity struct {
 	ID         string `json:"id"`
 	Operation  string `json:"operation"`

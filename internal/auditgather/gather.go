@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -65,11 +66,11 @@ func Gather(ctx context.Context, cfg *config.Config, item *httpapi.ItemResponse,
 	// Compute stage gate.
 	r.StageGate = computeStageGate(item, mediaType, mediaHint, env.Metadata.DiscSource)
 
-	// Log analysis. A scan error mid-file still leaves usable parsed entries,
-	// so keep the partial report alongside the recorded error.
-	logReport, logErr := gatherLogs(cfg, item)
-	if logErr != nil {
-		r.addError("gather logs: %v", logErr)
+	// Log analysis. A read error or an expired log still leaves usable parsed
+	// entries, so keep the partial report alongside the recorded errors.
+	logReport, logErrs := gatherLogs(cfg, item)
+	for _, err := range logErrs {
+		r.addError("gather logs: %v", err)
 	}
 	if logReport != nil {
 		r.Logs = logReport
@@ -283,12 +284,18 @@ const itemLogGrace = 2 * time.Minute
 
 // gatherLogs parses structured log entries for this item from every daemon
 // log file that overlaps the item's lifetime: the file active at creation
-// plus all later files (daemon restarts mid-item start a new file). A scan
-// error is returned alongside the partially-filled report.
-func gatherLogs(cfg *config.Config, item *httpapi.ItemResponse) (*LogAnalysis, error) {
-	logPaths := findLogFiles(cfg.DaemonLogDir(), item.CreatedAt)
+// plus all later files (daemon restarts mid-item start a new file). Problems
+// that leave the log evidence incomplete are returned alongside the
+// partially-filled report so the audit never reads as complete when it is not.
+func gatherLogs(cfg *config.Config, item *httpapi.ItemResponse) (*LogAnalysis, []error) {
+	logPaths, coversCreation := findLogFiles(cfg.DaemonLogDir(), item.CreatedAt)
 	if len(logPaths) == 0 {
-		return nil, fmt.Errorf("no log file found for item %d", item.ID)
+		return nil, []error{fmt.Errorf("no log file found for item %d", item.ID)}
+	}
+
+	var errs []error
+	if !coversCreation {
+		errs = append(errs, fmt.Errorf("earliest available log %s starts after item creation %s: earlier item log lines have expired", filepath.Base(logPaths[0]), item.CreatedAt))
 	}
 
 	// Item IDs and disc titles recur across queue clears and re-rips; the
@@ -299,18 +306,20 @@ func gatherLogs(cfg *config.Config, item *httpapi.ItemResponse) (*LogAnalysis, e
 	}
 
 	report := &LogAnalysis{Paths: logPaths}
-	var firstErr error
 	for _, path := range logPaths {
-		if err := scanLogFile(path, item, report, cutoff); err != nil && firstErr == nil {
-			firstErr = err
+		if err := scanLogFile(path, item, report, cutoff); err != nil {
+			errs = append(errs, err)
 		}
 	}
 
 	report.Events, report.EventsOmitted = compactProgressEvents(report.Events)
 
-	return report, firstErr
+	return report, errs
 }
 
+// scanLogFile parses every line of one log file. Lines are read whole with no
+// length cap: a single oversized record must not end the scan and silently
+// drop the rest of the file.
 func scanLogFile(path string, item *httpapi.ItemResponse, report *LogAnalysis, cutoff time.Time) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -318,27 +327,31 @@ func scanLogFile(path string, item *httpapi.ItemResponse, report *LogAnalysis, c
 	}
 	defer func() { _ = f.Close() }()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		report.LinesScanned++
-		parseLogLine(line, item, report, cutoff)
+	reader := bufio.NewReader(f)
+	for {
+		line, err := reader.ReadString('\n')
+		if line != "" {
+			report.LinesScanned++
+			parseLogLine(line, item, report, cutoff)
+		}
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read log %s: %w", filepath.Base(path), err)
+		}
 	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scan log %s: %w", filepath.Base(path), err)
-	}
-	return nil
 }
 
 // findLogFiles locates the daemon log files covering the item's lifetime: the
 // file active when the item was created and every later file. Log files are
-// named spindle-{timestamp}.log in the state directory.
-func findLogFiles(stateDir, createdAt string) []string {
+// named spindle-{timestamp}.log in the state directory. coversCreation is
+// false when every file that was active at creation has been deleted, so the
+// returned files start after the item's earliest log lines.
+func findLogFiles(stateDir, createdAt string) (paths []string, coversCreation bool) {
 	entries, err := os.ReadDir(stateDir)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 
 	// Collect log file names sorted by name (which sorts by timestamp).
@@ -354,7 +367,7 @@ func findLogFiles(stateDir, createdAt string) []string {
 	}
 
 	if len(logFiles) == 0 {
-		return nil
+		return nil, false
 	}
 
 	sort.Strings(logFiles)
@@ -374,10 +387,15 @@ func findLogFiles(stateDir, createdAt string) []string {
 		ts := extractLogTimestamp(filepath.Base(path))
 		if ts <= normalized {
 			start = i
+			coversCreation = true
 		}
 	}
+	// An unknown creation time cannot establish a gap.
+	if normalized == "" {
+		coversCreation = true
+	}
 
-	return logFiles[start:]
+	return logFiles[start:], coversCreation
 }
 
 // extractLogTimestamp converts "spindle-20260322T011625.285Z.log" to
@@ -501,10 +519,12 @@ func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis, 
 		})
 	}
 
-	// Item-specific INFO events that are not decisions or stage transitions.
-	// These carry progress/operation visibility such as encoding_progress,
-	// transcription completions, mux/copy progress, and plan summaries.
-	if strings.EqualFold(level, "INFO") && eventType != "" && decType == "" {
+	// Every item-specific INFO line that is not a decision. Most carry an
+	// event_type (encoding_progress, transcription completions, mux/copy
+	// progress, plan summaries), but the field contract does not require one
+	// on INFO, so untyped lines such as "Phase N/M" progress are kept too
+	// rather than silently vanishing from the audit.
+	if strings.EqualFold(level, "INFO") && decType == "" {
 		report.Events = append(report.Events, LogEntry{
 			TS:        ts,
 			Level:     level,
@@ -735,16 +755,15 @@ func gatherMediaProbes(ctx context.Context, env *ripspec.Envelope, mediaType str
 	return probes
 }
 
-// probeBestAsset probes the most complete version of an asset: final > subtitled > encoded.
+// probeBestAsset probes the most complete version of an asset: final >
+// subtitled > encoded. A failed probe is returned as-is rather than falling
+// back to an earlier stage, so a missing or corrupt delivered file surfaces as
+// a probe error instead of being masked by an intermediate that still exists.
 func probeBestAsset(ctx context.Context, env *ripspec.Envelope, episodeKey string) MediaFileProbe {
 	for _, stage := range []string{ripspec.AssetKindFinal, ripspec.AssetKindSubtitled, ripspec.AssetKindEncoded} {
 		asset, ok := env.Assets.FindAsset(stage, episodeKey)
-		if !ok || !asset.IsCompleted() {
-			continue
-		}
-		p := probeFile(ctx, asset.Path, stage, episodeKey)
-		if p.Error == "" {
-			return p
+		if ok && asset.IsCompleted() {
+			return probeFile(ctx, asset.Path, stage, episodeKey)
 		}
 	}
 	return MediaFileProbe{}

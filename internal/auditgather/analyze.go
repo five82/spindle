@@ -1,6 +1,7 @@
 package auditgather
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"math"
@@ -1170,11 +1171,24 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 		if !g.Treated || g.DenoiseCeilingJODMin == nil || *g.DenoiseCeilingJODMin >= bandTop {
 			continue
 		}
-		name := g.EpisodeKey
-		if name == "" {
-			name = "encode"
+		lowCeilings = append(lowCeilings, fmt.Sprintf("%s: min %.2f vs band top %.2f", cmp.Or(g.EpisodeKey, "encode"), *g.DenoiseCeilingJODMin, bandTop))
+	}
+	// Automatic treatment requires the paired-frame ceiling pass (explicit
+	// overrides may skip it), so a treated auto verdict without a ceiling
+	// shipped scores that have no honest cap.
+	var unmeasured []string
+	for _, g := range a.GrainTreatments {
+		if g.Treated && g.Mode != "override" && g.DenoiseCeilingJODMin == nil {
+			unmeasured = append(unmeasured, cmp.Or(g.EpisodeKey, "encode"))
 		}
-		lowCeilings = append(lowCeilings, fmt.Sprintf("%s: min %.2f vs band top %.2f", name, *g.DenoiseCeilingJODMin, bandTop))
+	}
+	if len(unmeasured) > 0 {
+		anomalies = append(anomalies, Anomaly{
+			Severity: "warning",
+			Category: "encoding",
+			Message: fmt.Sprintf("%d automatically treated encode(s) have no measured denoise ceiling: %s",
+				len(unmeasured), strings.Join(unmeasured, ", ")),
+		})
 	}
 	if len(lowCeilings) > 0 {
 		anomalies = append(anomalies, Anomaly{
@@ -1201,6 +1215,25 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 		checkStage("subtitled", a.AssetHealth.Subtitled)
 		checkStage("final", a.AssetHealth.Final)
 		checkStage("transcript", a.AssetHealth.Transcript)
+	}
+
+	// The organizer fails the stage on a misroute, so a mismatch here means
+	// its check and this audit's routing rule disagree about a delivered file.
+	if a.RoutingSummary != nil {
+		var misrouted []string
+		for _, e := range a.RoutingSummary.Entries {
+			if !e.MatchesExpected {
+				misrouted = append(misrouted, fmt.Sprintf("%s in %s", cmp.Or(e.EpisodeKey, filepath.Base(e.Path)), e.Destination))
+			}
+		}
+		if len(misrouted) > 0 {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "critical",
+				Category: "routing",
+				Message: fmt.Sprintf("%d final output(s) not where their review flags route them, despite the organizer's routing check: %s",
+					len(misrouted), strings.Join(misrouted, "; ")),
+			})
+		}
 	}
 
 	// Keep commentary-only differences in the profile summary, but warn only

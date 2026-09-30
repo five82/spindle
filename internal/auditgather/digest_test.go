@@ -124,11 +124,11 @@ func TestRenderDigestCoreSections(t *testing.T) {
 		"[rip_progress] rip progress | percent=100 total=65536",
 		"5 progress ticks omitted",
 		// Identical repeats: one line with every timestamp (retry spacing).
-		"rip_retry: retried (io error) x3 @ 08-11 22:00:01, 08-11 22:05:01, 08-11 22:10:01",
+		"rip_retry: retried (io error) x3 @ 08-12 02:00:01, 08-12 02:05:01, 08-12 02:10:01",
 		// Varying messages: expanded entries.
 		"title_rip: completed x2:",
-		"08-11 22:20:01 ripped title 0",
-		"08-11 22:30:01 ripped title 1",
+		"08-12 02:20:01 ripped title 0",
+		"08-12 02:30:01 ripped title 1",
 		// Episode manifest with unresolved flagged.
 		"s01_001 title_id=1 S01E03 probability=0.95",
 		"s01_002 title_id=2 UNRESOLVED",
@@ -211,5 +211,14 @@ func TestFormatExtrasTruncatesLongValues(t *testing.T) {
 	got := formatExtras(map[string]any{"big": strings.Repeat("x", maxExtraValueLen+50)})
 	if !strings.Contains(got, "truncated, full value in JSON") {
 		t.Errorf("expected truncation marker, got %q", got)
+	}
+}
+
+// Daemon logs carry the local offset while queue transitions are UTC; the
+// digest must render the same instant identically in both sections.
+func TestShortTSNormalizesOffsets(t *testing.T) {
+	local, utc := shortTS("2026-09-29T21:23:18.5-04:00"), shortTS("2026-09-30T01:23:18Z")
+	if local != utc || utc != "09-30 01:23:18" {
+		t.Fatalf("local=%q utc=%q", local, utc)
 	}
 }

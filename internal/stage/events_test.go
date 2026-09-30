@@ -38,3 +38,55 @@ func TestExecutorJournalsEachRunOutcome(t *testing.T) {
 		}
 	}
 }
+
+// A finished run must not leave activities reporting live work: the executor
+// ends every open activity, journaling activity_ended before the terminal
+// stage event, while activities that already finished keep their state.
+func TestExecutorEndsOpenActivitiesAtTerminalOutcome(t *testing.T) {
+	store := openExecutorTestStore(t)
+	item, err := store.NewDisc("disc", "fp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.EnsureTasks(item, []queue.TaskSpec{{Type: queue.StageIdentification}}); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := store.TasksForItem(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := tasks[0]
+	if err = store.StartTask(task); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ExecuteWorkflowStage(context.Background(), item, WorkflowOptions{
+		Store: store, Stage: queue.StageIdentification, Task: task,
+		Handler: executorStubHandler{run: func(_ context.Context, sess *Session) error {
+			sess.Activity(queue.Activity{ID: "summary", Operation: "matching", State: "done", Message: "matched"})
+			sess.Activity(queue.Activity{Operation: "persist", Message: "Finalizing identification"})
+			return nil
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.TasksForItem(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]string{}
+	for _, a := range stored[0].Activities {
+		states[a.Operation] = a.State
+	}
+	if states["persist"] != "ended" || states["matching"] != "done" {
+		t.Fatalf("activity states = %v", states)
+	}
+	events, _, err := store.Events(item.ID, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := len(events)
+	if n < 2 || events[n-2].Type != "activity_ended" || events[n-2].Substage != "persist" || events[n-1].Type != "stage_complete" {
+		t.Fatalf("events = %+v", events)
+	}
+}

@@ -565,14 +565,15 @@ func TestDetectAnomalies_UntreatedHighWholeFileCostIsNotGateFailure(t *testing.T
 	}
 }
 
-// A ceiling at or above the band top is the expected outcome, and an
-// untreated or unmeasured encode has no ceiling to judge.
+// A ceiling at or above the band top is the expected outcome; an untreated
+// encode, or an explicit override that skipped the pass, has no ceiling to
+// judge.
 func TestDetectAnomalies_DenoiseCeilingAtBandTopIsClean(t *testing.T) {
 	a := &Analysis{GrainTreatments: []GrainTreatmentEntry{
 		{EpisodeKey: "ok", GrainTreatment: ripspec.GrainTreatment{
 			Treated: true, DenoiseCeilingJODMin: jodPtr(grainCeilingFloorJOD),
 		}},
-		{EpisodeKey: "unmeasured", GrainTreatment: ripspec.GrainTreatment{Treated: true}},
+		{EpisodeKey: "override", GrainTreatment: ripspec.GrainTreatment{Treated: true, Mode: "override"}},
 		{EpisodeKey: "untreated", GrainTreatment: ripspec.GrainTreatment{DenoiseCeilingJODMin: jodPtr(1.0)}},
 	}}
 
@@ -745,9 +746,83 @@ func TestStageInterruptionIsCountedAndFlagged(t *testing.T) {
 	if len(flagged) != 1 || flagged[0].Severity != "warning" || !strings.Contains(flagged[0].Message, "encoding interrupted 1 time(s)") {
 		t.Fatalf("interruption anomalies = %+v", anomalies)
 	}
+}
+
+// The digest renders every journaled run with its own outcome, so a failed,
+// canceled, or interrupted run is visible without reading the JSON; waits,
+// activity time, activities left open, and substages attach to their run.
+func TestRenderDigestStageRuns(t *testing.T) {
+	events := []queue.Event{
+		{Time: "2026-09-30T01:00:00Z", Type: "stage_start", Stage: "encoding", TaskID: 4, Attempt: 1},
+		{Time: "2026-09-30T01:00:01Z", Type: "activity_waiting", Stage: "encoding", TaskID: 4, Attempt: 1, Substage: "input", Message: "Waiting for completed rip"},
+		{Time: "2026-09-30T01:00:11Z", Type: "activity_ended", Stage: "encoding", TaskID: 4, Attempt: 1, Substage: "input", DurationSeconds: 10},
+		{Time: "2026-09-30T01:00:12Z", Type: "encoding_substage", Stage: "encoding", TaskID: 4, Attempt: 1, EpisodeKey: "s01_003", Substage: "chunking"},
+		{Time: "2026-09-30T01:00:12Z", Type: "activity_running", Stage: "encoding", TaskID: 4, Attempt: 1, Substage: "Chunking", EpisodeKey: "s01_003"},
+		{Time: "2026-09-30T01:05:00Z", Type: "stage_interrupted", Stage: "encoding", TaskID: 4, Attempt: 1, Message: "Encoding s01_003", Percent: 42, DurationSeconds: 300},
+		{Time: "2026-09-30T01:06:00Z", Type: "stage_start", Stage: "encoding", TaskID: 4, Attempt: 2},
+		{Time: "2026-09-30T01:06:01Z", Type: "activity_running", Stage: "encoding", TaskID: 4, Attempt: 2, Substage: "Chunking"},
+		{Time: "2026-09-30T01:07:01Z", Type: "activity_ended", Stage: "encoding", TaskID: 4, Attempt: 2, Substage: "Chunking", DurationSeconds: 60},
+		{Time: "2026-09-30T01:07:01Z", Type: "activity_running", Stage: "encoding", TaskID: 4, Attempt: 2, Substage: "persist", Message: "Finalizing"},
+		{Time: "2026-09-30T01:08:00Z", Type: "stage_failed", Stage: "encoding", TaskID: 4, Attempt: 2, DurationSeconds: 120},
+		{Time: "2026-09-30T01:09:00Z", Type: "stage_start", Stage: "subtitling", TaskID: 6, Attempt: 1},
+		{Time: "2026-09-30T01:09:30Z", Type: "stage_canceled", Stage: "subtitling", TaskID: 6, Attempt: 1, DurationSeconds: 30},
+	}
 	var b strings.Builder
-	writeDigestStageTimings(&b, &Report{Analysis: &Analysis{StageTimings: timings}})
-	if !strings.Contains(b.String(), "INTERRUPTED x1") {
-		t.Fatalf("digest timing row: %s", b.String())
+	writeDigestStageRuns(&b, &Report{Transitions: events})
+	out := b.String()
+	for _, want := range []string{
+		"encoding task=4 attempt=1: 09-30 01:00:00 -> INTERRUPTED after 5m0s (last: \"Encoding s01_003\" 42%)",
+		"waited: input 10s \"Waiting for completed rip\"",
+		"substage: s01_003 chunking @ 09-30 01:00:12",
+		"encoding task=4 attempt=2: 09-30 01:06:00 -> FAILED 2m0s @ 09-30 01:08:00",
+		"time by activity: Chunking 1m0s",
+		"OPEN at run end: persist \"Finalizing\"",
+		"subtitling task=6 attempt=1: 09-30 01:09:00 -> CANCELED 30s",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stage runs missing %q:\n%s", want, out)
+		}
+	}
+	// An interrupted run's open activity is explained by the interruption.
+	if strings.Count(out, "OPEN at run end") != 1 {
+		t.Fatalf("open activities misattributed:\n%s", out)
+	}
+}
+
+// Automatic treatment always runs the paired-frame ceiling pass, so a treated
+// auto verdict without one shipped uncapped scores.
+func TestDetectAnomalies_TreatedAutoWithoutCeiling(t *testing.T) {
+	a := &Analysis{GrainTreatments: []GrainTreatmentEntry{
+		{EpisodeKey: "s01_002", GrainTreatment: ripspec.GrainTreatment{Treated: true, Mode: "auto"}},
+	}}
+	anomalies := detectAnomalies(&Report{}, a)
+	if len(anomalies) != 1 || anomalies[0].Severity != "warning" || !strings.Contains(anomalies[0].Message, "no measured denoise ceiling: s01_002") {
+		t.Fatalf("anomalies = %+v", anomalies)
+	}
+}
+
+// A final output outside the root its review flags require is a delivered-file
+// defect the organizer's own check should have prevented.
+func TestDetectAnomalies_RoutingMismatch(t *testing.T) {
+	r := &Report{
+		Paths: AuditPaths{ReviewDir: "/review", LibraryDir: "/library"},
+		Envelope: &ripspec.Envelope{
+			Metadata: ripspec.Metadata{MediaType: "tv"},
+			Episodes: []ripspec.Episode{{Key: "s01e01", Episode: 1}, {Key: "s01e02", Episode: 2, NeedsReview: true}},
+			Assets: ripspec.Assets{Final: []ripspec.Asset{
+				{EpisodeKey: "s01e01", Path: "/library/show/s01e01.mkv", Status: ripspec.AssetStatusCompleted},
+				{EpisodeKey: "s01e02", Path: "/library/show/s01e02.mkv", Status: ripspec.AssetStatusCompleted},
+			}},
+		},
+	}
+	a := &Analysis{RoutingSummary: computeRoutingSummary(r)}
+	var routing []Anomaly
+	for _, an := range detectAnomalies(r, a) {
+		if an.Category == "routing" {
+			routing = append(routing, an)
+		}
+	}
+	if len(routing) != 1 || routing[0].Severity != "critical" || !strings.Contains(routing[0].Message, "1 final output(s)") || !strings.Contains(routing[0].Message, "s01e02 in library") {
+		t.Fatalf("routing anomalies = %+v", routing)
 	}
 }

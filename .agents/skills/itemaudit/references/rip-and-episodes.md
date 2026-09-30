@@ -52,8 +52,10 @@ Analyze the `rip_cache` section from the audit output:
      `episode=0` — this is expected
    - Check for any ripped assets with `status: "failed"` or missing `path`
    - Verify ripped asset count matches episode count
-5. **Asset mapping strategy**: Check `decision_type=asset_mapping` —
-   `title_file_map` is the normal path for TV, `directory_scan` is the fallback
+5. **Asset mapping strategy**: Check `decision_type=asset_mapping` — TV with
+   episodes maps files by title ID (`title_id_scan`); movies scan the directory
+   (`directory_scan`). WARN `event_type=episode_files_missing` lists episodes
+   whose rip file was not found; each gets a `Rip asset missing` review reason
 
 ### Phase 3b: Episode Identification Validation (when `phase_episode_id` is true)
 
@@ -161,9 +163,10 @@ the wrong root. A misrouted item therefore surfaces as a FAILED item at
    that message names the keys and the expected root: diagnose why the flags and
    the routing branch disagree (it indicates an organizer bug, not a content
    problem).
-3. For a completed item, confirm the routing summary agrees with the per-episode
-   review flags; a disagreement here means the check and the summary disagree,
-   which is itself a finding.
+3. For a completed item, a disagreement between the routing summary and the
+   per-episode review flags is pre-flagged as a critical `routing` anomaly: the
+   organizer's check and the audit's rule disagree about a delivered file.
+   Determine which one is wrong before reporting the file as misrouted.
 4. If the structured audit data is incomplete or suspicious, **inspect the
    actual directories on disk** rather than assuming the envelope tells the
    whole story.

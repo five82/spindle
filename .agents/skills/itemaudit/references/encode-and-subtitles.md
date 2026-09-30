@@ -1,7 +1,11 @@
 ### Phase 4: Encoded File Analysis (when `phase_encoded` is true)
 
 Analyze the `media` array from the audit output. Each entry contains full
-ffprobe results.
+ffprobe results for the most complete completed asset (`role` final, else
+subtitled, else encoded). A probe that fails is kept with `error` and never
+replaced by an earlier-stage file: an `error` entry with `role=final` means the
+delivered file itself is missing or unreadable, and it is pre-flagged as a
+`media` anomaly.
 
 **TV note:** The encoding snapshot only contains data for the last episode
 encoded (the snapshot is overwritten per-episode during encoding). The `media[]`
@@ -168,9 +172,11 @@ episodes from the same disc).
        pre-flagged as a warning anomaly: the denoiser removed quality the CRF
        search can never see as a missed band. Report it with the applicable
        sample median.
-     - A treated title with no ceiling fields measured the treatment but not its
-       cost (the measurement is best effort). Say so; do not read a missing
-       ceiling as a clean one.
+     - Automatic treatment fails the encode when the paired-frame ceiling pass
+       cannot produce a grain model, so an auto-treated title with no ceiling
+       fields violates that invariant and is pre-flagged as a warning anomaly
+       ("no measured denoise ceiling"). An explicit `mode=override` may skip
+       the pass; say so. Never read a missing ceiling as a clean one.
      - An untreated title with a `reason` (`SD sources are never treated`,
        `no chunk long enough to measure`, `grain treatment disabled`, explicit
        override) explains itself. An untreated title with no reason was measured
@@ -314,8 +320,8 @@ this audit.
    - `decision_type=transcription_asset` and
      `decision_type=transcription_profile` show which asset/profile WhisperX
      processed for the sync reference. Use `logs.events` entries
-     (`transcription_extract_complete`, `transcription_whisperx_complete`,
-     `transcription_complete`) for transcription timing before falling back to
+     (`transcription_extract`, `transcription_whisperx_complete`) for
+     transcription timing before falling back to
      the raw files in `logs.paths`.
    - `decision_type=subtitle_transcript_source` with
      `decision_result=artifact_reused` means the stage reused the shared

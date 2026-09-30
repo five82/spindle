@@ -67,58 +67,41 @@ where anomalies exist.
   section/subsection structure
 - Only expand into detailed comparison when a mismatch is found
 
-**Do not report as findings (these are normal):**
+**Do not report as findings (these are normal).** Each rule's conditions live
+in the reference named; apply them there. This list is the reporting-time
+reminder, not a second definition:
 
-- Individual subtitle wording or transcription accuracy — subtitle content is
-  outside this skill's scope
-- A subtitle skip as CRITICAL on its own — determine whether it is a consequence
-  of an upstream bug or a genuine no-verified-candidate outcome; report the
-  latter once as a WARNING with its recovery path
+- Subtitle or transcript wording (SKILL.md scope)
+- A subtitle skip as CRITICAL on its own; report a genuine no-verified-candidate
+  skip once as a WARNING (encode-and-subtitles.md Phase 6.2)
 - Non-sequential disc title ordering — disc layout varies by manufacturer and is
   irrelevant once content ID resolves episodes
 - Inconsistent source audio track counts across titles on the same disc —
   different playlists routinely carry different language sets
 - Audio refinement stripping non-English tracks — that's its job
-- A drain/deploy restart mid-item — `daemon_drain` decisions, cancelled
-  non-drive workers, duplicate stage runs, `startup_queue_state`, skipped
-  already-ripped titles, and encodes resuming from completed chunks are the
-  designed `spindle stop` behavior (see the drain signature in Phase 2)
-- Reel's `event_type=resume_state_discarded` warning right after an upgrade or a
-  re-ripped source — the designed auto-reset; a finding only when nothing
-  changed to explain it. For a newly queued disc, check prior runs of the same
-  fingerprint for disk/write failures; fresh items now discard inherited encode
-  state when they have no recorded completed rip
-- Subtitle `qc_observations` that are below review thresholds and have
-  `validation_result=passed`
-- An adopted subtitle ending before long credits, or a `reference_tail_gap_s` at
-  or below 600 seconds — Matroska duration is a cue span and sparse WhisperX
-  end-credit hallucinations can make the raw reference appear longer
-- Missing HDR10+ dynamic metadata in encoded output — Reel intentionally emits
-  static HDR because the target playback environment does not consume it
-- Target-quality chunks with `stop_reason=rate_capped` (or a
-  `TQ rate-capped chunks` line) scoring below the band — the level 5.1 bitrate
-  cap holding on heavy-grain chunks is the designed playback-compat trade-off;
-  informational only, not a retest or re-encode finding
-- A `grain_treatments[]` entry with `treated: true` (denoise plus a grain
-  table), or an untreated entry whose applicable sample median
-  (`stage2_median_bpp` when re-measured, otherwise `median_bpp`) is below
-  `treatment_bpp_cutoff` — the gate working as designed. High whole-file bpp
-  alone is not a gate false negative; report it only if an independent quality
-  check finds a defect. A treated title whose `denoise_ceiling_jod_min` falls
-  below the recorded `band_top_jod` (default 9.75), or a treated title with no
-  ceiling measured, is worth reporting
-- A movie's encoding task holding the `encode` claim with no encoded output
-  while its rip runs — the deferred plan is expected; see Stage Gating above
-- A resolved `disk_space_wait` followed by `disk_space_available` when the item
-  later succeeds — report the pause as context, not a processing defect. An
-  active `disk_space` warning needs an operator-facing free-space action; an
-  actual later ENOSPC needs its own root-cause investigation
-- An identification-failed item having no rip, encode, or staging artifacts —
-  that is the fatal no-TMDB-match rule working, not missing work
+- Drain/deploy restarts and their resume evidence (logs.md Phase 2)
+- `resume_state_discarded` after an upgrade or a re-ripped source (logs.md
+  Phase 2)
+- Below-threshold subtitle `qc_observations` with `validation_result=passed`
+  (encode-and-subtitles.md Phase 6.3)
+- An adopted subtitle ending before long credits, or a `reference_tail_gap_s`
+  at or below 600 seconds (encode-and-subtitles.md Phase 6.1)
+- Missing HDR10+ dynamic metadata (encode-and-subtitles.md Phase 4.2)
+- `rate_capped` target-quality chunks below the band (encode-and-subtitles.md
+  Phase 4.6)
+- Grain-gate verdicts working as designed, including high whole-file bpp on an
+  untreated title; the exceptions are pre-flagged anomalies
+  (encode-and-subtitles.md Phase 4.6)
+- A movie's encoding task holding the `encode` claim while its rip runs, shown
+  as a Stage runs "waited: input" line (logs.md Phase 2)
+- A resolved disk-space wait on an item that later succeeds (logs.md Phase 2)
+- An identification-failed item with no rip, encode, or staging artifacts
+  (schema.md Stage Gating)
 
 **Stage timing:**
 
-- Always show the timing table — it's compact and useful for spotting anomalies
+- Always show the timing table, built from the digest's Stage runs (outcome
+  and duration per run); it is compact and useful for spotting anomalies
 
 ### Report Template
 
@@ -156,7 +139,7 @@ where anomalies exist.
 - Log files: <logs.paths>
 - Lines scanned: <logs.lines_scanned>
 - INFO events/progress: <summarize notable logs.events; note logs.events_omitted if progress ticks were downsampled; expand long-running progress/timing anomalies only>
-- Native transitions: <summarize stage terminal outcomes, repeated starts/retries, and per-episode encoding_substage changes from full JSON transitions; distinguish cancellations/degraded runs from failures>
+- Native transitions: <from the digest's Stage runs: terminal outcome per run, repeated starts/retries, waits, activities left open, and per-episode encoding substages; distinguish cancellations/degraded runs from failures>
 - WARN events: <count> (list if > 0)
 - ERROR events: <count> (list if > 0)
 - Key decisions: <from analysis.decision_groups — expand only anomalous decisions>
@@ -185,7 +168,7 @@ where anomalies exist.
 - Audio: <stream summary>
 - Encoding config: <encoding.snapshot.quality> | SVT-AV1 preset <encoding.snapshot.preset> | tune <encoding.snapshot.tune> | <encoding.snapshot.audio_codec>
 - Crop: <analysis.crop_analysis.filter> (<analysis.crop_analysis.standard_ratio>)
-- Grain treatment: <from analysis.grain_treatments: treated tier or untreated with reason, median_bpp vs cutoffs, and the denoise ceiling JOD mean/min for treated titles>
+- Grain treatment: <from analysis.grain_treatments: treated or untreated with reason, median_bpp (or stage2_median_bpp) vs treatment_bpp_cutoff, and the denoise ceiling JOD mean/min for treated titles>
 - Validation: <passed/failed, expand individual steps only if failed>
 
 **TV:**
@@ -193,7 +176,7 @@ where anomalies exist.
 - Encoding config: <encoding.snapshot.quality> | SVT-AV1 preset <encoding.snapshot.preset> | tune <encoding.snapshot.tune> | <encoding.snapshot.audio_codec>
 - Duration: <analysis.media_stats.duration_min_sec>-<max>s | Size: <analysis.media_stats.size_min_bytes>-<max>
 - Cross-episode consistency: <analysis.episode_consistency — pass if no deviations, else list deviations>
-- Grain treatment: <from analysis.grain_treatments: which episodes were treated, at which tier, and the lowest denoise ceiling JOD across them>
+- Grain treatment: <from analysis.grain_treatments: which episodes were treated, and the lowest denoise ceiling JOD across them>
 - Failed episodes: <count, with details if > 0>
 
 #### Subtitle Pipeline (if phase_subtitles)
@@ -232,9 +215,9 @@ After running `spindle queue audit`, check only the phases flagged as `true` in
       into the full JSON wherever the digest flagged an omission or something
       looked off; for a fresh-item resume warning, checked prior
       same-fingerprint runs outside the current item's clamped log window
-- [ ] Read full JSON `transitions` for stage starts/terminal outcomes and
-      encoding substages; used `analysis.stage_timings` for the timing table,
-      not nonexistent `logs.stages`
+- [ ] Read the digest's Stage runs for every run's terminal outcome, waits,
+      open activities, and encoding substages (JSON `transitions` for exact
+      sequences); used them for the timing table
 - [ ] If TV: reconciled scanned, selected, placeholder, manifest, ripped, and
       final episode counts; checked a credible disc-specific episode listing if
       available (DVD included); investigated every reduction or excess
@@ -274,7 +257,7 @@ After running `spindle queue audit`, check only the phases flagged as `true` in
 - [ ] Analyzed streams from `media[]` entries (video, audio, subtitle)
 - [ ] Validated crop detection from `encoding.snapshot.crop_filter`
 - [ ] Read `analysis.grain_treatments`: noted which encodes were treated and at
-      which tier, and checked every treated encode's `denoise_ceiling_jod_min`
+      whether it was re-measured at stage 2, and checked every treated encode's `denoise_ceiling_jod_min`
       against the 9.75 band top
 - [ ] Reviewed the apply stage's commentary, audio layout, and subtitle layout
       verdicts

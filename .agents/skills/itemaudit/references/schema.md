@@ -11,9 +11,10 @@ rather than a stable public API. It contains:
 - **`stage_gate`**: Pre-computed phase applicability (which analyses apply,
   resolved media type, media hint, disc source)
 - **`logs`**: Parsed diagnostic log entries — warnings and errors (with `extras`
-  maps of non-standard log fields), item-specific INFO events/progress
-  (`logs.events` with `event_type` and extras), but NOT native stage/substage
-  transitions. Gathered from every daemon log file overlapping the item's
+  maps of non-standard log fields), and every other item-specific INFO line
+  (`logs.events`, usually with an `event_type`; untyped lines such as
+  `Phase N/M` progress are kept with an empty `event_type`), but NOT native
+  stage/substage transitions. Gathered from every daemon log file overlapping the item's
   lifetime (`logs.paths` — daemon restarts mid-item span multiple files),
   clamped to the item's creation time so reused item IDs / re-ripped discs don't
   leak earlier runs' lines. Flooding `*_progress` event types are downsampled
@@ -24,19 +25,26 @@ rather than a stable public API. It contains:
   includes shared-client lines (`llm_request_*`, `llm_retry`, `opensubtitles_*`,
   `tmdb_retry`, `loom_scan*`, transcription), so an LLM or OpenSubtitles retry
   is attributable to the stage that issued it. DEBUG lines are never parsed;
-  `logs.is_debug` only says the files contain them.
+  `logs.is_debug` only says the files contain them. Lines are read whole with no
+  length cap. If every log file active at item creation has expired, `errors`
+  says so: the earliest log lines are missing, not clean.
 - **`transitions`**: Native, queue-backed per-item event history, ordered by
   increasing `id` across daemon restarts. Each entry has `time`, `type`,
-  `stage`, and `itemId`; terminal events have numeric `durationSeconds`, and
-  `encoding_substage` entries may carry `episodeKey`, `substage`, `message`, and
-  `percent`. Each run emits `stage_start` and one terminal event:
+  `stage`, `itemId`, `taskId`, and `attempt`; a run is one (`stage`, `taskId`,
+  `attempt`). Each run emits `stage_start` and one terminal event:
   `stage_complete`, `stage_failed`, `stage_canceled`, `stage_stopped`, or
-  `stage_degraded`. Startup recovery records `stage_interrupted` (with the
-  task's last `episodeKey`, `message`, `percent`, and the run's
-  `durationSeconds`) for a run the daemon died under. Consult the full JSON for
-  restart/retry sequences, failures, and substage progress; these entries are
-  not in `logs.events` or the digest's Events section. The queue DB is
-  transient: removed/cleared items lose their transitions.
+  `stage_degraded`, with numeric `durationSeconds`. Startup recovery records
+  `stage_interrupted` (with the task's last `episodeKey`, `message`, `percent`,
+  and the run's `durationSeconds`) for a run the daemon died under.
+  `encoding_substage` entries carry `episodeKey` and `substage`. Task
+  activities are journaled as `activity_running`/`activity_waiting` when they
+  start and `activity_done`/`activity_ended` (with `durationSeconds`) when they
+  finish or are superseded; `substage` holds the activity's operation. The
+  executor ends every activity still open when a run reaches its terminal
+  outcome, so a live activity on a finished run is a defect. The digest's
+  "Stage runs" section renders all of this per run; use the JSON for exact
+  sequences. The queue DB is transient: removed/cleared items lose their
+  transitions.
 - **`rip_cache`**: Cache metadata (disc title, cached_at, title_count,
   total_bytes). Serialized `rip_spec_data` and `metadata_json` blobs are omitted
   (already in parsed `envelope`). `disabled: true` means the cache is turned off
@@ -51,11 +59,15 @@ rather than a stable public API. It contains:
   Spindle always uses Reel target-quality mode, so the snapshot carries the full
   Reel-reported config summary (`encoder`, `quality`, `preset`, `tune`,
   `audio_codec`) plus crop and validation (pass/fail) — nothing is omitted
-- **`media`**: ffprobe output for encoded files. For TV, only the representative
-  probe (matching majority profile, marked `representative: true`), deviation
-  probes, and error probes are included. `media_omitted` indicates how many
-  clean probes were dropped.
-- **`errors`**: Any gathering errors (missing logs, parse failures, etc.)
+- **`media`**: ffprobe output for the most complete completed asset per output
+  (final, else subtitled, else encoded), with `role` naming which. A failed
+  probe is kept with `error` and is never replaced by an earlier-stage file, so
+  a missing or corrupt delivered file shows up here. For TV, only the
+  representative probe (matching majority profile, marked
+  `representative: true`), deviation probes, and error probes are included.
+  `media_omitted` indicates how many clean probes were dropped.
+- **`errors`**: Any gathering errors (missing or expired logs, read and parse
+  failures). Data below them may be incomplete.
 - **`analysis`**: Pre-computed summaries — decision groups, episode consistency,
   crop analysis, episode stats, media stats, asset health, the apply stage's
   final-output validation verdict, anomaly flags (see Analysis Reference below)
@@ -74,17 +86,17 @@ pre-computed summaries:
 | --------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `decision_groups`     | Decisions exist                    | Groups by (type, result, reason) with count, in log order. `entries` always carries every grouped decision with its timestamp — this is the only record of individual decisions and their spacing.                                                                                                                                                                                                                                                                                            |
 | `notable_decisions`   | Notable decisions exist            | Curated subset of decisions most useful for reporting (TMDB/title/crop/validation/source normalization/audio/subtitle/routing/episode match), avoiding noisy full decision scans.                                                                                                                                                                                                                                                                                                             |
-| `stage_timings`       | Native stage transitions exist     | One row per stage with start, successful completion, duration, start count, completion count, and `interruptions` (`stage_interrupted` runs). Derived from `transitions`; `stage_failed`/`stage_canceled`/`stage_stopped`/`stage_degraded` are NOT counted as successful completions. Read raw transitions for the outcome of each run.                                                                                                                                                       |
+| `stage_timings`       | Native stage transitions exist     | One row per stage with start, successful completion, duration, start count, completion count, and `interruptions` (`stage_interrupted` runs). Derived from `transitions`; `stage_failed`/`stage_canceled`/`stage_stopped`/`stage_degraded` are NOT counted as successful completions. The digest's "Stage runs" section shows each run's own outcome.                                                                                                                                           |
 | `source_summary`      | Source/output traits known         | Disc source, UHD-likely flag, input/output resolution, input codecs, output codec, HDR/dynamic range.                                                                                                                                                                                                                                                                                                                                                                                         |
 | `title_selection`     | Movie titles exist                 | Feature-length candidates, selected title, selection decision/reason, and similar-runtime candidate count. Prefer this over hand-parsing `envelope.titles`.                                                                                                                                                                                                                                                                                                                                   |
 | `output_media`        | Valid probes exist                 | Compact stream summaries (video/audio/subtitle titles, languages, and dispositions) derived from ffprobe. Prefer this for normal stream checks; use raw `media[]` only for missing details. Label and disposition correctness is judged by `final_validation`, not here.                                                                                                                                                                                                                      |
 | `final_validation`    | The apply stage ran                | The pipeline's own verdict on each delivered output, copied from `envelope.attributes.final_validation`. Per-output entries carry `output_path`, `passed`, `failed_checks[]`, an `error` when the file could not be probed, and an `av_sync` block (source/output A/V offsets, signed drift in milliseconds, pass/fail at 100 ms). The apply stage probes the delivered file against the ripped source after every rewrite, so this stays independent of Reel's persisted validation verdict. |
 | `audio_summary`       | Audio evidence exists              | Primary track, output/excluded/commentary counts, and commentary decisions. Whether the labels are correct comes from `final_validation`.                                                                                                                                                                                                                                                                                                                                                     |
 | `subtitle_summary`    | Subtitle evidence exists           | Subtitle pipeline metadata: per-title source (`opensubtitles`/`none`), validation counts, skipped count, and output subtitle count. Stream layout and label correctness come from `final_validation`. It is not evidence for auditing subtitle text.                                                                                                                                                                                                                                          |
-| `routing_summary`     | Final assets exist                 | Display-only classification of each final output's destination and its expected-vs-actual route. The organizer enforces routing itself and fails the stage on a mismatch, so this table is context, not the check.                                                                                                                                                                                                                                                                            |
+| `routing_summary`     | Final assets exist                 | Classification of each final output's destination and its expected-vs-actual route. The organizer enforces routing itself and fails the stage on a mismatch, so a mismatch here means the organizer's check and this rule disagree; it raises a critical `routing` anomaly.                                                                                                                                                                                                                   |
 | `episode_consistency` | 2+ TV probes                       | `majority_profile` (video_codec, width, height, audio_streams, subtitle_streams with codec/language/is_forced), `majority_count`, `total_episodes`, `deviations[]` with human-readable differences. Commentary-only deviations remain visible but do not trigger a consistency warning.                                                                                                                                                                                                       |
 | `crop_analysis`       | Crop data exists                   | `filter`, `output_width/height`, `aspect_ratio`, `standard_ratio`, `required`.                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `grain_treatments`    | Reel reported a grain-gate verdict | Per-encode `episode_key`, `mode` (auto/off/override), `treated`, `tier` (light/med), `resolution_class`, `denoise`, `grain_table`, `reason`, `gate_crf`, `sample_chunks`/`sample_bpp`, `median_bpp` against `light_bpp_cutoff`/`med_bpp_cutoff`, `gate_seconds`/`ceiling_seconds`, and `denoise_ceiling_jod_mean`/`denoise_ceiling_jod_min`. Lifted from `envelope.attributes.encode_stats[].grain_treatment`.                                                                                |
+| `grain_treatments`    | Reel reported a grain-gate verdict | Per-encode `episode_key`, `mode` (auto/off/override), `treated`, `resolution_class`, `denoise`, `estimation` (source-matched grain model), `reason`, `gate_crf`, `sample_chunks`/`sample_bpp`, `median_bpp` against `treatment_bpp_cutoff`, `gate_stage` with the `stage2_*` re-measurement and `ambiguous_bpp_cutoff`, `gate_seconds`/`ceiling_seconds`, `ceiling_measured`, `denoise_ceiling_jod_mean`/`_min` against `band_top_jod`, `reused`, and per-encode sizes. Lifted from `envelope.attributes.encode_stats[].grain_treatment`.  |
 | `episode_stats`       | Episodes exist                     | `count`, `matched`, `unresolved`, `placeholder_only`, `probability_min/max/mean` and `below_090` (resolved identities only), `sequence_contiguous`, `episode_range`. These are episode option probabilities, not Jev's separate confidence statistic.                                                                                                                                                                                                                                         |
 | `media_stats`         | Valid probes exist                 | `file_count`, `duration_min_sec/max_sec`, `size_min_bytes/max_bytes`.                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `asset_health`        | Assets exist                       | Per-stage (ripped/encoded/subtitled/final/transcript) `total/ok/failed/muxed` counts. `transcript` counts the shared per-episode WhisperX transcript artifacts reused across episode-ID, commentary, and subtitle generation.                                                                                                                                                                                                                                                                 |
