@@ -66,7 +66,7 @@ func (m Model) renderProblems() string {
 	var lines []string
 	footer := ""
 	if len(items) == 0 {
-		lines = append(lines, styles.SuccessText.Render("No current structured issues"))
+		lines = append(lines, styles.SuccessText.Render("✓ No problems"))
 	} else {
 		scroll := clampQueueScroll(m.problemsScroll, m.problemsRow, visibleRows, len(items))
 		end := min(scroll+visibleRows, len(items))
@@ -133,18 +133,34 @@ func (m Model) handleProblemsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m *Model) renderItemProblems(item *spindle.QueueItem) string {
 	styles := m.theme.Styles()
 	var b strings.Builder
-	m.renderStructuredProblems(&b, item, styles)
 	state := m.problemsState
+	current := state.lastItemID == item.ID
+	issues := itemProblems(*item)
 	switch {
-	case state.lastItemID != item.ID || !state.loaded && state.fetchError == nil:
-		fmt.Fprintln(&b, styles.MutedText.Render("Diagnostics loading; current structured issues shown above"))
+	case len(issues) > 0:
+		m.renderProblemSection(&b, "Current issues and nonfatal outcomes", styles.WarningText)
+		for _, issue := range issues {
+			for _, line := range wrapText(issue, max(panelInnerWidth(m.width)-2, 20)) {
+				fmt.Fprintf(&b, "  %s\n", styles.Text.Render(line))
+			}
+		}
+	case current && state.loaded && state.fetchError == nil && len(state.logLines) == 0:
+		// Healthy on both counts: one line, not two negatives.
+		fmt.Fprintln(&b, styles.SuccessText.Render("✓ No problems")+styles.FaintText.Render(" · no warnings or errors in recent item logs"))
+		return b.String()
+	default:
+		fmt.Fprintln(&b, styles.MutedText.Render("No current issues"))
+	}
+	switch {
+	case !current || !state.loaded && state.fetchError == nil:
+		fmt.Fprintln(&b, styles.FaintText.Render("Checking recent item logs for warnings/errors"))
 	case state.fetchError != nil:
 		fmt.Fprintln(&b, styles.WarningText.Render("Diagnostics fetch failed: "+state.fetchError.Error()+"; retained history may be stale"))
 	case len(state.logLines) == 0:
-		fmt.Fprintln(&b, styles.MutedText.Render("No warnings/errors in the available log window"))
+		fmt.Fprintln(&b, styles.FaintText.Render("No warnings or errors in recent item logs"))
 	}
-	if state.lastItemID == item.ID && len(state.logLines) > 0 {
-		fmt.Fprintf(&b, "\n%s\n", styles.MutedText.Bold(true).Render("Diagnostic history (bounded log window; not a list of unresolved faults)"))
+	if current && len(state.logLines) > 0 {
+		fmt.Fprintf(&b, "\n%s\n", styles.MutedText.Bold(true).Render("Diagnostic history (recent warnings/errors; not a list of unresolved faults)"))
 		for _, event := range state.logLines {
 			scope := "Historical/unclassified"
 			for _, task := range item.Tasks {
@@ -155,23 +171,10 @@ func (m *Model) renderItemProblems(item *spindle.QueueItem) string {
 					}
 				}
 			}
-			fmt.Fprintf(&b, "%s\n%s\n", styles.FaintText.Render(scope), m.styleLogEvent(event, styles, true))
+			fmt.Fprintf(&b, "%s\n%s\n", styles.FaintText.Render(scope), m.styleLogEvent(event, styles, true, true, panelInnerWidth(m.width)))
 		}
 	}
 	return b.String()
-}
-func (m *Model) renderStructuredProblems(b *strings.Builder, item *spindle.QueueItem, styles Styles) {
-	issues := itemProblems(*item)
-	if len(issues) == 0 {
-		fmt.Fprintln(b, styles.MutedText.Render("No current structured issues"))
-		return
-	}
-	m.renderProblemSection(b, "Current issues and nonfatal outcomes", styles.WarningText)
-	for _, issue := range issues {
-		for _, line := range wrapText(issue, max(panelInnerWidth(m.width)-2, 20)) {
-			fmt.Fprintf(b, "  %s\n", styles.Text.Render(line))
-		}
-	}
 }
 func (m *Model) renderProblemSection(b *strings.Builder, title string, style lipgloss.Style) {
 	fmt.Fprintln(b, style.Bold(true).Render(title))

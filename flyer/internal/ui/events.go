@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
@@ -76,6 +77,9 @@ func (m *Model) handleItemEventBatch(msg itemEventBatchMsg) {
 	}
 }
 
+// renderItemEvents renders the journal oldest-first (the tab follows the
+// newest line). A start/end pair for one operation folds into the end row,
+// which carries the duration, and every row wraps under its text column.
 func (m *Model) renderItemEvents() string {
 	styles := m.theme.Styles()
 	var b strings.Builder
@@ -87,49 +91,101 @@ func (m *Model) renderItemEvents() string {
 	if m.itemEvents.partial {
 		fmt.Fprintln(&b, styles.MutedText.Render("Partial history: bounded buffer/page; additional records may be available"))
 	}
-	for _, event := range m.itemEvents.events {
-		if b.Len() > 0 {
-			b.WriteByte('\n')
+
+	// Walk backwards so each start pairs with the next end of the same
+	// operation; paired starts are hidden.
+	events := m.itemEvents.events
+	activityKey := func(e spindle.ItemEvent) string {
+		return fmt.Sprint(e.TaskID, "/", e.Attempt, "/", e.EpisodeKey, "/", e.Substage)
+	}
+	isStart := func(e spindle.ItemEvent) bool {
+		return e.Type == "activity_running" || e.Type == "activity_waiting"
+	}
+	hidden := make([]bool, len(events))
+	openEnds := make(map[string]int)
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		switch {
+		case !strings.HasPrefix(e.Type, "activity_"):
+		case isStart(e) && openEnds[activityKey(e)] > 0:
+			openEnds[activityKey(e)]--
+			hidden[i] = true
+		case !isStart(e):
+			openEnds[activityKey(e)]++
+		}
+	}
+
+	now := m.clock()
+	width := panelInnerWidth(m.width)
+	for i, event := range events {
+		if hidden[i] {
+			continue
 		}
 		ts := event.Time
 		if parsed, err := time.Parse(time.RFC3339Nano, event.Time); err == nil {
-			ts = parsed.In(time.Local).Format("2006-01-02 15:04:05")
+			local := parsed.In(time.Local)
+			if y, d := local.Year(), local.YearDay(); y == now.Year() && d == now.YearDay() {
+				ts = local.Format("15:04:05")
+			} else {
+				ts = local.Format("Jan 02 15:04:05")
+			}
 		}
 		label := strings.ReplaceAll(strings.TrimPrefix(event.Type, "stage_"), "_", " ")
-		switch event.Type {
-		case "stage_start":
+		switch {
+		case event.Type == "stage_start":
 			label = "started"
 			if event.Stage == "encoding" {
 				label = "worker reserved (may wait for input)"
 			}
-		case "stage_complete":
+		case event.Type == "stage_complete":
 			label = "completed"
-		case "encoding_substage":
+		case event.Type == "encoding_substage":
 			label = event.Substage
+		case strings.HasPrefix(event.Type, "activity_"):
+			label = event.Substage
+			if state := strings.TrimPrefix(event.Type, "activity_"); state != "ended" {
+				label += " " + state
+			}
 		}
-		fmt.Fprintf(&b, "%s %s %s", styles.FaintText.Render(ts),
-			styles.AccentText.Render(event.Stage), styles.Text.Render(label))
-		if event.TaskID != 0 {
-			fmt.Fprintf(&b, " [task %d/run %d]", event.TaskID, event.Attempt)
-		}
-		if strings.HasPrefix(event.Type, "activity_") {
-			fmt.Fprintf(&b, " %s", event.Substage)
-		}
+		text := styles.Text.Render(label)
 		if event.EpisodeKey != "" {
-			fmt.Fprintf(&b, " %s", styles.MutedText.Render("("+event.EpisodeKey+")"))
+			text += " " + styles.MutedText.Render("("+event.EpisodeKey+")")
 		}
-		if event.Message != "" {
-			fmt.Fprintf(&b, " - %s", styles.Text.Render(event.Message))
+		// Daemon messages often just restate the operation ("Video merge
+		// ended"); keep only messages that add something.
+		if msg := strings.TrimSpace(event.Message); msg != "" && !strings.EqualFold(strings.TrimSuffix(msg, " ended"), event.Substage) {
+			text += " " + styles.FaintText.Render("-") + " " + styles.Text.Render(msg)
 		}
 		if event.Percent > 0 {
-			fmt.Fprintf(&b, " %s", styles.MutedText.Render(fmt.Sprintf("%.1f%%", event.Percent)))
+			text += " " + styles.MutedText.Render(fmt.Sprintf("%.1f%%", event.Percent))
 		}
-		if event.DurationSeconds > 0 {
-			fmt.Fprintf(&b, " %s", styles.MutedText.Render(fmt.Sprintf("%.1fs", event.DurationSeconds)))
+		if event.DurationSeconds >= 0.05 {
+			text += " " + styles.MutedText.Render(formatEventDuration(event.DurationSeconds))
+		}
+		if event.Attempt > 1 {
+			text += " " + styles.WarningText.Render(fmt.Sprintf("(run %d)", event.Attempt))
+		}
+		prefix := styles.FaintText.Render(ts) + " " + styles.AccentText.Render(fmt.Sprintf("%-12s", stageDisplay(event.Stage).label)) + " "
+		indent := strings.Repeat(" ", lipgloss.Width(prefix))
+		for j, line := range wrapText(text, max(width-lipgloss.Width(prefix), 20)) {
+			if j == 0 {
+				fmt.Fprintln(&b, prefix+line)
+			} else {
+				fmt.Fprintln(&b, indent+line)
+			}
 		}
 	}
 	if b.Len() == 0 {
 		return styles.MutedText.Render("No stage events yet")
 	}
-	return b.String()
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// formatEventDuration keeps sub-minute journal durations to a tenth of a
+// second; longer ones use the shared h/m/s form.
+func formatEventDuration(seconds float64) string {
+	if seconds < 60 {
+		return fmt.Sprintf("%.1fs", seconds)
+	}
+	return formatDuration(time.Duration(seconds * float64(time.Second)))
 }

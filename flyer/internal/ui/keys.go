@@ -30,9 +30,9 @@ type keyMap struct {
 	Tab5        key.Binding
 
 	// Queue actions
-	CycleFilter    key.Binding
-	Filter         key.Binding
-	ToggleEpisodes key.Binding
+	CycleFilter   key.Binding
+	Filter        key.Binding
+	ToggleDetails key.Binding
 
 	// Navigation
 	Up           key.Binding
@@ -65,7 +65,7 @@ func DefaultKeyMap() keyMap {
 		),
 		Help: key.NewBinding(
 			key.WithKeys("h", "?"),
-			key.WithHelp("h/?", "Toggle help"),
+			key.WithHelp("h/?", "Help"),
 		),
 		CycleTheme: key.NewBinding(
 			key.WithKeys("T"),
@@ -144,9 +144,10 @@ func DefaultKeyMap() keyMap {
 			key.WithHelp("/", "Filter by title"),
 		),
 		// "t" only: "T" cycles the theme (documented case exception).
-		ToggleEpisodes: key.NewBinding(
+		// Episodes tab: file details; logs: structured fields.
+		ToggleDetails: key.NewBinding(
 			key.WithKeys("t"),
-			key.WithHelp("t", "Toggle file details"),
+			key.WithHelp("t", "Toggle details"),
 		),
 
 		// Navigation
@@ -186,7 +187,7 @@ func DefaultKeyMap() keyMap {
 		// Logs actions
 		ToggleFollow: key.NewBinding(
 			key.WithKeys(" "),
-			key.WithHelp("Space", "Toggle follow mode"),
+			key.WithHelp("Space", "Toggle follow"),
 		),
 		Search: key.NewBinding(
 			key.WithKeys("/"),
@@ -219,38 +220,48 @@ type HelpSection struct {
 	Bindings []key.Binding
 }
 
-// HelpSections returns structured help data for the help modal.
+// HelpSections returns structured help data for the help modal. Paired
+// bindings share one row so the two-column layout fits an 80x24 terminal.
 func (k keyMap) HelpSections() []HelpSection {
+	row := func(keys, desc string) key.Binding { return key.NewBinding(key.WithHelp(keys, desc)) }
 	return []HelpSection{
 		{
-			Title: "Views",
-			Bindings: []key.Binding{
-				k.ViewQueue, k.ViewDaemonLogs, k.ViewProblems, k.Escape,
-			},
+			Title:    "Views",
+			Bindings: []key.Binding{k.ViewQueue, k.ViewDaemonLogs, k.ViewProblems, k.Escape},
 		},
 		{
 			Title: "Inspector",
 			Bindings: []key.Binding{
-				k.Inspect, k.InspectLogs, k.Tab1, k.Tab2, k.Tab3, k.Tab4, k.Tab5, k.Tab,
+				k.Inspect, k.InspectLogs,
+				row("1-5", "Jump to tab"),
+				row("Tab/S-Tab", "Next/prev tab"),
+				row("t", "Toggle file details"),
 			},
 		},
 		{
 			Title: "Navigation",
 			Bindings: []key.Binding{
-				k.Up, k.Down, k.Top, k.Bottom, k.HalfPageDown, k.HalfPageUp,
+				row("j/k", "Down/up"),
+				row("g/G", "Top/bottom"),
+				row("^d/^u", "Half page down/up"),
+				row("PgDn/PgUp", "Page down/up"),
 			},
 		},
 		{
 			Title:    "Queue",
-			Bindings: []key.Binding{k.Filter, k.CycleFilter, k.ToggleEpisodes},
+			Bindings: []key.Binding{k.Filter, k.CycleFilter},
 		},
 		{
 			Title:    "Logs",
-			Bindings: []key.Binding{k.ToggleFollow, k.Search, k.NextMatch, k.PrevMatch, k.LogFilters},
+			Bindings: []key.Binding{k.ToggleFollow, k.Search, row("n/N", "Next/prev match"), k.LogFilters, row("t", "Toggle fields")},
 		},
 		{
 			Title:    "General",
 			Bindings: []key.Binding{k.Refresh, k.CycleTheme, k.Help, k.Quit},
+		},
+		{
+			Title:    "Task strip",
+			Bindings: []key.Binding{row("✓ ◉ ○ ✗", "done/run/wait/fail")},
 		},
 	}
 }

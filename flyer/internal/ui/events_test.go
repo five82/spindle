@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,11 +22,69 @@ func TestItemEventsRenderKeepsLifecycleOutcomes(t *testing.T) {
 		{Type: "encoding_substage", Stage: "encoding", Substage: "Chunking"},
 		{Type: "stage_complete", Stage: "encoding"},
 	}
-	shown := stripANSI(m.renderItemEvents())
-	if strings.Contains(shown, "encoding started") || strings.Contains(shown, "\n\n") ||
-		!strings.Contains(shown, "ripping started") || !strings.Contains(shown, "encoding Chunking") ||
-		!strings.Contains(shown, "encoding completed") {
+	m.width = 100
+	shown := strings.Join(strings.Fields(stripANSI(m.renderItemEvents())), " ")
+	if strings.Contains(shown, "Encoding started") || strings.Contains(stripANSI(m.renderItemEvents()), "\n\n") ||
+		!strings.Contains(shown, "Ripping started") || !strings.Contains(shown, "Encoding Chunking") ||
+		!strings.Contains(shown, "Encoding completed") {
 		t.Fatalf("events = %q", shown)
+	}
+}
+
+// A start/end pair for one operation reads as a single row with its
+// duration; a still-open operation keeps its state word.
+func TestItemEventsFoldActivityPairs(t *testing.T) {
+	m := New(Options{PrefsPath: t.TempDir() + "/prefs.toml"})
+	m.width = 120
+	m.itemEvents.loaded = true
+	m.itemEvents.events = []spindle.ItemEvent{
+		{Type: "activity_running", Stage: "encoding", TaskID: 4, Attempt: 1, EpisodeKey: "s01_001", Substage: "Video probe", Message: "Video probe"},
+		{Type: "activity_ended", Stage: "encoding", TaskID: 4, Attempt: 1, EpisodeKey: "s01_001", Substage: "Video probe", Message: "Video probe", DurationSeconds: 0.01},
+		{Type: "activity_running", Stage: "encoding", TaskID: 4, Attempt: 1, EpisodeKey: "s01_001", Substage: "Crop detection", Message: "Crop detection"},
+		{Type: "activity_ended", Stage: "encoding", TaskID: 4, Attempt: 1, EpisodeKey: "s01_001", Substage: "Crop detection", Message: "Crop detection ended", DurationSeconds: 3.2},
+		{Type: "activity_running", Stage: "encoding", TaskID: 4, Attempt: 1, EpisodeKey: "s01_001", Substage: "Chunking", Message: "Detecting shot cuts"},
+	}
+	lines := strings.Split(stripANSI(m.renderItemEvents()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("pairs must fold to one row each: %q", lines)
+	}
+	for i, want := range []string{"Video probe (s01_001)", "Crop detection (s01_001) 3.2s", "Chunking running (s01_001) - Detecting shot cuts"} {
+		if !strings.Contains(lines[i], "Encoding") || !strings.Contains(lines[i], want) {
+			t.Errorf("row %d = %q, want %q", i, lines[i], want)
+		}
+	}
+	if strings.Contains(lines[0], "0.0s") || strings.Contains(lines[0], "Video probe - Video probe") || strings.Contains(lines[1], "- Crop detection ended") || strings.Contains(lines[0], "task 4") {
+		t.Fatalf("zero duration, repeated message, and first-run task tags must be dropped: %q", lines)
+	}
+	m.itemEvents.events[4].Attempt = 2
+	if got := stripANSI(m.renderItemEvents()); !strings.Contains(got, "(run 2)") {
+		t.Fatalf("retries must be marked: %q", got)
+	}
+}
+
+// The Events tab opens on the newest events and keeps following them while
+// the operator stays at the bottom.
+func TestItemEventsTabFollowsNewest(t *testing.T) {
+	item := spindle.QueueItem{ID: 42}
+	m := New(Options{PrefsPath: t.TempDir() + "/prefs.toml"})
+	m.width, m.height = 100, 12
+	m.initInspectorViewport()
+	m.snapshot = state.Snapshot{Queue: []spindle.QueueItem{item}}
+	m.inspecting, m.inspectedID = true, 42
+	model, _ := m.switchInspectorTab(tabEvents)
+	m = model.(Model)
+	var events []spindle.ItemEvent
+	for i := range 30 {
+		events = append(events, spindle.ItemEvent{ID: int64(i + 1), ItemID: 42, Type: "encoding_substage", Stage: "encoding", Substage: fmt.Sprintf("step-%02d", i)})
+	}
+	m.handleItemEventBatch(itemEventBatchMsg{itemID: 42, batch: spindle.ItemEventBatch{Next: 30, Events: events}})
+	if view := m.inspectorViewport.View(); !m.inspectorViewport.AtBottom() || !strings.Contains(view, "step-29") {
+		t.Fatalf("events tab must open on the newest line: %q", stripANSI(view))
+	}
+	m.inspectorViewport.GotoTop()
+	m.handleItemEventBatch(itemEventBatchMsg{itemID: 42, batch: spindle.ItemEventBatch{Next: 31, Events: []spindle.ItemEvent{{ID: 31, ItemID: 42, Type: "encoding_substage", Stage: "encoding", Substage: "step-30"}}}})
+	if m.inspectorViewport.AtBottom() {
+		t.Fatal("scrolling up must stop following")
 	}
 }
 

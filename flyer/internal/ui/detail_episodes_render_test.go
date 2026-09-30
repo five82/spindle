@@ -21,7 +21,7 @@ func TestMovieFileDetailsIncludeDeliveredAndIntermediateFacts(t *testing.T) {
 	_, totals := item.EpisodeSnapshot()
 	m.renderEpisodeList(&b, item, m.theme.Styles(), totals)
 	got := stripANSI(b.String())
-	for _, want := range []string{"File Air", "/library/Air.mkv", "1920x1048", "en opus 8ch", "passed", "intermediate", "to library", "SRT applied"} {
+	for _, want := range []string{"File Air", "/library/Air.mkv", "1920x1048", "en opus 8ch", "passed", "(before Apply)", "to library", "SRT applied"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q: %s", want, got)
 		}
@@ -35,7 +35,7 @@ func TestFailedAssetDoesNotInventFailedPipelineColumn(t *testing.T) {
 	_, totals := item.EpisodeSnapshot()
 	m.renderEpisodeList(&b, item, m.theme.Styles(), totals)
 	got := stripANSI(b.String())
-	if !strings.Contains(got, "encode no") || !strings.Contains(got, "subtitles failed") {
+	if !strings.Contains(got, "encode ○") || !strings.Contains(got, "subtitles failed") {
 		t.Fatal(got)
 	}
 	if strings.Contains(got, "Encode failed") {

@@ -20,16 +20,19 @@ I'm not a maintainer. Expect rough edges.
   (File for movies), Problems, Logs, and Events tabs. Independent work and
   explicit waits remain visible. Long operations disclose measured work after
   ten seconds; unknown totals never become a percentage. Any ETA is approximate
-  and scoped to the current file's video, not the whole item. `t` toggles
-  secondary file evidence without hiding the inventory. Output checks describe
-  Apply's final files, separately from Reel's intermediate checks. Events
-  retains task/attempt transitions and durations across daemon restarts, until
-  the transient queue is cleared.
+  and scoped to the current file's video, not the whole item. On the Episodes
+  tab, `t` toggles secondary file evidence without hiding the inventory. Output
+  checks describe Apply's final files, separately from Reel's intermediate
+  checks. Events opens on the newest transitions, folds each operation's start
+  and end into one row with its duration, and retains history across daemon
+  restarts, until the transient queue is cleared.
 - **Problems triage.** Current failures, review needs, unavailable checks, and
   nonfatal outcomes such as skipped subtitles, one keypress from details.
   Bounded diagnostic history is separate from current structured issues.
 - **Logs.** Daemon and per-item logs with highlighting, follow mode, and filters
-  for level, component, lane, request, stage, asset, task, and attempt. Failed
+  for level, component, lane, request, stage, asset, task, and attempt. Each
+  event is one row with its decision outcome inline; `t` expands every
+  structured field. Failed
   fetches retain their error and mark retained data stale rather than empty.
 - **Search.** Regex log search with `n`/`N`. The queue's `/` filters rows by
   title.

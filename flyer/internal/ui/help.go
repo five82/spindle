@@ -92,9 +92,9 @@ func (h *HelpModal) View(theme Theme, width, height int) string {
 			col.Render(strings.Join(blocks[:split], "\n\n")),
 			"  ",
 			col.Render(strings.Join(blocks[split:], "\n\n")))
-		// Style.Width includes padding, so add it to keep the joined
-		// columns from re-wrapping.
-		modalWidth = 2*colWidth + 2 + 4
+		// Style.Width includes padding and border, so add both to keep
+		// the joined columns from re-wrapping.
+		modalWidth = 2*colWidth + 2 + 4 + 2
 		title = styles.Text.Bold(true).Render("Keyboard Shortcuts")
 		vPad = 0
 	}

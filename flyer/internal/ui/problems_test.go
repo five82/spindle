@@ -15,10 +15,8 @@ func stripANSI(s string) string {
 	return ansiEscape.ReplaceAllString(s, "")
 }
 
-func TestRenderStructuredProblems_LeadsWithFailedTask(t *testing.T) {
+func TestRenderItemProblems_LeadsWithFailedTask(t *testing.T) {
 	m := &Model{theme: GetTheme("slate"), width: 100}
-	styles := m.theme.Styles()
-
 	item := &spindle.QueueItem{
 		NeedsReview:   true,
 		ReviewReasons: []string{"subtitle no-match"},
@@ -27,56 +25,48 @@ func TestRenderStructuredProblems_LeadsWithFailedTask(t *testing.T) {
 		},
 	}
 
-	var b strings.Builder
-	m.renderStructuredProblems(&b, item, styles)
-	got := stripANSI(b.String())
+	got := stripANSI(m.renderItemProblems(item))
 
 	failedIdx := strings.Index(got, "Encoding failed")
 	reviewIdx := strings.Index(got, "Review:")
 	if failedIdx == -1 {
-		t.Fatalf("renderStructuredProblems() missing Failed Task header, got %q", got)
+		t.Fatalf("renderItemProblems() missing Failed Task header, got %q", got)
 	}
 	if reviewIdx == -1 {
-		t.Fatalf("renderStructuredProblems() missing Review Reasons header, got %q", got)
+		t.Fatalf("renderItemProblems() missing Review Reasons header, got %q", got)
 	}
 	if failedIdx > reviewIdx {
 		t.Fatalf("Failed Task section should precede Review Reasons: got %q", got)
 	}
 	if !strings.Contains(got, "Encoding") {
-		t.Fatalf("renderStructuredProblems() missing task label, got %q", got)
+		t.Fatalf("renderItemProblems() missing task label, got %q", got)
 	}
 	if !strings.Contains(got, "attempt 3") {
-		t.Fatalf("renderStructuredProblems() missing attempts, got %q", got)
+		t.Fatalf("renderItemProblems() missing attempts, got %q", got)
 	}
 	if !strings.Contains(got, "ffmpeg exited 1") {
-		t.Fatalf("renderStructuredProblems() missing task error, got %q", got)
+		t.Fatalf("renderItemProblems() missing task error, got %q", got)
 	}
 }
 
-func TestRenderStructuredProblems_FailedAtStageFallbackWhenTasksAbsent(t *testing.T) {
+func TestRenderItemProblems_FailedAtStageFallbackWhenTasksAbsent(t *testing.T) {
 	m := &Model{theme: GetTheme("slate"), width: 100}
-	styles := m.theme.Styles()
-
 	item := &spindle.QueueItem{
 		FailedAtStage: "ripping",
 	}
 
-	var b strings.Builder
-	m.renderStructuredProblems(&b, item, styles)
-	got := stripANSI(b.String())
+	got := stripANSI(m.renderItemProblems(item))
 
 	if !strings.Contains(got, "Ripping failed") {
-		t.Fatalf("renderStructuredProblems() missing fallback failure, got %q", got)
+		t.Fatalf("renderItemProblems() missing fallback failure, got %q", got)
 	}
 	if !strings.Contains(got, "Ripping") {
-		t.Fatalf("renderStructuredProblems() missing fallback stage label, got %q", got)
+		t.Fatalf("renderItemProblems() missing fallback stage label, got %q", got)
 	}
 }
 
-func TestRenderStructuredProblems_NoFailedTaskComposesAsBefore(t *testing.T) {
+func TestRenderItemProblems_NoFailedTaskComposesAsBefore(t *testing.T) {
 	m := &Model{theme: GetTheme("slate"), width: 100}
-	styles := m.theme.Styles()
-
 	item := &spindle.QueueItem{
 		NeedsReview:   true,
 		ReviewReasons: []string{"subtitle no-match"},
@@ -85,15 +75,13 @@ func TestRenderStructuredProblems_NoFailedTaskComposesAsBefore(t *testing.T) {
 		},
 	}
 
-	var b strings.Builder
-	m.renderStructuredProblems(&b, item, styles)
-	got := stripANSI(b.String())
+	got := stripANSI(m.renderItemProblems(item))
 
 	if strings.Contains(got, "Failed Task") {
-		t.Fatalf("renderStructuredProblems() should not show Failed Task section, got %q", got)
+		t.Fatalf("renderItemProblems() should not show Failed Task section, got %q", got)
 	}
 	if !strings.Contains(got, "Review: subtitle no-match") {
-		t.Fatalf("renderStructuredProblems() should lead with Review Reasons as before, got %q", got)
+		t.Fatalf("renderItemProblems() should lead with Review Reasons as before, got %q", got)
 	}
 }
 
@@ -142,8 +130,8 @@ func TestStyleLogEventHighlightsErrorHint(t *testing.T) {
 		Fields:  map[string]string{"error_hint": "check disk space"},
 	}
 
-	plain := m.styleLogEvent(evt, styles, false)
-	prominent := m.styleLogEvent(evt, styles, true)
+	plain := m.styleLogEvent(evt, styles, false, true, 200)
+	prominent := m.styleLogEvent(evt, styles, true, true, 200)
 
 	if stripANSI(plain) != stripANSI(prominent) {
 		t.Fatalf("highlightErrorHint should not change rendered text, only styling: plain=%q prominent=%q", stripANSI(plain), stripANSI(prominent))

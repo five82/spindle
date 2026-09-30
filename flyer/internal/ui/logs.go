@@ -13,6 +13,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
@@ -67,8 +68,14 @@ type logState struct {
 	searchQuery    string
 	searchRegex    *regexp.Regexp
 	searchInput    textinput.Model
-	searchMatches  []int // Line indices that match
+	searchMatches  []int // Event indices that match
 	searchMatchIdx int   // Current match index
+
+	// showFields expands each event's structured fields below it; the
+	// default is one row per event. eventLines maps an event index to its
+	// first rendered line, so search can scroll to it in either mode.
+	showFields bool
+	eventLines []int
 
 	// Content caching - skip re-render when unchanged
 	contentVersion uint64
@@ -154,61 +161,48 @@ func (m Model) getLogTitle() string {
 
 // renderLogStatus renders the log status bar.
 func (m *Model) renderLogStatus(styles Styles) string {
+	// The status is one fixed row of chrome; never let it wrap.
+	fit := func(line string) string { return ansi.Truncate(line, m.width, "…") }
 	if m.logState.fetchError != nil {
-		return styles.WarningText.Render("Log fetch failed; retained buffer stale: " + m.logState.fetchError.Error())
+		return fit(styles.WarningText.Render("Log fetch failed; retained buffer stale: " + m.logState.fetchError.Error()))
 	}
 	if !m.logState.loaded && len(m.logState.rawLines) == 0 {
 		return styles.MutedText.Render("Loading log window")
 	}
-	// If we have an active search with matches, show search status instead
-	if m.logState.searchRegex != nil && len(m.logState.searchMatches) > 0 {
-		matchNum := m.logState.searchMatchIdx + 1
-		totalMatches := len(m.logState.searchMatches)
-		return styles.AccentText.Render(fmt.Sprintf("/%s", m.logState.searchQuery)) +
-			styles.FaintText.Render(" - ") +
-			styles.WarningText.Render(fmt.Sprintf("%d/%d", matchNum, totalMatches)) +
-			styles.FaintText.Render(" - Press ") +
-			styles.AccentText.Render("n") +
-			styles.FaintText.Render(" for next, ") +
-			styles.AccentText.Render("N") +
-			styles.FaintText.Render(" for previous, ") +
-			styles.AccentText.Render("Esc") +
-			styles.FaintText.Render(" to clear")
-	}
-
-	// If search regex exists but no matches
-	if m.logState.searchRegex != nil && len(m.logState.searchMatches) == 0 {
-		return styles.DangerText.Render("Pattern not found: " + m.logState.searchQuery)
-	}
-
-	// Source label
-	var src, apiPath string
-	switch m.logState.mode {
-	case logSourceItem:
-		src = "Item"
-		if m.logState.lastItemID > 0 {
-			apiPath = fmt.Sprintf("api logs item=%d", m.logState.lastItemID)
-		} else {
-			apiPath = "api logs"
+	sep := " " + styles.FaintText.Render("·") + " "
+	if m.logState.searchRegex != nil {
+		if len(m.logState.searchMatches) == 0 {
+			return fit(styles.DangerText.Render("Pattern not found: " + m.logState.searchQuery))
 		}
-	default:
-		src = "Daemon"
-		apiPath = "api logs"
+		return fit(styles.AccentText.Render("/"+m.logState.searchQuery) + sep +
+			styles.WarningText.Render(fmt.Sprintf("%d/%d", m.logState.searchMatchIdx+1, len(m.logState.searchMatches))) + sep +
+			styles.AccentText.Render("n/N") + styles.FaintText.Render(" next/prev") + sep +
+			styles.AccentText.Render("Esc") + styles.FaintText.Render(" clear"))
 	}
 
-	// Build status: "Item log 341 lines auto-tail on"
-	autoTail := "off"
-	if m.logState.follow {
-		autoTail = "on"
+	src := "Daemon log"
+	if m.logState.mode == logSourceItem {
+		src = "Item log"
+		if m.logState.lastItemID > 0 {
+			src = fmt.Sprintf("Item #%d log", m.logState.lastItemID)
+		}
 	}
-	status := fmt.Sprintf("%s log %d lines auto-tail %s; bounded history", src, len(m.logState.rawLines), autoTail)
-
-	var parts []string
-	parts = append(parts, styles.FaintText.Render(status))
-
-	// Scroll position while not following, so "where am I" stays visible.
-	if !m.logState.follow && m.logViewport.TotalLineCount() > m.logViewport.VisibleLineCount() {
-		parts = append(parts, styles.MutedText.Render(fmt.Sprintf("%d%%", int(m.logViewport.ScrollPercent()*100))))
+	tail := "following"
+	if !m.logState.follow {
+		tail = "paused"
+		// Scroll position while paused, so "where am I" stays visible.
+		if m.logViewport.TotalLineCount() > m.logViewport.VisibleLineCount() {
+			tail += fmt.Sprintf(" at %d%%", int(m.logViewport.ScrollPercent()*100))
+		}
+	}
+	lines := fmt.Sprintf("%d events", len(m.logState.rawLines))
+	if len(m.logState.rawLines) >= logBufferLimit {
+		lines = fmt.Sprintf("last %d events", logBufferLimit)
+	}
+	parts := []string{
+		styles.MutedText.Render(src),
+		styles.FaintText.Render(lines),
+		styles.FaintText.Render(tail),
 	}
 
 	// Search input mode
@@ -237,18 +231,11 @@ func (m *Model) renderLogStatus(styles Styles) string {
 			}
 		}
 		if len(filterParts) > 0 {
-			parts = append(parts, styles.MutedText.Render("filter: "+strings.Join(filterParts, " ")))
+			parts = append(parts, styles.MutedText.Render(strings.Join(filterParts, " ")))
 		}
 	}
 
-	// API path at the end
-	if apiPath != "" {
-		parts = append(parts, styles.AccentText.Render(apiPath))
-	}
-
-	// Join with styled bullet separator
-	sep := " " + styles.FaintText.Render("•") + " "
-	return strings.Join(parts, sep)
+	return fit(strings.Join(parts, sep))
 }
 
 // renderLogContent renders the colorized log lines.
@@ -270,9 +257,14 @@ func (m *Model) renderLogContent() string {
 	}
 
 	var b strings.Builder
+	m.logState.eventLines = m.logState.eventLines[:0]
+	line := 0
+	// Each row carries a 7-cell "%4d │ " gutter.
+	width := panelInnerWidth(m.width) - 7
 
 	for i, evt := range m.logState.rawLines {
 		lineNum := i + 1
+		m.logState.eventLines = append(m.logState.eventLines, line)
 
 		// Determine if this line is a search match
 		isActiveMatch := i == activeMatchLine
@@ -288,16 +280,17 @@ func (m *Model) renderLogContent() string {
 				Background(lipgloss.Color(m.theme.Warning)).
 				Foreground(lipgloss.Color(m.theme.Background))
 			lineContent = prefixStyle.Render(fmt.Sprintf("%4d │ ", lineNum)) +
-				m.colorizeLineForSearch(formatLogEvent(evt), m.theme.Warning)
+				m.colorizeLineForSearch(ansi.Truncate(formatLogEvent(evt), width, "…"), m.theme.Warning)
 		case isPassiveMatch:
 			// Passive match: accent foreground
 			lineContent = styles.AccentText.Render(fmt.Sprintf("%4d │ ", lineNum)) +
-				m.colorizeLineWithHighlight(formatLogEvent(evt), styles)
+				m.colorizeLineWithHighlight(ansi.Truncate(formatLogEvent(evt), width, "…"), styles)
 		default:
 			// Normal line: styled directly from the structured event fields
 			lineContent = styles.FaintText.Render(fmt.Sprintf("%4d │ ", lineNum)) +
-				m.styleLogEvent(evt, styles, false)
+				m.styleLogEvent(evt, styles, false, m.logState.showFields, width)
 		}
+		line += strings.Count(lineContent, "\n") + 1
 
 		b.WriteString(lineContent)
 		if i < len(m.logState.rawLines)-1 {
@@ -323,15 +316,18 @@ func (m *Model) colorizeLineWithHighlight(line string, styles Styles) string {
 
 // styleLogEvent builds the styled log line directly from the structured
 // LogEvent fields: timestamp muted, level colored by severity, the item/stage
-// subject highlighted, message in normal text, and structured fields
-// appended below, matching the visual treatment previously produced by
-// re-parsing formatLogEvent's output with regexes.
+// subject highlighted, and the message in normal text.
+//
+// Without fields the event is one row cut to width, with the decision
+// result and error hint (the fields that answer "what happened") inline.
+// With fields, every structured field follows on its own row, wrapped
+// under its value.
 //
 // highlightErrorHint makes the error_hint field (when present) stand out
 // with the warning/danger style, matching the level's severity. The daemon
 // log view passes false; the problems view -- where error_hint is the most
 // direct answer to "what broke" -- passes true.
-func (m *Model) styleLogEvent(evt spindle.LogEvent, styles Styles, highlightErrorHint bool) string {
+func (m *Model) styleLogEvent(evt spindle.LogEvent, styles Styles, highlightErrorHint, fields bool, width int) string {
 	level := strings.ToUpper(strings.TrimSpace(evt.Level))
 
 	var result strings.Builder
@@ -354,13 +350,29 @@ func (m *Model) styleLogEvent(evt spindle.LogEvent, styles Styles, highlightErro
 		result.WriteString(styles.Text.Render(message))
 	}
 
+	if !fields {
+		// Skip a result the message already states ("stage started").
+		if r := strings.TrimSpace(evt.Fields["decision_result"]); r != "" && !strings.Contains(strings.ToLower(evt.Message), strings.ToLower(r)) {
+			result.WriteString(styles.FaintText.Render(" → ") + styles.AccentText.Bold(true).Render(r))
+		}
+		if hint := strings.TrimSpace(evt.Fields["error_hint"]); hint != "" {
+			result.WriteString(styles.FaintText.Render(" · ") + m.getLevelStyle(level, styles).Render(hint))
+		}
+		return ansi.Truncate(result.String(), width, "…")
+	}
+
 	for _, key := range orderedFieldKeys(evt.Fields) {
 		value := strings.TrimSpace(evt.Fields[key])
 		if value == "" {
 			continue
 		}
-		result.WriteString("\n")
-		result.WriteString(styleLogFieldRow(key, value, styles, level, highlightErrorHint))
+		for _, row := range wrapText(styleLogFieldRow(key, value, styles, level, highlightErrorHint), width) {
+			result.WriteString("\n")
+			if !strings.HasPrefix(ansi.Strip(row), "    - ") {
+				row = "      " + row // continuation under the value
+			}
+			result.WriteString(row)
+		}
 	}
 
 	return result.String()
@@ -469,6 +481,12 @@ func (m Model) handleLogsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.LogFilters):
 		m.openLogFilters()
+		return m, nil
+
+	case key.Matches(msg, m.keys.ToggleDetails):
+		m.logState.showFields = !m.logState.showFields
+		m.logState.contentVersion++
+		m.updateLogViewport()
 		return m, nil
 
 	case key.Matches(msg, m.keys.NextMatch):
@@ -639,6 +657,9 @@ func (m *Model) scrollToSearchMatch() {
 	}
 
 	targetLine := m.logState.searchMatches[m.logState.searchMatchIdx]
+	if targetLine < len(m.logState.eventLines) {
+		targetLine = m.logState.eventLines[targetLine]
+	}
 	m.logState.follow = false
 
 	// Calculate scroll position to center the match if possible

@@ -209,3 +209,22 @@ func TestAppViewsAndRefresh(t *testing.T) {
 		t.Fatalf("manual refresh: snapshot = %v, calls = %d", got, calls)
 	}
 }
+
+// The help modal must fit the 80x24 minimum terminal with every binding on
+// one row (a too-narrow modal used to re-wrap descriptions mid-column).
+func TestHelpModalFitsMinimumTerminal(t *testing.T) {
+	m := New(Options{ThemeName: "Slate"})
+	box := stripANSI(NewHelpModal(m.keys, "Inspector").View(m.theme, 80, 24))
+	lines := strings.Split(box, "\n")
+	if len(lines) > 24 {
+		t.Fatalf("help modal is %d rows, want <= 24:\n%s", len(lines), box)
+	}
+	for _, want := range []string{"Toggle file details", "Next/prev tab", "Page down/up", "done/run/wait/fail"} {
+		if !strings.Contains(box, want) {
+			t.Errorf("help modal missing %q on one row:\n%s", want, box)
+		}
+	}
+	if !strings.HasPrefix(strings.TrimSpace(strings.Trim(lines[3], "║")), "Inspector") {
+		t.Errorf("context section must be listed first:\n%s", box)
+	}
+}

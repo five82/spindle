@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/five82/spindle/flyer/internal/spindle"
 	"github.com/five82/spindle/flyer/internal/state"
@@ -77,5 +78,26 @@ func TestNowBandShowsBusyDriveHolder(t *testing.T) {
 	got := stripANSI(m.nowBandContent(m.theme.BandStyles()))
 	if !strings.Contains(got, "Drive: #42 ripping") {
 		t.Fatalf("nowBandContent() missing busy drive holder: %q", got)
+	}
+}
+
+func TestNowBandNamesHolderTitleAndETA(t *testing.T) {
+	now := time.Now()
+	m := Model{
+		width: 140,
+		theme: GetTheme("Slate"),
+		now:   func() time.Time { return now },
+		snapshot: state.Snapshot{
+			Queue: []spindle.QueueItem{{ID: 1, DisplayTitle: "Breaking Bad (2008)", Tasks: []spindle.Task{{Type: "encoding", State: "running", ActiveAssetKey: "s01_001",
+				Activities: []spindle.Activity{{ID: "video", Operation: "encoding", AssetKey: "s01_001", State: "running", StartedAt: now.Add(-time.Minute).Format(time.RFC3339), UpdatedAt: now.Format(time.RFC3339), Completed: 8, Total: 100, Unit: "frames"}},
+				Encoding:   &spindle.EncodingStatus{ETASeconds: 1320}}}}},
+			Status: spindle.StatusResponse{Scheduler: &spindle.SchedulerStatus{Resources: map[string]spindle.ResourceStatus{
+				"encode": {Used: 1, Holders: []spindle.ResourceHolder{{ItemID: 1, Task: "encoding"}}},
+			}}},
+		},
+	}
+	got := stripANSI(m.nowBandContent(m.theme.BandStyles()))
+	if !strings.Contains(got, "#1 Breaking Bad (2008) encoding · s01_001 8% · ~22m left") || strings.Count(got, "encoding") != 1 {
+		t.Fatalf("NOW band = %q", got)
 	}
 }

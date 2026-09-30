@@ -79,12 +79,6 @@ func (m Model) renderHeader() string {
 		parts = append(parts, headerPart{drive, 0})
 	}
 
-	// Queue count
-	parts = append(parts, headerPart{
-		styles.MutedText.Render("Queue: ") + styles.Text.Render(fmt.Sprintf("%d", len(m.snapshot.Queue))),
-		3,
-	})
-
 	// Failed and review counts (only shown when non-zero)
 	if p := m.buildProblemCountsPart(compact, failed, review, styles); p != "" {
 		parts = append(parts, headerPart{p, 2})
@@ -362,8 +356,7 @@ func (m Model) renderCommandBar() string {
 	switch {
 	case m.inspecting:
 		commands = []cmd{
-			{"1-5", "Tabs", 2},
-			{"Tab", "Next tab", 3},
+			{"1-5/Tab", "Tabs", 2},
 			{"j/k", "Scroll", 3},
 		}
 		if m.inspectorTab == tabLogs {
@@ -375,13 +368,12 @@ func (m Model) renderCommandBar() string {
 				cmd{"Space", followLabel, 2},
 				cmd{"/", "Search", 2},
 				cmd{"f", "Filters", 3},
+				cmd{"t", m.logFieldsLabel(), 3},
 			)
 		}
 		// Inventory stays visible; t reveals secondary evidence for movies too.
-		if m.inspectorTab == tabOverview || m.inspectorTab == tabEpisodes {
-			if item := m.getInspectedItem(); item != nil {
-				commands = append(commands, cmd{"t", "Details", 3})
-			}
+		if m.inspectorTab == tabEpisodes && m.getInspectedItem() != nil {
+			commands = append(commands, cmd{"t", "Details", 3})
 		}
 		commands = append(commands, cmd{"Esc", "Back", 1})
 
@@ -395,6 +387,7 @@ func (m Model) renderCommandBar() string {
 			{"/", "Search", 2},
 			{"n/N", "Next/Prev", 3},
 			{"f", "Filters", 3},
+			{"t", m.logFieldsLabel(), 3},
 			{"Esc", "Queue", 1},
 		}
 
@@ -435,13 +428,15 @@ func (m Model) renderCommandBar() string {
 		parts = append(parts, headerPart{styles.AccentText.Render("/" + pattern), 2})
 	}
 
-	// Add theme indicator
-	parts = append(parts, headerPart{
-		styles.AccentText.Render("T") + styles.FaintText.Render(":"+m.theme.Name),
-		4,
-	})
-
 	return padBand(joinHeaderParts(parts, m.width, styles.Band), m.width, styles.Band)
+}
+
+// logFieldsLabel names what the log field toggle will do next.
+func (m Model) logFieldsLabel() string {
+	if m.logState.showFields {
+		return "Compact"
+	}
+	return "Fields"
 }
 
 // maxLen returns compactLen if compact is true, otherwise normalLen.

@@ -90,10 +90,7 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 			detail = "Ready; awaiting scheduler"
 		}
 	}
-	now := time.Now()
-	if m.now != nil {
-		now = m.now()
-	}
+	now := m.clock()
 	if m.snapshot.LastError != nil && !m.snapshot.LastUpdated.IsZero() {
 		now = m.snapshot.LastUpdated
 	}
@@ -117,9 +114,14 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 	if len(activities) > 0 && status == "Waiting" && !diskWaiting {
 		status, style = "Running", styles.AccentText
 	}
+	// Fixed status, stage, and files columns keep durations aligned.
 	row := fmt.Sprintf("%-7s %-12s", status, info.label)
-	if n, ok := stageThroughput(info.totals, item, totals); ok && totals.Planned > 0 {
-		row += fmt.Sprintf(" %d/%d done", n, totals.Planned)
+	if totals.Planned > 0 {
+		files := ""
+		if n, ok := stageThroughput(info.totals, item, totals); ok {
+			files = fmt.Sprintf("%d/%d done", n, totals.Planned)
+		}
+		row += fmt.Sprintf(" %-*s", len(fmt.Sprintf("%d/%d done", totals.Planned, totals.Planned)), files)
 	}
 	if task.State == "done" {
 		if d := task.Duration(); d > 0 {
@@ -128,9 +130,10 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 			row += " <1s"
 		}
 		if task.Type == "subtitling" && item.SubtitleGeneration != nil {
-			row += fmt.Sprintf("; %d skipped", item.SubtitleGeneration.Skipped)
+			row += fmt.Sprintf(" · %d skipped", item.SubtitleGeneration.Skipped)
 		}
 	}
+	row = strings.TrimRight(row, " ")
 	if task.Attempts > 1 {
 		row += fmt.Sprintf(" (attempt %d)", task.Attempts)
 	}
@@ -174,10 +177,25 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 		if len(lines) > 0 {
 			fmt.Fprintf(b, "      %s\n", styles.Text.Render(lines[0]))
 		}
+		video := a.ID == "video" && !stale
 		if a.Total > 0 && a.Unit != "" {
 			percent := float64(a.Completed) / float64(a.Total) * 100
-			fmt.Fprintf(b, "      %s %s\n", renderProgressBar(percent, 16, styles.AccentText, styles),
-				styles.MutedText.Render(fmt.Sprintf("%d/%d %s", a.Completed, a.Total, a.Unit)))
+			measure := fmt.Sprintf("%.0f%% · %d/%d %s", percent, a.Completed, a.Total, a.Unit)
+			if video {
+				if eta := taskETA(task, now); eta != "" {
+					measure += " · " + eta + " remaining for this file's video"
+				} else if e := task.Encoding; e != nil && !e.Calibrating && e.TotalFrames > e.CurrentFrame {
+					measure += " · ETA unavailable"
+				}
+			}
+			// Wrap the measure beside the 24-cell bar rather than crop it.
+			for i, line := range wrapText(measure, max(width-6-25, 20)) {
+				bar := strings.Repeat(" ", 24)
+				if i == 0 {
+					bar = renderProgressBar(percent, 24, styles.AccentText, styles)
+				}
+				fmt.Fprintf(b, "      %s %s\n", bar, styles.MutedText.Render(line))
+			}
 		} else {
 			fmt.Fprintf(b, "      %s\n", styles.FaintText.Render("No within-operation percentage available"))
 		}
@@ -193,9 +211,9 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 				fmt.Fprintf(b, "      %s\n", styles.FaintText.Render("No new "+a.Unit+" for "+formatDuration(quiet)+"; work may continue"))
 			}
 		}
-		if a.ID == "video" && !stale {
-			if extras := taskExtras(task, now); len(extras) > 0 {
-				for _, line := range wrapText(strings.Join(extras, "; "), max(width-6, 20)) {
+		if video {
+			for _, extra := range taskExtras(task) {
+				for _, line := range wrapText(extra, max(width-6, 20)) {
 					fmt.Fprintf(b, "      %s\n", styles.MutedText.Render(line))
 				}
 			}
@@ -219,42 +237,51 @@ func stageThroughput(key string, item spindle.QueueItem, totals spindle.EpisodeT
 	return 0, false
 }
 
-func taskExtras(task spindle.Task, now time.Time) []string {
-	var extras []string
-	if e := task.Encoding; task.IsWorking() && e != nil {
-		if e.Calibrating {
-			extras = append(extras, "Calibrating quality; video ETA unavailable")
-		}
-		if e.ChunksTotal > 0 {
-			extras = append(extras, fmt.Sprintf("%d/%d chunks accepted", e.ChunksComplete, e.ChunksTotal))
-		}
-		if e.Probing+e.Scoring+e.Finishing > 0 {
-			extras = append(extras, fmt.Sprintf("%d probing / %d scoring / %d finishing", e.Probing, e.Scoring, e.Finishing))
-		}
-		if e.InFlight > 0 {
-			extras = append(extras, fmt.Sprintf("%d chunks in flight", e.InFlight))
-		}
-		if e.TargetWorkers > 0 {
-			extras = append(extras, fmt.Sprintf("workers %d/%d (limit %d)", e.ActiveWorkers, e.TargetWorkers, e.MaxWorkers))
-		}
-		if e.FPS > 0 {
-			extras = append(extras, fmt.Sprintf("%.1f video frames/s average", e.FPS))
-		}
-		if e.RecentSpeed > 0 {
-			extras = append(extras, fmt.Sprintf("%.2fx reported video rate, recent", e.RecentSpeed))
-		}
-		if e.EncodeSlotWaitSeconds > 0 {
-			extras = append(extras, fmt.Sprintf("encode-slot wait %.0f worker-s", e.EncodeSlotWaitSeconds))
+// taskExtras groups encoder internals into short lines (chunk pipeline, then
+// throughput) instead of one run-on sentence. The ETA rides on the bar line.
+func taskExtras(task spindle.Task) []string {
+	e := task.Encoding
+	if !task.IsWorking() || e == nil {
+		return nil
+	}
+	var lines []string
+	if e.Calibrating {
+		lines = append(lines, "Calibrating quality; video ETA unavailable")
+	}
+	join := func(parts []string) {
+		if len(parts) > 0 {
+			lines = append(lines, strings.Join(parts, " · "))
 		}
 	}
-	if eta := taskETA(task, now); eta != "" {
-		extras = append(extras, eta)
-	} else if e := task.Encoding; e != nil && !e.Calibrating && e.TotalFrames > e.CurrentFrame {
-		extras = append(extras, "Video ETA unavailable")
+	var chunks []string
+	if e.ChunksTotal > 0 {
+		chunks = append(chunks, fmt.Sprintf("%d/%d chunks accepted", e.ChunksComplete, e.ChunksTotal))
 	}
-	return extras
+	if e.Probing+e.Scoring+e.Finishing > 0 {
+		chunks = append(chunks, fmt.Sprintf("%d probing / %d scoring / %d finishing", e.Probing, e.Scoring, e.Finishing))
+	}
+	if e.InFlight > 0 {
+		chunks = append(chunks, fmt.Sprintf("%d in flight", e.InFlight))
+	}
+	join(chunks)
+	var rate []string
+	if e.FPS > 0 {
+		rate = append(rate, fmt.Sprintf("%.1f fps average", e.FPS))
+	}
+	if e.RecentSpeed > 0 {
+		rate = append(rate, fmt.Sprintf("%.2fx recent", e.RecentSpeed))
+	}
+	if e.TargetWorkers > 0 {
+		rate = append(rate, fmt.Sprintf("workers %d/%d (limit %d)", e.ActiveWorkers, e.TargetWorkers, e.MaxWorkers))
+	}
+	if e.EncodeSlotWaitSeconds > 0 {
+		rate = append(rate, fmt.Sprintf("slot wait %.0f worker-s", e.EncodeSlotWaitSeconds))
+	}
+	join(rate)
+	return lines
 }
 
+// taskETA returns the fresh, producer-reported video ETA as "~Nm", or "".
 func taskETA(task spindle.Task, now time.Time) string {
 	if task.Type != "encoding" || !task.IsWorking() || task.Encoding == nil || task.Encoding.Calibrating {
 		return ""
@@ -265,7 +292,7 @@ func taskETA(task spindle.Task, now time.Time) string {
 		}
 		if eta := task.Encoding.ETADuration(); eta > 0 {
 			minutes := max(1, int((eta+time.Minute-1)/time.Minute))
-			return fmt.Sprintf("~%dm remaining for this file's video", minutes)
+			return fmt.Sprintf("~%dm", minutes)
 		}
 	}
 	return ""

@@ -66,8 +66,8 @@ func TestValidationAndIdentificationOutput(t *testing.T) {
 	}{
 		{"empty", nil, ""},
 		{"no steps", &spindle.EncodingValidation{Passed: true}, ""},
-		{"failed", &spindle.EncodingValidation{Steps: []spindle.EncodingValidationStep{{Name: "checksum"}}}, "Final checks not run"},
-		{"passed", &spindle.EncodingValidation{Passed: true, Steps: []spindle.EncodingValidationStep{{Name: "checksum", Passed: true, Details: "verified"}, {Name: "", Passed: true}, {Name: "codec", Passed: false}}}, "Final checks not run"},
+		{"failed", &spindle.EncodingValidation{Steps: []spindle.EncodingValidationStep{{Name: "checksum"}}}, "Final checks not run yet"},
+		{"passed", &spindle.EncodingValidation{Passed: true, Steps: []spindle.EncodingValidationStep{{Name: "checksum", Passed: true, Details: "verified"}, {Name: "", Passed: true}, {Name: "codec", Passed: false}}}, "Final checks not run yet"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var b strings.Builder
@@ -76,5 +76,21 @@ func TestValidationAndIdentificationOutput(t *testing.T) {
 				t.Fatalf("validation = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestValidationSummaryCallsUnrunChecksPending(t *testing.T) {
+	styles := GetTheme("Slate").Styles()
+	var b strings.Builder
+	passed := &spindle.FinalValidation{Passed: true}
+	passed.AVSync = &struct {
+		Error             string  `json:"error"`
+		Passed            bool    `json:"passed"`
+		DriftMilliseconds float64 `json:"drift_milliseconds"`
+	}{Passed: true}
+	item := spindle.QueueItem{Episodes: []spindle.EpisodeStatus{{Key: "a", FinalValidation: passed}, {Key: "b"}, {Key: "c"}}}
+	renderValidationSummary(fieldWriter{b: &b, styles: styles, width: 100}, item)
+	if got := stripANSI(b.String()); !strings.Contains(got, "1 passed") || !strings.Contains(got, "2 pending") || strings.Contains(got, "not run") {
+		t.Fatalf("validation summary = %q", got)
 	}
 }

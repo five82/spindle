@@ -11,10 +11,13 @@ import (
 )
 
 // fieldWriter renders aligned label/value rows with word-wrapped values.
+// indent prefixes every row; labelWidth overrides the default label column.
 type fieldWriter struct {
-	b      *strings.Builder
-	styles Styles
-	width  int
+	b          *strings.Builder
+	styles     Styles
+	width      int
+	indent     int
+	labelWidth int
 }
 
 // detailFieldLabelWidth is the fixed label column of the overview rows,
@@ -32,13 +35,14 @@ func (w fieldWriter) fieldStyled(label string, labelStyle lipgloss.Style, value 
 	if strings.TrimSpace(value) == "" {
 		return
 	}
-	labelWidth := max(detailFieldLabelWidth, len(label)+1)
-	lines := wrapText(value, max(w.width-labelWidth, 20))
-	w.b.WriteString(labelStyle.Render(fmt.Sprintf("%-*s", labelWidth, label)))
+	labelWidth := max(detailFieldLabelWidth, w.labelWidth, len(label)+1)
+	indent := strings.Repeat(" ", w.indent)
+	lines := wrapText(value, max(w.width-w.indent-labelWidth, 20))
+	w.b.WriteString(indent + labelStyle.Render(fmt.Sprintf("%-*s", labelWidth, label)))
 	w.b.WriteString(valueStyle.Render(lines[0]))
 	w.b.WriteString("\n")
 	for _, line := range lines[1:] {
-		w.b.WriteString(strings.Repeat(" ", labelWidth))
+		w.b.WriteString(indent + strings.Repeat(" ", labelWidth))
 		w.b.WriteString(valueStyle.Render(line))
 		w.b.WriteString("\n")
 	}
@@ -51,8 +55,8 @@ func (w fieldWriter) fieldStyled(label string, labelStyle lipgloss.Style, value 
 //	Attention review/error/warning details (only when something needs the operator)
 //	Pipeline  scheduler task board
 //	Media     source, video, audio, crop, encoder config, identification
-//	Output    size estimate/result, encode stats, validation, subtitles, path
-//	Episodes  batch summary (full list lives on the Episodes tab)
+//	Output    size estimate/result, encode stats, validation, subtitles, path,
+//	          file counts (the per-file list lives on the Episodes tab)
 //	Meta      absolute timestamps (faint footer; the item band carries the age)
 func (m *Model) renderDetailContent(item spindle.QueueItem, width int) string {
 	if width <= 0 {
@@ -64,12 +68,11 @@ func (m *Model) renderDetailContent(item spindle.QueueItem, width int) string {
 
 	m.renderAttention(w, item, styles)
 
-	m.writeSection(&b, "Pipeline", styles, width)
+	m.writeSection(&b, "Pipeline", styles)
 	m.renderTaskBoard(&b, item, styles, width)
 
 	m.renderMedia(w, item, styles)
 	m.renderOutput(w, item, styles)
-	m.renderEpisodeSummarySection(&b, item, styles)
 
 	m.renderDetailMeta(&b, item, styles)
 
@@ -120,7 +123,8 @@ func (m *Model) renderStatusChips(item spindle.QueueItem, styles Styles) string 
 			label = "Waiting"
 		}
 	}
-	chips = append(chips, roleStyle(info.role, styles).Bold(true).Render(strings.ToUpper(label)))
+	// Reverse video fills the chip with the role color, matching chip().
+	chips = append(chips, roleStyle(info.role, m.theme.Styles()).Bold(true).Reverse(true).Padding(0, 1).Render(strings.ToUpper(label)))
 
 	// Media type chip
 	if mediaType := detectMediaType(item.Metadata); mediaType != "" {
@@ -165,14 +169,12 @@ func isRipCacheHit(item spindle.QueueItem) bool {
 	return false
 }
 
-// writeSection writes a section header as a width-adaptive titled rule,
-// matching the top-level view rules.
-func (m *Model) writeSection(b *strings.Builder, title string, styles Styles, width int) {
-	if width <= 0 {
-		width = m.width
-	}
+// writeSection writes a section header as a bold accent label. The panel
+// border is the only rule; a full-width rule per section stacked a second
+// line under it and read as clutter.
+func (m *Model) writeSection(b *strings.Builder, title string, styles Styles) {
 	b.WriteString("\n")
-	b.WriteString(renderRule(titleCase(title), width, styles))
+	b.WriteString(styles.AccentText.Bold(true).Render(titleCase(title)))
 	b.WriteString("\n")
 }
 
@@ -244,7 +246,7 @@ func itemProblems(item spindle.QueueItem) []string {
 		if e.Validation != nil && !e.Validation.Passed {
 			for _, check := range e.Validation.Steps {
 				if !check.Passed {
-					add("Reel intermediate: ", check.Name+": "+check.Details)
+					add("Encode check: ", check.Name+": "+check.Details)
 				}
 			}
 		}
@@ -262,7 +264,7 @@ func (m *Model) renderAttention(w fieldWriter, item spindle.QueueItem, styles St
 	if len(problems) == 0 {
 		return
 	}
-	m.writeSection(w.b, "Attention", styles, w.width)
+	m.writeSection(w.b, "Attention", styles)
 	w.field("Issue", truncate(problems[0], max(w.width-10, 20)), styles.WarningText)
 	w.field("Details", fmt.Sprintf("%d issue(s); see 3 Problems", len(problems)), styles.MutedText)
 }
@@ -273,14 +275,12 @@ func (m *Model) renderMedia(w fieldWriter, item spindle.QueueItem, styles Styles
 	var b strings.Builder
 	inner := fieldWriter{b: &b, styles: w.styles, width: w.width}
 
+	// Disc number lives in the item band; the input file only on Video.
 	inner.field("Source", sourceSummary(item.Source), styles.Text)
-	if item.DiscNumber > 0 {
-		inner.field("Disc", fmt.Sprintf("%d", item.DiscNumber), styles.Text)
-	}
 	renderVideoSpecs(inner, item)
 	renderAudioInfo(inner, item)
 	if item.CommentaryCount > 0 {
-		inner.field("Tracks", fmt.Sprintf("%d commentary track(s) detected", item.CommentaryCount), styles.Text)
+		inner.field("Tracks", fmt.Sprintf("%d commentary", item.CommentaryCount), styles.Text)
 	}
 	renderEncodingConfig(inner, item)
 	renderContentID(inner, item)
@@ -297,7 +297,7 @@ func (m *Model) renderMedia(w fieldWriter, item spindle.QueueItem, styles Styles
 	if b.Len() == 0 {
 		return
 	}
-	m.writeSection(w.b, "Media", styles, w.width)
+	m.writeSection(w.b, "Media", styles)
 	w.b.WriteString(b.String())
 }
 
@@ -333,11 +333,18 @@ func (m *Model) renderOutput(w fieldWriter, item spindle.QueueItem, styles Style
 	if !strings.EqualFold(item.Stage, "failed") {
 		inner.field("Files", m.describeItemFileStates(item), styles.Text)
 	}
+	if isEpisodicItem(item) {
+		episodes, _ := item.EpisodeSnapshot()
+		if matched := matchedEpisodeCount(item, episodes); matched > 0 && matched < len(episodes) {
+			inner.field("", "⚠ Episode numbers not confirmed", styles.WarningText)
+		}
+		inner.field("", "Press 2 for the episode list", styles.FaintText)
+	}
 
 	if b.Len() == 0 {
 		return
 	}
-	m.writeSection(w.b, "Output", styles, w.width)
+	m.writeSection(w.b, "Output", styles)
 	w.b.WriteString(b.String())
 }
 
@@ -352,24 +359,6 @@ func isEpisodicItem(item spindle.QueueItem) bool {
 		}
 	}
 	return len(episodes) > 1 || detectMediaType(item.Metadata) == "tv"
-}
-
-// renderEpisodeSummarySection renders the episode batch summary; the full
-// per-episode list lives on the Episodes tab.
-func (m *Model) renderEpisodeSummarySection(b *strings.Builder, item spindle.QueueItem, styles Styles) {
-	if !isEpisodicItem(item) {
-		return
-	}
-	episodes, totals := item.EpisodeSnapshot()
-
-	m.writeSection(b, "Episodes", styles, 0)
-	m.renderEpisodeSummary(b, item, episodes, totals, styles)
-	if matched := matchedEpisodeCount(item, episodes); matched > 0 && matched < len(episodes) {
-		b.WriteString(styles.WarningText.Render("⚠ Episode numbers not confirmed"))
-		b.WriteString("\n")
-	}
-	b.WriteString(styles.FaintText.Render("Press 2 for the episode list"))
-	b.WriteString("\n")
 }
 
 // sourceSummary formats a movie's primary source title, e.g.

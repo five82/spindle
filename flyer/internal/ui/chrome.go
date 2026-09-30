@@ -7,21 +7,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// renderRule renders a full-width horizontal rule with an embedded title:
-// ── Title ───────────────
-// The title renders bold; the dashes use the theme border color.
-func renderRule(title string, width int, styles Styles) string {
-	line := styles.RuleText.Render("── ")
-	if title != "" {
-		line += styles.Text.Bold(true).Render(title) + styles.RuleText.Render(" ")
-	}
-	used := lipgloss.Width(line)
-	if width > used {
-		line += styles.RuleText.Render(strings.Repeat("─", width-used))
-	}
-	return line
-}
-
 // padBand pads a chrome band line with background-filled cells to the full
 // terminal width, so the band reads as one solid strip.
 func padBand(line string, width int, band lipgloss.Style) string {
@@ -51,14 +36,13 @@ func renderPanel(title, content, footer string, width int, styles Styles) string
 	inner := panelInnerWidth(width)
 
 	var b strings.Builder
-	b.WriteString(styles.RuleText.Render("┌── "))
-	dashes := width - 5
-	if title != "" {
+	if title == "" {
+		b.WriteString(styles.RuleText.Render("┌" + strings.Repeat("─", max(width-2, 0)) + "┐"))
+	} else {
+		b.WriteString(styles.RuleText.Render("┌── "))
 		b.WriteString(styles.Text.Bold(true).Render(title))
-		b.WriteString(styles.RuleText.Render(" "))
-		dashes = width - 6 - lipgloss.Width(title)
+		b.WriteString(styles.RuleText.Render(" " + strings.Repeat("─", max(width-6-lipgloss.Width(title), 0)) + "┐"))
 	}
-	b.WriteString(styles.RuleText.Render(strings.Repeat("─", max(dashes, 0)) + "┐"))
 	b.WriteString("\n")
 
 	edge := styles.RuleText.Render("│")

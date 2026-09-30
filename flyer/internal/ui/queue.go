@@ -390,11 +390,12 @@ func (m Model) queueProgressCell(item spindle.QueueItem, cols queueColumns, _ li
 
 // queueStageCell returns the stage column text and style for an item.
 func queueStageCell(item spindle.QueueItem, styles Styles) (string, lipgloss.Style) {
+	// Title case like the inspector's task board; only chips are uppercase.
 	if item.NeedsReview {
-		return "REVIEW", styles.WarningText
+		return "Review", styles.WarningText.Bold(true)
 	}
 	if strings.EqualFold(item.Stage, "failed") {
-		return "FAILED", styles.DangerText
+		return "Failed", styles.DangerText
 	}
 	info := stageDisplay(itemDisplayStage(item))
 	label := info.label
@@ -403,10 +404,10 @@ func queueStageCell(item spindle.QueueItem, styles Styles) (string, lipgloss.Sty
 		label = info.doneLabel
 		style = styles.MutedText
 	} else if len(item.WorkingTasks()) == 0 {
-		label = "waiting"
+		label = "Waiting"
 		style = styles.FaintText
 	}
-	return strings.ToLower(label), style
+	return label, style
 }
 
 // queueFileCount returns completed files, never the current file's position.

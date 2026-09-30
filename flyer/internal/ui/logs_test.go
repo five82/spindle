@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
@@ -65,7 +67,7 @@ func TestStyleLogEventMatchesPlainTextContent(t *testing.T) {
 	m := &Model{theme: theme}
 
 	evt := sampleLogEvent()
-	styled := stripANSI(m.styleLogEvent(evt, styles, false))
+	styled := stripANSI(m.styleLogEvent(evt, styles, false, true, 200))
 
 	for _, want := range []string{
 		logEventTimestamp(evt),
@@ -91,7 +93,7 @@ func TestStyleLogEventUppercasesLevel(t *testing.T) {
 	m := &Model{theme: theme}
 
 	evt := spindle.LogEvent{Level: "info", Message: "hello"}
-	styled := stripANSI(m.styleLogEvent(evt, styles, false))
+	styled := stripANSI(m.styleLogEvent(evt, styles, false, true, 200))
 	if !strings.Contains(styled, "INFO") {
 		t.Fatalf("styleLogEvent() = %q, want level rendered as INFO", styled)
 	}
@@ -103,7 +105,7 @@ func TestStyleLogEventOmitsSubjectAndMessageWhenEmpty(t *testing.T) {
 	m := &Model{theme: theme}
 
 	evt := spindle.LogEvent{Level: "info"}
-	styled := stripANSI(m.styleLogEvent(evt, styles, false))
+	styled := stripANSI(m.styleLogEvent(evt, styles, false, true, 200))
 	if strings.Contains(styled, "–") {
 		t.Fatalf("styleLogEvent() = %q, should not render a message separator with no message", styled)
 	}
@@ -221,5 +223,45 @@ func TestHandleLogBatchDedupesOverlappingSeq(t *testing.T) {
 	}
 	if last := m.logState.rawLines[len(m.logState.rawLines)-1]; last.Sequence != 4 {
 		t.Fatalf("last appended seq = %d, want 4", last.Sequence)
+	}
+}
+
+// By default each event is one row: the decision outcome and error hint ride
+// inline, other fields stay hidden, and the row never exceeds its width.
+func TestStyleLogEventCompactRow(t *testing.T) {
+	theme := GetTheme("Nightfox")
+	m := &Model{theme: theme}
+	evt := sampleLogEvent()
+	evt.Fields["decision_result"] = "adopted"
+	evt.Fields["error_hint"] = "clean the disc"
+	evt.Fields["subtitle_path"] = "/very/long/path"
+	got := stripANSI(m.styleLogEvent(evt, theme.Styles(), false, false, 200))
+	if strings.Contains(got, "\n") || !strings.Contains(got, "disc read retry → adopted · clean the disc") || strings.Contains(got, "subtitle_path") {
+		t.Fatalf("compact row = %q", got)
+	}
+	if got := stripANSI(m.styleLogEvent(evt, theme.Styles(), false, false, 40)); lipgloss.Width(got) > 40 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("compact row must be cut to width: %q", got)
+	}
+	started := spindle.LogEvent{Level: "info", Message: "stage started", Fields: map[string]string{"decision_result": "started"}}
+	if got := stripANSI(m.styleLogEvent(started, theme.Styles(), false, false, 200)); strings.Contains(got, "→") {
+		t.Fatalf("result already in the message must not repeat: %q", got)
+	}
+}
+
+// Expanded field rows wrap under their value instead of running off the
+// panel edge.
+func TestStyleLogEventWrapsLongFields(t *testing.T) {
+	theme := GetTheme("Nightfox")
+	m := &Model{theme: theme}
+	evt := spindle.LogEvent{Level: "info", Message: "adopted", Fields: map[string]string{"decision_reason": strings.Repeat("similarity ", 12)}}
+	got := stripANSI(m.styleLogEvent(evt, theme.Styles(), false, true, 50))
+	lines := strings.Split(got, "\n")
+	if len(lines) < 3 || !strings.HasPrefix(lines[2], "      ") {
+		t.Fatalf("wrapped field rows = %q", lines)
+	}
+	for _, line := range lines[1:] {
+		if lipgloss.Width(line) > 50 {
+			t.Fatalf("field row overflows: %q", line)
+		}
 	}
 }

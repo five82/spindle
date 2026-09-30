@@ -19,8 +19,9 @@ func TestLogStatusSearchAndItemFilters(t *testing.T) {
 	m.logState.searchActive = true
 	m.logState.searchInput.SetValue("needle")
 	m.logState.filterComponent, m.logState.filterLane, m.logState.filterRequest = "api", "rip", "request1"
+	m.width = 160
 	status := stripANSI(m.renderLogStatus(styles))
-	for _, want := range []string{"Item log", "item=42", "search: needle", "comp=api", "lane=rip", "req=request1"} {
+	for _, want := range []string{"Item #42 log", "paused", "search: needle", "comp=api", "lane=rip", "req=request1"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("status %q missing %q", status, want)
 		}
@@ -28,8 +29,13 @@ func TestLogStatusSearchAndItemFilters(t *testing.T) {
 	if got := m.getLogTitle(); got != "Daemon Log (filtered)" {
 		t.Fatalf("filtered title = %q", got)
 	}
+	m.width = 30
+	if got := stripANSI(m.renderLogStatus(styles)); len([]rune(got)) > 30 {
+		t.Fatalf("status must fit the terminal width, got %q", got)
+	}
+	m.width = 160
 	m.logState.lastItemID = 0
-	if got := stripANSI(m.renderLogStatus(styles)); strings.Contains(got, "item=") {
+	if got := stripANSI(m.renderLogStatus(styles)); strings.Contains(got, "#") || !strings.HasPrefix(got, "Item log") {
 		t.Fatalf("item without ID status = %q", got)
 	}
 	m.logState.searchRegex = regexp.MustCompile("retry")

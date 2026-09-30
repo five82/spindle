@@ -655,6 +655,14 @@ func (m Model) helpContext() string {
 	}
 }
 
+// clock returns the current time, honoring the test clock.
+func (m Model) clock() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
+}
+
 // spinnerFrames animate the connecting/offline indicator.
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -160,7 +161,7 @@ func TestLogFiltersApplyAndCancel(t *testing.T) {
 
 func TestLogViewNavigationAndStatus(t *testing.T) {
 	m := newLogInteractionModel(t)
-	if got := stripANSI(m.renderLogStatus(m.theme.Styles())); !strings.Contains(got, "Daemon log 3 lines auto-tail on") {
+	if got := stripANSI(m.renderLogStatus(m.theme.Styles())); !strings.Contains(got, "Daemon log · 3 events · following") {
 		t.Fatalf("status = %q", got)
 	}
 	for _, k := range []string{" ", "g", "G", "j", "k"} {
@@ -181,5 +182,26 @@ func TestLogViewNavigationAndStatus(t *testing.T) {
 	m = model.(Model)
 	if !m.logState.follow {
 		t.Fatal("bottom should enable follow")
+	}
+}
+
+// Search scrolls to the matched event's rendered line, which differs from
+// its index once structured fields expand events over several rows.
+func TestLogSearchScrollsToExpandedEvent(t *testing.T) {
+	m := newLogInteractionModel(t)
+	m.logState.rawLines = nil
+	for i := range 20 {
+		m.logState.rawLines = append(m.logState.rawLines, spindle.LogEvent{Sequence: uint64(i + 1), Level: "info", Message: fmt.Sprintf("event-%02d", i),
+			Fields: map[string]string{"a": "1", "b": "2", "c": "3"}})
+	}
+	model, _ := m.handleLogsKey(appKey("t"))
+	m = model.(Model)
+	if !m.logState.showFields {
+		t.Fatal("t must expand fields")
+	}
+	m.logState.searchMatches, m.logState.searchMatchIdx = []int{15}, 0
+	m.scrollToSearchMatch()
+	if view := stripANSI(m.logViewport.View()); !strings.Contains(view, "event-15") {
+		t.Fatalf("match not visible after scroll:\n%s", view)
 	}
 }

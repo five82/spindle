@@ -19,14 +19,15 @@ triage list are sibling full-width views of the dashboard layer.
 Invariants worth defending:
 
 - The inspector Overview is a **fixed section skeleton** — Attention, Pipeline,
-  Media, Output, Episodes, Meta — in the same order for every item state. Rows
+  Media, Output, Meta — in the same order for every item state. Rows
   appear or disappear by data presence, never by state branching, so positions
   stay learnable (tests assert the order). Attention leads: the moment an item
   needs the operator is exactly when the problem should hold the top of the
   screen. The accepted cost is that Pipeline shifts down when Attention appears.
-- The inspector Problems tab label carries a `⚠` marker when the item actually
-  has problems — the glyph marks presence, the label carries the meaning — so
-  the operator never tabs into an empty view blind.
+- The inspector Episodes and Problems tab labels carry counts, and Problems adds
+  a `⚠` marker when the item actually has problems — the glyph marks presence,
+  the label carries the meaning — so the operator never tabs into an empty view
+  blind. The active tab renders in reverse video so it reads without color.
 - The header always renders reported optical-drive availability (AVAILABLE /
   BUSY / PAUSED). The queue's NOW band reports active resource holders only,
   including the drive holder when busy. "Insert the next disc" is the single
@@ -56,11 +57,13 @@ The panel fills the vertical slack so the frame is stable while data changes
 per side).
 
 Scroll visibility: when panel content overflows, the scroll position renders
-right-aligned in the bottom border — a `start-end of total` range for lists, a
-percentage for viewports; log views show the percentage in their status line
-while follow is paused. The inspector's item line leads with a breadcrumb naming
-the view Esc returns to, followed by the prominent item number
-(`Queue › ID #1 › Title` or `Problems › ID #1 › Title`).
+right-aligned in the bottom border as a `start-end of total` line range; log
+views show a percentage in their status line while follow is paused. The
+inspector's item line leads with a breadcrumb naming the view Esc returns to,
+followed by the prominent item number (`Queue › #1 Title` or
+`Problems › #1 Title`); it states the snapshot's age only once the snapshot is
+stale, since the header clock already dates a fresh one. Status lines are single
+rows of chrome and truncate rather than wrap.
 
 Breakpoints: below 80 columns the queue drops its AGE column and header labels
 abbreviate; at >= 100 columns the queue's completed-file counts gain outcome
@@ -72,11 +75,13 @@ verify layout changes there.
 
 | Level | Use in flyer                                                        | Border                                    |
 | ----- | ------------------------------------------------------------------- | ----------------------------------------- |
-| 0     | Content inside panels; section rules (`── Title ───`)               | none                                      |
+| 0     | Content inside panels; section headers as bold accent labels        | none                                      |
 | 1     | Every view's content region (queue, problems, logs, inspector tabs) | single-line, title embedded in top border |
 | 4     | Help and log-filter modals                                          | double-line, centered over a faint scrim  |
 
-Rounded borders are not used on interactive surfaces. New overlays get
+Inspector panels leave the top border untitled: the highlighted tab already
+names the content, and a repeated title plus a section rule stacked three
+title lines. Rounded borders are not used on interactive surfaces. New overlays get
 double-line borders and composite through `overlayCenter` (which applies the
 scrim).
 
@@ -101,7 +106,8 @@ scrim).
 Follows the guide's Tier 1/2 assignments: `q` quits, `?`/`h` help, `/` filter,
 `r` refresh, `Esc` back, `g`/`G` top/bottom, `Ctrl+D`/`Ctrl+U` half-page.
 Single-letter keys bind both cases and display lowercase. Documented exceptions:
-`t` (file details) vs `T` (theme), and vim's `n`/`N` match cycling. The footer
+`t` (details: file details on the Episodes tab, structured fields in logs) vs
+`T` (theme), and vim's `n`/`N` match cycling. The footer
 key strip shows the current context's keys with drop-priority ranks for narrow
 terminals; a key not shown in the footer must not be required to complete a
 task.

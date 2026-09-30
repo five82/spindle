@@ -59,11 +59,14 @@ func (m Model) nowBandContent(styles Styles) string {
 					break
 				}
 			}
-			seg := styles.MutedText.Render(rlabel+": ") +
-				styles.Text.Render(fmt.Sprintf("#%d ", h.ItemID)) + activity
+			id := fmt.Sprintf("#%d ", h.ItemID)
+			if title := m.holderTitle(h.ItemID); title != "" && !compact {
+				id += truncate(title, 28) + " "
+			}
+			seg := styles.MutedText.Render(rlabel+": ") + styles.Text.Render(id) + activity
 			if !compact {
 				for _, extra := range m.holderExtras(h) {
-					seg += styles.AccentText.Render(" " + extra)
+					seg += styles.FaintText.Render(" ·") + styles.AccentText.Render(" "+extra)
 				}
 			}
 			parts = append(parts, seg)
@@ -90,16 +93,21 @@ func (m Model) holderExtras(h spindle.ResourceHolder) []string {
 			if m.snapshot.LastError != nil {
 				return []string{"stale"}
 			}
-			now := time.Now()
-			if m.now != nil {
-				now = m.now()
-			}
+			now := m.clock()
 			for _, activity := range t.Activities {
 				if activity.State == "waiting" {
 					return []string{activity.Message}
 				}
 				if activity.State == "running" && !activity.Started().IsZero() && now.Sub(activity.Started()) >= 10*time.Second && activity.Total > 0 && activity.Unit != "" {
-					return []string{fmt.Sprintf("%s %s %.0f%%", activity.AssetKey, activity.Operation, 100*float64(activity.Completed)/float64(activity.Total))}
+					op := activity.Operation
+					if strings.EqualFold(op, t.Type) {
+						op = "" // "encoding" already names the holder's activity
+					}
+					extras := []string{strings.Join(strings.Fields(fmt.Sprintf("%s %s %.0f%%", activity.AssetKey, op, 100*float64(activity.Completed)/float64(activity.Total))), " ")}
+					if eta := taskETA(t, now); eta != "" {
+						extras = append(extras, eta+" left")
+					}
+					return extras
 				}
 			}
 			if !t.IsWorking() {
@@ -109,4 +117,15 @@ func (m Model) holderExtras(h spindle.ResourceHolder) []string {
 		}
 	}
 	return nil
+}
+
+// holderTitle names a resource holder's item, or "" when it is untitled or
+// no longer in the queue.
+func (m Model) holderTitle(itemID int64) string {
+	for _, item := range m.snapshot.Queue {
+		if item.ID == itemID && (item.DisplayTitle != "" || item.DiscTitle != "") {
+			return composeTitle(item)
+		}
+	}
+	return ""
 }

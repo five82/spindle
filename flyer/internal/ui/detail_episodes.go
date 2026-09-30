@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
+
+	"charm.land/lipgloss/v2"
 
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
@@ -59,14 +62,26 @@ func (m *Model) renderEpisodeRow(b *strings.Builder, item spindle.QueueItem, ep 
 		marker, markerStyle = "!", styles.DangerText
 	}
 	fmt.Fprintf(b, "%s %s %s\n", markerStyle.Render(marker), styles.Text.Render(formatEpisodeLabel(ep)), styles.Text.Render(episodeDisplayTitle(ep)))
-	state := func(path string) string {
-		if path != "" {
-			return "yes"
+	// Recorded-file glyphs match the queue's task strip (✓ recorded, ○ not).
+	files, filesWidth := "", 0
+	for _, f := range []struct{ name, path string }{{"rip", ep.RippedPath}, {"encode", ep.EncodedPath}, {"output", ep.FinalPath}} {
+		glyph, style := "○", styles.FaintText
+		if f.path != "" {
+			glyph, style = "✓", styles.SuccessText
 		}
-		return "no"
+		if files != "" {
+			files += "  "
+			filesWidth += 2
+		}
+		files += styles.MutedText.Render(f.name+" ") + style.Render(glyph)
+		filesWidth += len(f.name) + 2
 	}
-	fmt.Fprintf(b, "  %s\n", styles.MutedText.Render(fmt.Sprintf("Recorded files: rip %s | encode %s | output %s", state(ep.RippedPath), state(ep.EncodedPath), state(ep.FinalPath))))
-	fmt.Fprintf(b, "  %s\n", styles.MutedText.Render("Subtitle: "+subtitleOutcome(ep)))
+	subtitle := "Subtitle: " + subtitleOutcome(ep)
+	if filesWidth+5+lipgloss.Width(subtitle) <= panelInnerWidth(m.width)-2 {
+		fmt.Fprintf(b, "  %s%s%s\n", files, styles.FaintText.Render("  ·  "), styles.MutedText.Render(subtitle))
+	} else {
+		fmt.Fprintf(b, "  %s\n  %s\n", files, styles.MutedText.Render(subtitle))
+	}
 	for _, task := range item.Tasks {
 		if task.State != "running" || item.UserStopped {
 			continue
@@ -77,6 +92,12 @@ func (m *Model) renderEpisodeRow(b *strings.Builder, item spindle.QueueItem, ep 
 				continue
 			}
 			message := stageDisplay(task.Type).label + ": " + a.Message
+			if a.Total > 0 && a.Unit != "" {
+				message += fmt.Sprintf(" %.0f%% (%d/%d %s)", 100*float64(a.Completed)/float64(a.Total), a.Completed, a.Total, a.Unit)
+			}
+			if eta := taskETA(task, m.clock()); a.ID == "video" && eta != "" {
+				message += "; " + eta + " remaining"
+			}
 			if m.snapshot.LastError != nil {
 				message = "Stale: " + message
 			}
@@ -97,7 +118,8 @@ func (m *Model) renderEpisodeRow(b *strings.Builder, item spindle.QueueItem, ep 
 		fmt.Fprintf(b, "  %s\n", style.Render(issue))
 	}
 	if !m.isEpisodesCollapsed(item, nil, spindle.EpisodeTotals{}) {
-		w := fieldWriter{b: b, styles: styles, width: max(panelInnerWidth(m.width)-4, 20)}
+		// One shared label column (widest label + 1) keeps every value aligned.
+		w := fieldWriter{b: b, styles: styles, width: panelInnerWidth(m.width), indent: 2, labelWidth: len("Reel quality") + 1}
 		w.field("Key", ep.Key, styles.FaintText)
 		w.field("Source", describeEpisodeTrackInfo(&ep), styles.Text)
 		if isEpisodicItem(item) {
@@ -107,17 +129,21 @@ func (m *Model) renderEpisodeRow(b *strings.Builder, item spindle.QueueItem, ep 
 		w.field("Subs issues", strings.Join(append(append([]string{}, ep.SubtitleReviewIssues...), ep.SubtitleSevereIssues...), "; "), styles.WarningText)
 		if audio := ep.AudioAnalysis; audio != nil {
 			for _, track := range audio.CommentaryTracks {
-				w.field("Comment", fmt.Sprintf("track %d: %s (confidence %.2f)", track.Index, track.Reason, track.Confidence), styles.Text)
+				w.field("Commentary", fmt.Sprintf("track %d: %s (confidence %.2f)", track.Index, track.Reason, track.Confidence), styles.Text)
 			}
 			for _, track := range audio.ExcludedTracks {
 				w.field("Excluded", fmt.Sprintf("track %d: %s", track.Index, track.Reason), styles.Text)
 			}
 		}
-		w.field("Final checks", ep.FinalValidation.Verdict(), styles.Text)
+		verdict := ep.FinalValidation.Verdict()
+		if verdict == "not run" {
+			verdict = "pending (run after Apply)" // matches the Overview's Checks row
+		}
+		w.field("Final checks", verdict, styles.Text)
 		if v := ep.FinalValidation; v != nil {
-			w.field("Check details", strings.Join(v.FailedChecks, "; ")+v.Error, styles.WarningText)
-			w.field("Delivered video", v.VideoCodec+" "+v.Resolution, styles.Text)
-			w.field("Delivered audio", strings.Join(v.Audio, "; "), styles.Text)
+			w.field("Check detail", strings.Join(v.FailedChecks, "; ")+v.Error, styles.WarningText)
+			w.field("Out video", strings.TrimSpace(v.VideoCodec+" "+v.Resolution), styles.Text)
+			w.field("Out audio", strings.Join(v.Audio, "; "), styles.Text)
 			if v.AVSync != nil {
 				text := v.AVSync.Error
 				if text == "" {
@@ -128,27 +154,25 @@ func (m *Model) renderEpisodeRow(b *strings.Builder, item spindle.QueueItem, ep 
 		}
 		if s := ep.EncodeStats; s != nil {
 			if s.Width > 0 {
-				w.field("Source video", fmt.Sprintf("%dx%d", s.Width, s.Height), styles.Text)
+				w.field("Src video", fmt.Sprintf("%dx%d", s.Width, s.Height), styles.Text)
 			}
 			if s.Validation != nil {
 				for _, check := range s.Validation.Steps {
 					w.field("Reel check", fmt.Sprintf("%s: passed=%t; %s", check.Name, check.Passed, check.Details), styles.MutedText)
 				}
 			}
-			if len(s.TargetQuality) > 0 {
-				w.field("Reel quality", string(s.TargetQuality), styles.MutedText)
+			for _, line := range summarizeTargetQuality(s.TargetQuality) {
+				w.field("Reel quality", line, styles.MutedText)
 			}
-			if len(s.GrainTreatment) > 0 {
-				w.field("Grain", string(s.GrainTreatment), styles.MutedText)
-			}
-			w.field("Reel", fmt.Sprintf("%s intermediate; %s; %.1fx", formatBytes(s.EncodedSizeBytes), formatDuration(time.Duration(s.EncodeSeconds*float64(time.Second))), s.Speed), styles.Text)
+			w.field("Grain", summarizeGrain(s.GrainTreatment), styles.MutedText)
+			w.field("Encoded", fmt.Sprintf("%s (before Apply) in %s; %.1fx speed", formatBytes(s.EncodedSizeBytes), formatDuration(time.Duration(s.EncodeSeconds*float64(time.Second))), s.Speed), styles.Text)
 		}
 		if ep.FinalSizeBytes > 0 {
 			w.field("Delivered", formatBytes(ep.FinalSizeBytes)+" to "+ep.FinalRoute, styles.Text)
 		}
 		w.field("Destination", ep.FinalPath, styles.Text)
-		w.field("Recorded rip", ep.RippedPath, styles.FaintText)
-		w.field("Recorded encode", ep.EncodedPath, styles.FaintText)
+		w.field("Rip file", ep.RippedPath, styles.FaintText)
+		w.field("Encode file", ep.EncodedPath, styles.FaintText)
 	}
 }
 
@@ -203,7 +227,12 @@ func (m *Model) describeItemFileStates(item spindle.QueueItem) string {
 	if t.Planned == 0 {
 		return "Selected-file inventory not reported"
 	}
-	return fmt.Sprintf("%d/%d ripped; %d/%d encoded; %d/%d published", t.Ripped, t.Planned, t.Encoded, t.Planned, t.Final, t.Planned)
+	value := fmt.Sprintf("%d/%d ripped; %d/%d encoded; %d/%d published", t.Ripped, t.Planned, t.Encoded, t.Planned, t.Final, t.Planned)
+	if isEpisodicItem(item) {
+		episodes, _ := item.EpisodeSnapshot()
+		value += fmt.Sprintf("; %d/%d matched", matchedEpisodeCount(item, episodes), t.Planned)
+	}
+	return value
 }
 
 func describeEpisodeMapping(ep spindle.EpisodeStatus) string {
@@ -228,4 +257,73 @@ func describeEpisodeIssue(ep spindle.EpisodeStatus) string {
 		return "Needs review: " + ep.ReviewReason
 	}
 	return ""
+}
+
+// summarizeTargetQuality condenses Reel's CRF-search aggregate to one line
+// per metric; metrics.jsonl keeps the full record. Unparseable input falls
+// back to one truncated line of raw JSON.
+func summarizeTargetQuality(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var tq struct {
+		Metrics []struct {
+			Metric    string  `json:"metric"`
+			Target    float64 `json:"target"`
+			Tolerance float64 `json:"tolerance"`
+			Chunks    int     `json:"chunks"`
+			ScoreMin  float64 `json:"score_min"`
+			ScoreMean float64 `json:"score_mean"`
+			CRFMin    float64 `json:"final_crf_min"`
+			CRFMedian float64 `json:"final_crf_median"`
+			CRFMax    float64 `json:"final_crf_max"`
+		} `json:"metrics"`
+	}
+	if err := json.Unmarshal(raw, &tq); err != nil || len(tq.Metrics) == 0 {
+		return []string{truncate(string(raw), 80)}
+	}
+	var lines []string
+	for _, q := range tq.Metrics {
+		lines = append(lines, fmt.Sprintf("%s %.2f±%.2f: mean %.2f, min %.2f; CRF %g-%g (median %g); %d chunks",
+			q.Metric, q.Target, q.Tolerance, q.ScoreMean, q.ScoreMin, q.CRFMin, q.CRFMax, q.CRFMedian, q.Chunks))
+	}
+	return lines
+}
+
+// summarizeGrain condenses the grain gate's verdict: whether treatment ran,
+// the bits-per-pixel evidence against its cutoff, and the denoise ceiling
+// that caps a treated title's scores.
+func summarizeGrain(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var g struct {
+		Treated     bool     `json:"treated"`
+		Denoise     string   `json:"denoise"`
+		Reason      string   `json:"reason"`
+		MedianBPP   float64  `json:"median_bpp"`
+		Cutoff      float64  `json:"treatment_bpp_cutoff"`
+		CeilingMean *float64 `json:"denoise_ceiling_jod_mean"`
+		CeilingMin  *float64 `json:"denoise_ceiling_jod_min"`
+	}
+	if err := json.Unmarshal(raw, &g); err != nil {
+		return truncate(string(raw), 80)
+	}
+	parts := []string{"not treated"}
+	if g.Treated {
+		parts[0] = "treated"
+		if g.Denoise != "" {
+			parts[0] += " (" + g.Denoise + ")"
+		}
+	}
+	if g.Reason != "" {
+		parts = append(parts, g.Reason)
+	}
+	if g.MedianBPP > 0 {
+		parts = append(parts, fmt.Sprintf("median bpp %.3f vs cutoff %g", g.MedianBPP, g.Cutoff))
+	}
+	if g.CeilingMean != nil && g.CeilingMin != nil {
+		parts = append(parts, fmt.Sprintf("denoise ceiling %.2f JOD (min %.2f)", *g.CeilingMean, *g.CeilingMin))
+	}
+	return strings.Join(parts, "; ")
 }

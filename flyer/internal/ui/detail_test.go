@@ -38,7 +38,7 @@ func TestOverviewStableSkeletonAndConcurrentWork(t *testing.T) {
 			{Type: "apply", State: "pending", DependsOn: []string{"encoding", "subtitling"}},
 		}}
 	got := overviewFor(t, item)
-	sectionOrder(t, got, "Pipeline", "Media", "Output", "Episodes", "created")
+	sectionOrder(t, got, "Pipeline", "Media", "Output", "episode list", "created")
 	for _, want := range []string{"Running Ripping", "1/2 done", "0/2 done", "Reading title 03", "47/100 frames", "Needs Encoding + Subtitling"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q: %s", want, got)
@@ -90,7 +90,7 @@ func TestOverviewCompletedItemUsesDeliveredFacts(t *testing.T) {
 		Tasks:    []spindle.Task{{Type: "encoding", State: "done"}}, Encoding: &spindle.EncodingStatus{EncodedSize: 999, Validation: &spindle.EncodingValidation{Passed: true}}}
 	got := overviewFor(t, item)
 	sectionOrder(t, got, "Pipeline", "Output", "created")
-	for _, want := range []string{"142.00 MiB delivered", "190.00 MiB intermediate", "Final post-Apply: 1 passed", "/library/Air.mkv", "Elapsed 2h 30m", "OpenSubtitles SRT"} {
+	for _, want := range []string{"142.00 MiB delivered", "190.00 MiB (before Apply)", "Checks   1 passed", "/library/Air.mkv", "Elapsed 2h 30m", "OpenSubtitles SRT"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q: %s", want, got)
 		}
@@ -106,6 +106,9 @@ func TestOverviewMediaScopeAndQuality(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Error(got)
 		}
+	}
+	if strings.Count(got, "feature.mkv") != 1 {
+		t.Fatalf("input file must be named once: %s", got)
 	}
 	if strings.Contains(got, "initial CRF") {
 		t.Fatal(got)
@@ -131,13 +134,10 @@ func TestOverviewTaskDurationsAndOverlap(t *testing.T) {
 func TestOverviewTVDiscAndSourceSummary(t *testing.T) {
 	item := spindle.QueueItem{DiscNumber: 2, Metadata: json.RawMessage(`{"media_type":"tv"}`), Episodes: make([]spindle.EpisodeStatus, 4)}
 	got := overviewFor(t, item)
-	sectionOrder(t, got, "Pipeline", "Media", "Output", "Episodes")
-	if !strings.Contains(got, "Disc     2") || !strings.Contains(got, "4 source files") {
+	sectionOrder(t, got, "Pipeline", "Output")
+	// The disc number is identity: the item band carries it, not Media.
+	if strings.Contains(got, "Disc ") || !strings.Contains(got, "0/4 ripped") || !strings.Contains(got, "Press 2 for the episode list") {
 		t.Fatal(got)
-	}
-	item.DiscNumber = 0
-	if strings.Contains(overviewFor(t, item), "Disc     ") {
-		t.Fatal("unset disc shown")
 	}
 }
 func TestCountsNeverUseManifestPosition(t *testing.T) {

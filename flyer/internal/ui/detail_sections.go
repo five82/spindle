@@ -12,7 +12,7 @@ import (
 func renderEstimatedSize(w fieldWriter, item spindle.QueueItem) {
 	for _, task := range item.Tasks {
 		if e := task.Encoding; task.IsWorking() && e != nil && e.Percent >= 10 && e.EstimatedTotalBytes > 0 && e.EncodedSize == 0 {
-			w.field("File est", "~"+formatBytes(e.EstimatedTotalBytes)+" before Apply", w.styles.AccentText)
+			w.field("Est. size", "~"+formatBytes(e.EstimatedTotalBytes)+" (before Apply)", w.styles.AccentText)
 		}
 	}
 }
@@ -49,7 +49,7 @@ func renderSizeResult(w fieldWriter, item spindle.QueueItem) {
 		w.field("Output", value, w.styles.Text)
 	}
 	if intermediate > 0 {
-		w.field("Reel", formatBytes(intermediate)+" intermediate (before Apply)", w.styles.MutedText)
+		w.field("Encoded", formatBytes(intermediate)+" (before Apply)", w.styles.MutedText)
 	}
 }
 
@@ -85,7 +85,7 @@ func renderEncodingConfig(w fieldWriter, item spindle.QueueItem) {
 	if enc == nil || enc.Preset == "" {
 		return
 	}
-	w.field("Config", fmt.Sprintf("%s preset %s; tune %s (%s)", enc.Encoder, enc.Preset, enc.Tune, enc.InputFile), w.styles.MutedText)
+	w.field("Config", fmt.Sprintf("%s preset %s; tune %s", enc.Encoder, enc.Preset, enc.Tune), w.styles.MutedText)
 	w.field("Quality", summarizeQuality(enc.Quality), w.styles.MutedText)
 }
 
@@ -108,7 +108,8 @@ func renderContentID(w fieldWriter, item spindle.QueueItem) {
 	if c == nil || strings.TrimSpace(c.Method) == "" {
 		return
 	}
-	w.field("ID", fmt.Sprintf("%s; %d matched; %d unresolved; %d for review", c.Method, c.MatchedEpisodes, c.UnresolvedEpisodes, c.ReviewEpisodes), w.styles.Text)
+	// Counts lead; the daemon's method identifier is provenance, so it trails.
+	w.field("Matching", fmt.Sprintf("%d matched; %d unresolved; %d for review (via %s)", c.MatchedEpisodes, c.UnresolvedEpisodes, c.ReviewEpisodes, c.Method), w.styles.Text)
 	w.field("Catalog", fmt.Sprintf("%s; %d candidate episodes", c.ReferenceSource, c.ReferenceEpisodes), w.styles.Text)
 	if c.Completed && !c.SequenceContiguous {
 		w.field("Sequence", "Episode sequence not contiguous", w.styles.WarningText)
@@ -135,13 +136,19 @@ func renderValidationSummary(w fieldWriter, item spindle.QueueItem) {
 		counts[ep.FinalValidation.Verdict()]++
 	}
 	if len(item.Episodes) == 0 {
-		w.field("Checks", "Final checks not run", w.styles.MutedText)
+		w.field("Checks", "Final checks not run yet", w.styles.MutedText)
 		return
 	}
+	// Final checks run on published files, after Apply; until then they
+	// are pending rather than skipped.
 	var parts []string
 	for _, state := range []string{"failed", "unavailable", "not run", "passed"} {
 		if n := counts[state]; n > 0 {
-			parts = append(parts, fmt.Sprintf("%d %s", n, state))
+			label := state
+			if state == "not run" {
+				label = "pending"
+			}
+			parts = append(parts, fmt.Sprintf("%d %s", n, label))
 		}
 	}
 	style := w.styles.SuccessText
@@ -151,7 +158,7 @@ func renderValidationSummary(w fieldWriter, item spindle.QueueItem) {
 	if counts["failed"] > 0 {
 		style = w.styles.DangerText
 	}
-	w.field("Checks", "Final post-Apply: "+strings.Join(parts, "; "), style)
+	w.field("Checks", strings.Join(parts, "; "), style)
 }
 
 func renderFinalPath(w fieldWriter, item spindle.QueueItem) {

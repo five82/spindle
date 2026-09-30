@@ -70,7 +70,7 @@ func TestTriageSelectionAndNavigation(t *testing.T) {
 		t.Fatal("empty triage must clear selection")
 	}
 	next, _ = m.handleProblemsKey(appKey("j"))
-	if next.(Model).problemsRow != 0 || !strings.Contains(stripANSI(m.renderProblems()), "No current structured issues") {
+	if next.(Model).problemsRow != 0 || !strings.Contains(stripANSI(m.renderProblems()), "No problems") {
 		t.Fatal("empty triage must not navigate")
 	}
 }
@@ -110,7 +110,7 @@ func TestItemProblemsSectionsAndLogs(t *testing.T) {
 	m.problemsState.lastItemID = 7
 	m.problemsState.logLines = []spindle.LogEvent{{Sequence: 1, Level: "warn", Message: "daemon warning"}}
 	got := stripANSI(m.renderItemProblems(item))
-	for _, want := range []string{"Current issues", "missing subtitle", "bad disc", "S01E01", "read error", "Encode failed", "no space", "Context:", "/output", "Suggestion:", "free disk", "Warning", "quality low", "Reel intermediate", "audio", "missing track", "Diagnostic history", "Historical/unclassified", "daemon warning"} {
+	for _, want := range []string{"Current issues", "missing subtitle", "bad disc", "S01E01", "read error", "Encode failed", "no space", "Context:", "/output", "Suggestion:", "free disk", "Warning", "quality low", "Encode check", "audio", "missing track", "Diagnostic history", "Historical/unclassified", "daemon warning"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q from %q", want, got)
 		}
@@ -120,11 +120,16 @@ func TestItemProblemsSectionsAndLogs(t *testing.T) {
 	}
 	m.problemsState.lastItemID = 8
 	m.problemsState.logLines = nil
-	if got := stripANSI(m.renderItemProblems(&spindle.QueueItem{ID: 8})); !strings.Contains(got, "No current structured issues") || !strings.Contains(got, "Diagnostics loading") {
-		t.Fatalf("empty problems = %q", got)
+	m.problemsState.loaded = false
+	if got := stripANSI(m.renderItemProblems(&spindle.QueueItem{ID: 8})); !strings.Contains(got, "No current issues") || !strings.Contains(got, "Checking recent item logs") {
+		t.Fatalf("loading problems = %q", got)
+	}
+	m.problemsState.loaded = true
+	if got := stripANSI(m.renderItemProblems(&spindle.QueueItem{ID: 8})); strings.Count(got, "\n") != 1 || !strings.Contains(got, "✓ No problems") {
+		t.Fatalf("healthy problems must be one line, got %q", got)
 	}
 	item.Encoding.Validation = &spindle.EncodingValidation{Passed: true, Steps: []spindle.EncodingValidationStep{{Name: "video", Passed: true}}}
-	if got := stripANSI(m.renderItemProblems(item)); strings.Contains(got, "Reel intermediate: video") {
+	if got := stripANSI(m.renderItemProblems(item)); strings.Contains(got, "Encode check: video") {
 		t.Fatalf("passing validation omitted: %q", got)
 	}
 }

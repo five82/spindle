@@ -70,7 +70,7 @@ func TestInspectorNavigationAndMissingItem(t *testing.T) {
 	if got := stripANSI(m.inspectorViewport.View()); !strings.Contains(got, "Item no longer in queue") {
 		t.Fatalf("missing item view = %q", got)
 	}
-	if got := stripANSI(m.renderInspectorItemLine(m.theme.BandStyles())); !strings.Contains(got, "ID #999") || !strings.Contains(got, "gone") {
+	if got := stripANSI(m.renderInspectorItemLine(m.theme.BandStyles())); !strings.Contains(got, "#999") || !strings.Contains(got, "gone") {
 		t.Fatalf("missing item band = %q", got)
 	}
 }

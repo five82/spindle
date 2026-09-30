@@ -79,7 +79,7 @@ func (m Model) switchInspectorTab(tab inspectorTab) (tea.Model, tea.Cmd) {
 		if item != nil && item.ID != m.itemEvents.itemID {
 			m.itemEvents = itemEventState{itemID: item.ID}
 		}
-		m.inspectorViewport.GotoTop()
+		m.inspectorViewport.GotoBottom() // open on the newest events
 		m.updateInspectorViewport()
 		return m, m.fetchItemEvents(item)
 	default:
@@ -121,7 +121,7 @@ func (m Model) handleInspectorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Tab5):
 		return m.switchInspectorTab(tabEvents)
 
-	case key.Matches(msg, m.keys.ToggleEpisodes):
+	case key.Matches(msg, m.keys.ToggleDetails) && m.inspectorTab == tabEpisodes:
 		m.toggleInspectedEpisodes()
 		return m, nil
 	}
@@ -200,6 +200,8 @@ func (m *Model) updateInspectorViewport() {
 		return
 	}
 
+	// Events follow the newest line while the operator stays at the bottom.
+	follow := m.inspectorTab == tabEvents && m.inspectorViewport.AtBottom()
 	anchor := ""
 	if m.inspectorViewport.YOffset() > 0 {
 		anchor = strings.TrimSpace(ansi.Strip(strings.Split(m.inspectorViewport.View(), "\n")[0]))
@@ -219,7 +221,9 @@ func (m *Model) updateInspectorViewport() {
 		content = "Stale queue snapshot; last successful fetch " + m.snapshot.LastUpdated.Format(time.RFC3339) + "\n" + content
 	}
 	m.inspectorViewport.SetContent(content)
-	if anchor != "" {
+	if follow {
+		m.inspectorViewport.GotoBottom()
+	} else if anchor != "" {
 		for i, line := range strings.Split(content, "\n") {
 			if strings.TrimSpace(ansi.Strip(line)) == anchor {
 				m.inspectorViewport.SetYOffset(i)
@@ -241,20 +245,15 @@ func (m Model) renderInspector() string {
 	b.WriteString(padBand(m.renderInspectorTabBar(band), m.width, band.Band))
 	b.WriteString("\n")
 
-	title := inspectorTabLabels[m.inspectorTab]
-	if item := m.getInspectedItem(); m.inspectorTab == tabEpisodes && item != nil && !isEpisodicItem(*item) {
-		title = "File"
-	}
+	// Panels stay untitled: the highlighted tab already names them.
 	if m.inspectorTab == tabLogs {
-		b.WriteString(renderPanel(title, m.logViewport.View(), "", m.width, styles))
+		b.WriteString(renderPanel("", m.logViewport.View(), "", m.width, styles))
 		b.WriteString("\n")
 		b.WriteString(m.renderLogStatus(styles))
 	} else {
-		footer := ""
-		if m.inspectorViewport.TotalLineCount() > m.inspectorViewport.VisibleLineCount() {
-			footer = fmt.Sprintf("%d%%", int(m.inspectorViewport.ScrollPercent()*100))
-		}
-		b.WriteString(renderPanel(title, m.inspectorViewport.View(), footer, m.width, styles))
+		vp := m.inspectorViewport
+		footer := scrollRangeFooter(vp.YOffset(), min(vp.YOffset()+vp.Height(), vp.TotalLineCount()), vp.TotalLineCount(), vp.Height())
+		b.WriteString(renderPanel("", m.inspectorViewport.View(), footer, m.width, styles))
 	}
 	return b.String()
 }
@@ -272,15 +271,14 @@ func (m Model) renderInspectorItemLine(styles Styles) string {
 
 	item := m.getInspectedItem()
 	if item == nil {
-		return prefix + styles.AccentText.Bold(true).Render(fmt.Sprintf("ID #%d", m.inspectedID)) +
+		return prefix + styles.AccentText.Bold(true).Render(fmt.Sprintf("#%d", m.inspectedID)) +
 			styles.MutedText.Render(" (gone)")
 	}
 
-	itemLabel := fmt.Sprintf("ID #%d", item.ID)
-	identity := prefix + styles.AccentText.Bold(true).Render(itemLabel)
+	identity := prefix + styles.AccentText.Bold(true).Render(fmt.Sprintf("#%d", item.ID))
 	title := composeTitle(*item)
-	if title != itemLabel {
-		identity += styles.FaintText.Render(" › ") + styles.Text.Bold(true).Render(title)
+	if title != fmt.Sprintf("ID #%d", item.ID) { // composeTitle's untitled fallback
+		identity += " " + styles.Text.Bold(true).Render(title)
 	}
 	parts := []headerPart{{identity, 0}}
 	// Year and runtime are identity, not metadata. The display title
@@ -296,40 +294,50 @@ func (m Model) renderInspectorItemLine(styles Styles) string {
 		parts = append(parts, headerPart{styles.MutedText.Render(runtime), 5})
 	}
 	parts = append(parts, headerPart{m.renderStatusChips(*item, styles), 1})
-	if updated := m.snapshot.LastUpdated; !updated.IsZero() {
-		parts = append(parts, headerPart{styles.FaintText.Render("fetched " + humanizeDuration(time.Since(updated))), 3})
+	// The header clock already dates a fresh snapshot; only a stale one
+	// needs its age called out here.
+	if updated := m.snapshot.LastUpdated; m.snapshot.LastError != nil && !updated.IsZero() {
+		parts = append(parts, headerPart{styles.WarningText.Render("stale: fetched " + humanizeDuration(time.Since(updated))), 3})
 	}
 	return joinHeaderParts(parts, m.width, styles.Band)
 }
 
-// renderInspectorTabBar renders the numbered tab bar. The Problems tab
-// carries a warning glyph when the item actually has problems, so the
-// operator never tabs in blind; the glyph marks presence, the label
-// carries the meaning (guide: color/symbol never stands alone). The
-// Episodes tab marks absence the same way: it dims further when the item
-// has no episode list worth visiting (movies), keeping tab positions
+// renderInspectorTabBar renders the numbered tab bar. The active tab is
+// reverse video, so it reads without color. Episodes and Problems carry
+// counts so the operator never tabs in blind; Problems adds a warning
+// glyph when the item has any (the label carries the meaning, the glyph
+// marks presence). Movies relabel Episodes as File, keeping tab positions
 // stable without advertising a dead end.
 func (m Model) renderInspectorTabBar(styles Styles) string {
 	item := m.getInspectedItem()
 	segments := make([]string, 0, tabCount)
 	for i, label := range inspectorTabLabels {
-		num := fmt.Sprintf("%d", i+1)
-		if inspectorTab(i) == tabEpisodes && item != nil && !isEpisodicItem(*item) {
-			label = "File"
+		tab := inspectorTab(i)
+		suffix := ""
+		if item != nil {
+			switch tab {
+			case tabEpisodes:
+				if !isEpisodicItem(*item) {
+					label = "File"
+				} else if episodes, _ := item.EpisodeSnapshot(); len(episodes) > 0 {
+					label += fmt.Sprintf(" (%d)", len(episodes))
+				}
+			case tabProblems:
+				if n := len(itemProblems(*item)); n > 0 {
+					label += fmt.Sprintf(" (%d)", n)
+					suffix = styles.WarningText.Render("⚠ ")
+				}
+			}
 		}
-		text := num + " " + label
-		switch {
-		case inspectorTab(i) == m.inspectorTab:
-			text = styles.AccentText.Bold(true).Render(text)
-		default:
-			text = styles.FaintText.Render(text)
+		text := fmt.Sprintf(" %d %s ", i+1, label)
+		if tab == m.inspectorTab {
+			text = styles.AccentText.Bold(true).Reverse(true).Render(text)
+		} else {
+			text = styles.MutedText.Render(text)
 		}
-		if inspectorTab(i) == tabProblems && item != nil && needsAttention(*item) {
-			text += styles.WarningText.Render(" ⚠")
-		}
-		segments = append(segments, text)
+		segments = append(segments, text+suffix)
 	}
-	return strings.Join(segments, styles.RuleText.Render("  │  "))
+	return strings.Join(segments, styles.RuleText.Render("│"))
 }
 
 // renderEpisodesTab renders the Episodes tab content.
