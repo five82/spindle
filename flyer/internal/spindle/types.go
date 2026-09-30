@@ -495,10 +495,8 @@ type LogEvent struct {
 	Timestamp string            `json:"ts"`
 	Level     string            `json:"level"`
 	Message   string            `json:"msg"`
-	Component string            `json:"component"`
 	Stage     string            `json:"stage"`
 	ItemID    int64             `json:"item_id"`
-	Lane      string            `json:"lane"`
 	Fields    map[string]string `json:"fields"`
 }
 

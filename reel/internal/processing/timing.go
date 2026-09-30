@@ -1,38 +1,38 @@
 package processing
 
 import (
-	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/five82/spindle/reel/internal/perf"
 	"github.com/five82/spindle/reel/internal/reporter"
 )
 
-func startVerboseStep(rep reporter.Reporter, name string) func() {
+// startStep times a step and logs its wall window at DEBUG when the returned
+// stop func runs.
+func startStep(log *slog.Logger, name string) func() {
 	start := time.Now()
-	rep.Verbose(fmt.Sprintf("%s started at %s", name, start.Format(time.RFC3339)))
 	return func() {
 		stop := time.Now()
-		rep.Verbose(fmt.Sprintf("%s stopped at %s (duration %s)", name, stop.Format(time.RFC3339), stop.Sub(start).Round(time.Millisecond)))
+		log.Debug("phase finished", "phase", name, "started_at", start.Format(time.RFC3339),
+			"duration_seconds", stop.Sub(start).Round(time.Millisecond).Seconds())
 	}
 }
 
-// startPhase times a pipeline phase: it emits the same verbose start/stop lines
-// as startVerboseStep and, when the returned stop func runs, records the phase
-// wall window into the perf collector for perf.json. The collector is nil-safe,
-// so callers without one still get verbose logging.
-func startPhase(c *perf.Collector, rep reporter.Reporter, name string) func() {
+// startPhase times a pipeline phase like startStep and, when the returned
+// stop func runs, also records the phase wall window into the perf collector
+// for perf.json. The collector is nil-safe.
+func startPhase(c *perf.Collector, rep reporter.Reporter, log *slog.Logger, name string) func() {
 	start := time.Now()
 	update := reporter.StageProgress{Lane: "work", State: "running", Stage: name, Message: name}
 	if name == "Video encoding" {
 		update.Lane, update.Stage = "video", "encoding"
 	}
 	rep.StageProgress(update)
-	rep.Verbose(fmt.Sprintf("%s started at %s", name, start.Format(time.RFC3339)))
+	finish := startStep(log, name)
 	return func() {
-		stop := time.Now()
-		rep.Verbose(fmt.Sprintf("%s stopped at %s (duration %s)", name, stop.Format(time.RFC3339), stop.Sub(start).Round(time.Millisecond)))
-		c.RecordPhase(name, start, stop)
+		finish()
+		c.RecordPhase(name, start, time.Now())
 		update.State, update.Message = "ended", name+" ended"
 		rep.StageProgress(update)
 	}
@@ -44,17 +44,18 @@ func startPhase(c *perf.Collector, rep reporter.Reporter, name string) func() {
 type phaseTracker struct {
 	perfc  *perf.Collector
 	rep    reporter.Reporter
+	log    *slog.Logger
 	finish func()
 }
 
-func newPhaseTracker(perfc *perf.Collector, rep reporter.Reporter) *phaseTracker {
-	return &phaseTracker{perfc: perfc, rep: rep}
+func newPhaseTracker(perfc *perf.Collector, rep reporter.Reporter, log *slog.Logger) *phaseTracker {
+	return &phaseTracker{perfc: perfc, rep: rep, log: log}
 }
 
 // start opens a phase, first closing the previous one if it is still open.
 func (p *phaseTracker) start(name string) {
 	p.end()
-	p.finish = startPhase(p.perfc, p.rep, name)
+	p.finish = startPhase(p.perfc, p.rep, p.log, name)
 }
 
 // end closes the open phase; a no-op when none is open, so `defer p.end()`

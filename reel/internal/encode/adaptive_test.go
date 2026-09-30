@@ -216,7 +216,7 @@ func sampleUtilization(l *adaptiveLimiter, active, ticks int, memoryStable bool)
 }
 
 func TestAdaptiveLimiterAccumulatesSlotWait(t *testing.T) {
-	limiter := newAdaptiveLimiter(4, 1, 4, 0, nil, nil)
+	limiter := newAdaptiveLimiter(4, 1, 4, 0, nil)
 	ctx := context.Background()
 
 	// The only slot is taken without waiting, so no time is charged.
@@ -247,7 +247,7 @@ func TestAdaptiveLimiterAccumulatesSlotWait(t *testing.T) {
 }
 
 func TestAdaptiveLimiterRampsUpWhenSlotsSaturated(t *testing.T) {
-	limiter := newAdaptiveLimiter(8, 2, 8, 0, nil, nil)
+	limiter := newAdaptiveLimiter(8, 2, 8, 0, nil)
 
 	// Slots fully utilized for a full window: expect a ramp.
 	sampleUtilization(limiter, 2, rampWindowTicks, true)
@@ -258,7 +258,7 @@ func TestAdaptiveLimiterRampsUpWhenSlotsSaturated(t *testing.T) {
 }
 
 func TestAdaptiveLimiterDoesNotRampWhenSlotsIdle(t *testing.T) {
-	limiter := newAdaptiveLimiter(8, 4, 8, 0, nil, nil)
+	limiter := newAdaptiveLimiter(8, 4, 8, 0, nil)
 
 	// Only half the slots used: utilization 0.5 < threshold, no ramp.
 	sampleUtilization(limiter, 2, rampWindowTicks*3, true)
@@ -269,7 +269,7 @@ func TestAdaptiveLimiterDoesNotRampWhenSlotsIdle(t *testing.T) {
 }
 
 func TestAdaptiveLimiterDoesNotRampUnderMemoryPressure(t *testing.T) {
-	limiter := newAdaptiveLimiter(8, 4, 8, 0, nil, nil)
+	limiter := newAdaptiveLimiter(8, 4, 8, 0, nil)
 
 	// Saturated slots but memory not stable: no ramp.
 	sampleUtilization(limiter, 4, rampWindowTicks*2, false)
@@ -280,7 +280,7 @@ func TestAdaptiveLimiterDoesNotRampUnderMemoryPressure(t *testing.T) {
 }
 
 func TestAdaptiveLimiterRampStepGrowsWithTarget(t *testing.T) {
-	limiter := newAdaptiveLimiter(64, 8, 64, 0, nil, nil)
+	limiter := newAdaptiveLimiter(64, 8, 64, 0, nil)
 
 	// At target 8, step is max(1, 8/4) = 2 -> 10.
 	sampleUtilization(limiter, 8, rampWindowTicks, true)
@@ -291,7 +291,7 @@ func TestAdaptiveLimiterRampStepGrowsWithTarget(t *testing.T) {
 }
 
 func TestAdaptiveLimiterHoldsCooldownAfterPressure(t *testing.T) {
-	limiter := newAdaptiveLimiter(8, 6, 8, 0, nil, nil)
+	limiter := newAdaptiveLimiter(8, 6, 8, 0, nil)
 	limiter.reduceTarget(0.15, swapPressureGrowthBytes)
 	reduced := func() int { _, target, _ := limiter.stats(); return target }()
 	if reduced >= 6 {
@@ -399,7 +399,7 @@ func TestSwapGrowthStableForRamp(t *testing.T) {
 }
 
 func TestAdaptiveLimiterDoesNotRampLateInEncode(t *testing.T) {
-	limiter := newAdaptiveLimiter(4, 2, 4, 100, nil, nil)
+	limiter := newAdaptiveLimiter(4, 2, 4, 100, nil)
 	limiter.observeProgress(80) // 80% complete -> late-encode ramp guard
 
 	sampleUtilization(limiter, 2, rampWindowTicks*2, true)

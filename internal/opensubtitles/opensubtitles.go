@@ -109,8 +109,8 @@ func (c *Client) Search(ctx context.Context, tmdbID int, season, episode int, la
 	if c == nil {
 		return nil, fmt.Errorf("opensubtitles: client not configured")
 	}
-	c.rateLimit()
-	c.logger.Debug("OpenSubtitles search started",
+	c.rateLimit(ctx)
+	c.logger.DebugContext(ctx, "OpenSubtitles search started",
 		"event_type", "opensubtitles_search_start",
 		"tmdb_id", tmdbID,
 	)
@@ -141,7 +141,7 @@ func (c *Client) Search(ctx context.Context, tmdbID int, season, episode int, la
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("opensubtitles search: decode: %w", err)
 	}
-	c.logger.Info("OpenSubtitles search completed",
+	c.logger.InfoContext(ctx, "OpenSubtitles search completed",
 		"event_type", "opensubtitles_search_complete",
 		"tmdb_id", tmdbID,
 		"results", len(resp.Data),
@@ -154,7 +154,7 @@ func (c *Client) Download(ctx context.Context, fileID int) (*DownloadResponse, e
 	if c == nil {
 		return nil, fmt.Errorf("opensubtitles: client not configured")
 	}
-	c.rateLimit()
+	c.rateLimit(ctx)
 
 	payload := struct {
 		FileID    int    `json:"file_id"`
@@ -173,13 +173,13 @@ func (c *Client) Download(ctx context.Context, fileID int) (*DownloadResponse, e
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("opensubtitles download: decode: %w", err)
 	}
-	c.logger.Debug("OpenSubtitles download negotiated", "file_id", fileID, "remaining", resp.Remaining)
+	c.logger.DebugContext(ctx, "OpenSubtitles download negotiated", "file_id", fileID, "remaining", resp.Remaining)
 	return &resp, nil
 }
 
 // DownloadToFile downloads a subtitle and saves it to destPath.
 func (c *Client) DownloadToFile(ctx context.Context, fileID int, destPath string) error {
-	c.logger.Debug("downloading subtitle file",
+	c.logger.DebugContext(ctx, "downloading subtitle file",
 		"event_type", "opensubtitles_download_start",
 		"file_id", fileID,
 		"dest", destPath,
@@ -194,7 +194,7 @@ func (c *Client) DownloadToFile(ctx context.Context, fileID int, destPath string
 		return fmt.Errorf("opensubtitles fetch: %w", err)
 	}
 
-	c.logger.Info("subtitle file downloaded",
+	c.logger.InfoContext(ctx, "subtitle file downloaded",
 		"event_type", "opensubtitles_download_complete",
 		"file_id", fileID,
 		"dest", destPath,
@@ -216,14 +216,14 @@ func (c *Client) CheckHealth(ctx context.Context) error {
 }
 
 // rateLimit sleeps if needed to maintain the minimum delay between API calls.
-func (c *Client) rateLimit() {
+func (c *Client) rateLimit(ctx context.Context) {
 	if c.lastCall.IsZero() {
 		c.lastCall = time.Now()
 		return
 	}
 	elapsed := time.Since(c.lastCall)
 	if elapsed < c.rateDelay {
-		c.logger.Debug("OpenSubtitles rate limit sleep", "sleep_ms", (c.rateDelay - elapsed).Milliseconds())
+		c.logger.DebugContext(ctx, "OpenSubtitles rate limit sleep", "sleep_ms", (c.rateDelay - elapsed).Milliseconds())
 		time.Sleep(c.rateDelay - elapsed)
 	}
 	c.lastCall = time.Now()
@@ -349,7 +349,7 @@ func (c *Client) doWithRetry(ctx context.Context, fn func() ([]byte, error)) ([]
 	var lastErr error
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
-			c.logger.Warn("retrying OpenSubtitles request",
+			c.logger.WarnContext(ctx, "retrying OpenSubtitles request",
 				"event_type", "opensubtitles_retry",
 				"error_hint", fmt.Sprintf("attempt %d/%d", attempt, c.maxRetries),
 				"impact", "delayed response",
@@ -371,7 +371,7 @@ func (c *Client) doWithRetry(ctx context.Context, fn func() ([]byte, error)) ([]
 
 		lastErr = err
 		if !isRetryable(err) {
-			c.logger.Warn("OpenSubtitles request failed (non-retryable)",
+			c.logger.WarnContext(ctx, "OpenSubtitles request failed (non-retryable)",
 				"event_type", "opensubtitles_request_failed",
 				"error_hint", "status not retryable",
 				"impact", "request abandoned",

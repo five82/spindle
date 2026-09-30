@@ -40,6 +40,7 @@ func assignEpisodeAssets(env *ripspec.Envelope, dir string, titleFiles map[int]s
 					"error", err,
 					"event_type", "rip_dir_scan_failed",
 					"error_hint", "check staging directory permissions",
+					"impact", "ripped files are not mapped to episodes",
 				)
 			}
 			return episodeAssignResult{}

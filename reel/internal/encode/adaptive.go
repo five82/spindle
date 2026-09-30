@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -50,8 +51,6 @@ const (
 // ErrMemoryPressure is returned when Reel cancels encoding to avoid system OOM.
 var ErrMemoryPressure = errors.New("memory pressure critical; canceled before swap exhaustion")
 
-type statusCallback func(string)
-
 type adaptiveLimiter struct {
 	mu          sync.Mutex
 	cond        *sync.Cond
@@ -66,12 +65,9 @@ type adaptiveLimiter struct {
 	// for performance attribution (perf.json); never gates encoding.
 	slotWaitNanos atomic.Int64
 
-	status statusCallback
-	// warn receives degraded-behavior limiter messages (worker reductions and
-	// the critical cancel) so they can reach the consumer unconditionally,
-	// independent of verbose mode. See statusCallback field for the
-	// verbose-only ramp-up path.
-	warn statusCallback
+	// log receives worker-count decisions (INFO) and the degraded-behavior
+	// reductions and critical cancel (WARN).
+	log *slog.Logger
 
 	observedFrames int
 	totalFrames    int
@@ -88,7 +84,10 @@ func MaxAdaptiveWorkers() int {
 	return max(util.LogicalCores(), 1)
 }
 
-func newAdaptiveLimiter(maxWorkers, initialWorkers, rampCeiling, totalFrames int, status, warn statusCallback) *adaptiveLimiter {
+func newAdaptiveLimiter(maxWorkers, initialWorkers, rampCeiling, totalFrames int, log *slog.Logger) *adaptiveLimiter {
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
 	maxWorkers = max(maxWorkers, 1)
 	initialWorkers = min(max(initialWorkers, 1), maxWorkers)
 	if rampCeiling <= 0 || rampCeiling > maxWorkers {
@@ -102,8 +101,7 @@ func newAdaptiveLimiter(maxWorkers, initialWorkers, rampCeiling, totalFrames int
 		rampCeiling: rampCeiling,
 		target:      initialWorkers,
 		totalFrames: max(totalFrames, 0),
-		status:      status,
-		warn:        warn,
+		log:         log,
 	}
 	l.cond = sync.NewCond(&l.mu)
 	return l
@@ -308,7 +306,11 @@ func (l *adaptiveLimiter) monitorSample(stats util.MemoryStats, baselineSwapUsed
 	if critical, reason := l.criticalPressure(availableFraction, swapGrowthTotal, stats); critical {
 		detail := fmt.Sprintf("%s, available %.0f%%, swap +%s", reason, availableFraction*100, util.FormatBytesReadable(swapGrowthTotal))
 		setError(fmt.Errorf("%w: %s", ErrMemoryPressure, detail))
-		l.warnf("Memory pressure is critical (%s); canceling encode before swap exhaustion", detail)
+		l.log.Warn("memory pressure critical; canceling encode",
+			"event_type", "memory_pressure_cancel",
+			"error_hint", detail,
+			"impact", "encode canceled before swap exhaustion; resume reuses completed chunks",
+		)
 		cancel()
 		l.wake()
 		return currentSwapUsed
@@ -402,8 +404,14 @@ func (l *adaptiveLimiter) reduceTarget(availableFraction float64, swapGrowth uin
 	l.mu.Unlock()
 
 	if newTarget < old {
-		l.warnf("Memory pressure detected; reducing workers %d -> %d (active %d, available %.0f%%, swap +%s)",
-			old, newTarget, active, availableFraction*100, util.FormatBytesReadable(swapGrowth))
+		l.log.Warn("memory pressure; reducing encode workers",
+			"event_type", "encode_workers_reduced",
+			"error_hint", fmt.Sprintf("available %.0f%%, swap +%s", availableFraction*100, util.FormatBytesReadable(swapGrowth)),
+			"impact", "encode continues with fewer workers; wall time increases",
+			"workers_from", old,
+			"workers_to", newTarget,
+			"workers_active", active,
+		)
 	}
 }
 
@@ -442,20 +450,11 @@ func (l *adaptiveLimiter) maybeRampUp(memoryStable bool) {
 	step := max(1, l.target/4)
 	l.target = min(l.rampCeiling, old+step)
 	l.cond.Broadcast()
-	l.statusf("Encode slots saturated (%.0f%% utilization, memory stable); raising workers %d -> %d", utilization*100, old, l.target)
-}
-
-func (l *adaptiveLimiter) statusf(format string, args ...any) {
-	if l.status != nil {
-		l.status(fmt.Sprintf(format, args...))
-	}
-}
-
-// warnf reports degraded-behavior limiter decisions (worker reductions and
-// the critical cancel). Unlike statusf, this is meant to reach the consumer
-// unconditionally rather than only in verbose mode.
-func (l *adaptiveLimiter) warnf(format string, args ...any) {
-	if l.warn != nil {
-		l.warn(fmt.Sprintf(format, args...))
-	}
+	l.log.Info("raising encode workers",
+		"decision_type", "encode_workers",
+		"decision_result", "raised",
+		"decision_reason", fmt.Sprintf("encode slots saturated (%.0f%% utilization), memory stable", utilization*100),
+		"workers_from", old,
+		"workers_to", l.target,
+	)
 }

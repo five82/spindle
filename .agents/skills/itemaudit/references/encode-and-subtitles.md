@@ -97,22 +97,47 @@ episodes from the same disc).
      Correlate it with the structured `source_timeline_normalization` decision
      and the apply final verdict; do not call the delivered file defective when
      its endpoint checks pass.
-   - Encoder-library warnings/errors surface as `event_type=reel_warning` in
-     `logs.warnings` and `event_type=reel_error` in `logs.errors`; the persisted
-     copy is in `encoding.snapshot.warning`/`error`
+   - Reel logs structured records that the encode worker replays through the
+     stage logger, so every Reel line carries `item_id`, `stage=encoding`, and
+     `episode_key`. Reel warnings keep their own `event_type` in
+     `logs.warnings`: `encode_workers_reduced` (memory pressure lowered
+     concurrency: slower, same quality), `memory_pressure_cancel` (encode
+     canceled before swap exhaustion; the encode fails with the memory-pressure
+     error), `resume_state_discarded`, `refcache_fallback` (filtered reference
+     cache unusable: slower, same quality), `grain_stage2_unavailable` /
+     `grain_stage2_failed` (the fixed-CRF grain verdict stood for an ambiguous
+     title), and `encode_output_exists`. `event_type=reel_error` lands in
+     `logs.errors` with `context` and an `error_hint` suggestion. The latest
+     warning and the error also persist in `encoding.snapshot.warning`/`error`.
+     `event_type=encode_worker_stderr` means the worker wrote unexpected native
+     or runtime output on a successful encode; quote its `error_hint`.
+   - Reel INFO decisions in `analysis.decision_groups`: `chunk_plan` (chunk
+     count, natural cuts, merges, splits, and `distribution`), `grain_treatment`
+     (`treated`/`untreated`, with `median_bpp` against `treat_above_bpp`,
+     `gate_stage`, `stage2_*`, `denoise`, and `reused`), `target_quality_metric`
+     (CVVDP or SSIMULACRA2 and why, with target, tolerance, CRF range, and
+     display model), `ssimu2_calibration` (the locked offset and warmup probe
+     count), and `encode_workers` (`raised` when slots stayed saturated with
+     memory stable). `logs.events` carries one
+     `event_type=target_quality_summary` per metric with score min/mean/ max,
+     `stops`, `probe_counts`, `initial_sources`, and the `multi_probe_chunks` /
+     `max_probe_chunks` / `rate_capped_chunks` lists.
    - Target-quality search outcome:
      `envelope.attributes.encode_stats[].target_quality.metrics[]` carries
-     per-encode `score_min/mean/max`, `probes_per_chunk`, and `stop_reasons`
-     (with debug logs, the DEBUG `reel verbose` lines `TQ summary` /
-     `TQ decisions` / `TQ probe` / `TQ final` give the per-chunk detail). Read
-     `stop_reasons` by name:
+     per-encode `score_min/mean/max`, `probes_per_chunk`, and `stop_reasons`.
+     Per-chunk detail is DEBUG in the daemon log files (`logs.paths`): one
+     `msg="TQ probe"` record per probe (`chunk`, `round`, `crf`, `score`,
+     `delta`, `peak_mbps`, `over_rate`, `initial_source`) and one
+     `msg="TQ final"` per chunk (`crf`, `score`, `probes`, `stop`); filter with
+     `jq 'select(.item_id==N and .msg=="TQ final")'`. Read `stop_reasons` by
+     name:
      - `converged`: final score in band.
      - `rate_capped`: the AV1 level 5.1 bitstream cap (40 Mbps, 1-second peak
        gate) bounded the search from below on that chunk. Reel rejects probes
-       whose worst second exceeds the cap (`over_rate=true peak_mbps=` on the
-       `TQ probe` line), and on heavy-grain 4K chunks lowering CRF cannot raise
-       the score because SVT's regulator holds the rate. The chunk ships at its
-       best rate-legal CRF, below the band. This is the intended
+       whose worst second exceeds the cap (`over_rate=true` with `peak_mbps` on
+       the `TQ probe` record), and on heavy-grain 4K chunks lowering CRF cannot
+       raise the score because SVT's regulator holds the rate. The chunk ships
+       at its best rate-legal CRF, below the band. This is the intended
        playback-compatibility trade-off, NOT a search defect: report the count
        and worst score as informational context, never as a retest/re-encode
        recommendation. A re-encode on the same source reproduces it exactly.
@@ -122,7 +147,8 @@ episodes from the same disc).
        normal (probe noise is about 0.075 JOD). A material tail (several percent
        of chunks, or misses well below the band with no cap involvement) is the
        retest condition in Reel's `docs/PERFORMANCE_TESTING.md`; report it as a
-       WARNING with the chunk list from `TQ max-probe chunks`.
+       WARNING with the chunk list from `max_probe_chunks` on the
+       `target_quality_summary` event.
    - Grain treatment: `analysis.grain_treatments[]` carries Reel's automatic
      grain-gate verdict per encode. The gate samples long chunks in the middle
      60% at fixed CRF 22 and compares their median bpp against
@@ -261,13 +287,13 @@ this audit.
    - The pipeline downloads the identified title's OpenSubtitles candidates,
      cleans them, retimes against the rip's WhisperX transcript with ffsubsync,
      and adopts the first candidate that passes the verification gate. TV may
-     try the current episode-ID reference first (`contentid_reference`), even
-     if fresh search fails; that reuse must not bypass cleanup, synchronization,
+     try the current episode-ID reference first (`contentid_reference`), even if
+     fresh search fails; that reuse must not bypass cleanup, synchronization,
      full-program similarity, coverage/tail, or timing gates. The short Jev
-     excerpt is never the display verification transcript. When no
-     candidate verifies (or none exists, or the title is multi-episode), it
-     records `source=none` and the title completes WITHOUT subtitles. Spindle
-     never generates subtitles itself.
+     excerpt is never the display verification transcript. When no candidate
+     verifies (or none exists, or the title is multi-episode), it records
+     `source=none` and the title completes WITHOUT subtitles. Spindle never
+     generates subtitles itself.
    - `decision_type=subtitle_source` is the core trace:
      `decision_result=adopted` (reason carries the candidate and gate metrics),
      `candidate_rejected` per rejected candidate (reason explains which gate

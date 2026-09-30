@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/five82/spindle/internal/encodingstate"
+
 	"github.com/five82/spindle/reel"
 
 	"github.com/five82/spindle/internal/queue"
@@ -104,66 +106,31 @@ func TestPlanJobs_EmptyRippedAssets(t *testing.T) {
 	}
 }
 
-func TestProgressThrottle_SuppressesWithinInterval(t *testing.T) {
-	reporter := &spindleReporter{now: time.Now}
-
-	baseTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	callCount := 0
-	reporter.now = func() time.Time {
-		callCount++
-		// First call at T+0, second at T+1s (within throttle), third at T+3s (past throttle).
-		switch callCount {
-		case 1:
-			return baseTime
-		case 2:
-			return baseTime.Add(1 * time.Second)
-		case 3:
-			return baseTime.Add(3 * time.Second)
-		default:
-			return baseTime.Add(time.Duration(callCount) * time.Second)
+func TestProgressThrottlePersistsTerminalUpdateWithinInterval(t *testing.T) {
+	sess := encoderSession(t, ripspec.Envelope{})
+	rep := newSpindleReporter(sess, testEncoderLogger(), "s01e07")
+	clock := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	rep.now = func() time.Time { return clock }
+	snapshot := func() encodingstate.Snapshot {
+		t.Helper()
+		snap, err := encodingstate.Unmarshal(sess.Task.EncodingDetailsJSON)
+		if err != nil {
+			t.Fatal(err)
 		}
+		return snap
 	}
 
-	progressCalls := 0
-
-	// Test the throttle logic directly by checking lastPush updates.
-	// First call: should proceed (lastPush is zero).
-	reporter.lastPush = time.Time{} // zero
-	now1 := reporter.now()
-	if now1.Sub(reporter.lastPush) < throttleInterval {
-		t.Error("first call should not be throttled")
+	rep.EncodingProgress(reel.ProgressSnapshot{Percent: 99, ChunksComplete: 308, ChunksTotal: 310})
+	clock = clock.Add(500 * time.Millisecond)
+	rep.EncodingProgress(reel.ProgressSnapshot{Percent: 99.5, ChunksComplete: 309, ChunksTotal: 310})
+	if got := snapshot().ChunksComplete; got != 308 {
+		t.Fatalf("non-terminal update inside throttle window persisted: chunks_complete=%d", got)
 	}
-	reporter.lastPush = now1
-	progressCalls++
-
-	// Second call: T+1s, should be throttled (only 1s since last push).
-	now2 := reporter.now()
-	if now2.Sub(reporter.lastPush) >= throttleInterval {
-		t.Error("second call at T+1s should be throttled")
-	}
-
-	// Third call: T+3s, should proceed (3s since last push at T+0).
-	now3 := reporter.now()
-	if now3.Sub(reporter.lastPush) < throttleInterval {
-		t.Error("third call at T+3s should not be throttled")
-	}
-	reporter.lastPush = now3
-	progressCalls++
-
-	if progressCalls != 2 {
-		t.Errorf("expected 2 non-throttled calls, got %d", progressCalls)
-	}
-}
-
-func TestProgressThrottle_FirstCallAlwaysProceeds(t *testing.T) {
-	reporter := &spindleReporter{
-		now: func() time.Time { return time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC) },
-	}
-
-	// lastPush is zero value, so any time should exceed the throttle.
-	now := reporter.now()
-	if now.Sub(reporter.lastPush) < throttleInterval {
-		t.Error("first call should always proceed regardless of throttle interval")
+	clock = clock.Add(500 * time.Millisecond)
+	rep.EncodingProgress(reel.ProgressSnapshot{Percent: 99.9, ChunksComplete: 310, ChunksTotal: 310})
+	rep.EncodingComplete(reel.EncodingOutcome{EncodedSize: 1})
+	if snap := snapshot(); snap.Substage != "complete" || snap.Percent != 100 || snap.ChunksComplete != 310 || snap.ChunksTotal != 310 {
+		t.Fatalf("completed snapshot kept stale counters: %+v", snap)
 	}
 }
 

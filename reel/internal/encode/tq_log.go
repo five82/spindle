@@ -3,6 +3,7 @@ package encode
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -114,8 +115,8 @@ func absFloat(v float64) float64 {
 	return v
 }
 
-func logTargetAggregate(logs []chunkTargetLog, verbose func(string)) {
-	if verbose == nil || len(logs) == 0 {
+func logTargetAggregate(logs []chunkTargetLog, logger *slog.Logger) {
+	if len(logs) == 0 {
 		return
 	}
 	// SSIMU2 runs mix scales: warmup chunks carry JOD scores, the rest
@@ -135,8 +136,7 @@ func logTargetAggregate(logs []chunkTargetLog, verbose func(string)) {
 			if name == "" {
 				name = string(quality.MetricCVVDP)
 			}
-			verbose(fmt.Sprintf("TQ aggregate for %s-scored chunks:", name))
-			logTargetAggregate(byMetric[key], verbose)
+			logTargetAggregate(byMetric[key], logger.With("metric", name))
 		}
 		return
 	}
@@ -191,17 +191,22 @@ func logTargetAggregate(logs []chunkTargetLog, verbose func(string)) {
 			commonCount = count
 		}
 	}
-	verbose(fmt.Sprintf("TQ summary chunks=%d probes=%d probes_per_chunk=%.2f score_min=%.4f mean=%.4f max=%.4f mean_abs_error=%.4f common_crf=%s", len(logs), probes, float64(probes)/float64(len(logs)), minScore, meanScore, maxScore, meanErr, quality.FormatCRF(commonCRF)))
-	verbose(fmt.Sprintf("TQ decisions stops=%s probe_counts=%s initial_sources=%s", formatStopCounts(stopCounts), formatIntCounts(probeCounts), formatStringCounts(sourceCounts)))
+	attrs := []any{"event_type", "target_quality_summary",
+		"chunks", len(logs), "probes", probes, "probes_per_chunk", float64(probes) / float64(len(logs)),
+		"score_min", minScore, "score_mean", meanScore, "score_max", maxScore, "mean_abs_error", meanErr,
+		"common_crf", quality.FormatCRF(commonCRF), "stops", formatStopCounts(stopCounts),
+		"probe_counts", formatIntCounts(probeCounts), "initial_sources", formatStringCounts(sourceCounts)}
 	if len(multiProbeLogs) > 0 {
-		verbose(fmt.Sprintf("TQ multi-probe chunks: %s", formatMultiProbeChunks(multiProbeLogs, 8)))
+		attrs = append(attrs, "multi_probe_chunks", formatMultiProbeChunks(multiProbeLogs, 8))
 	}
 	if len(maxProbeChunks) > 0 {
-		verbose(fmt.Sprintf("TQ max-probe chunks: %s", formatChunkList(maxProbeChunks, 12)))
+		attrs = append(attrs, "max_probe_chunks", formatChunkList(maxProbeChunks, 12))
 	}
 	if len(rateCappedChunks) > 0 {
-		verbose(fmt.Sprintf("TQ rate-capped chunks (bitstream cap bound the search; intended, not a search failure): %s", formatChunkList(rateCappedChunks, 12)))
+		// The bitstream cap bound the search: intended, not a search failure.
+		attrs = append(attrs, "rate_capped_chunks", formatChunkList(rateCappedChunks, 12))
 	}
+	logger.Info("target-quality search summary", attrs...)
 }
 
 func formatIntCounts(counts map[int]int) string {

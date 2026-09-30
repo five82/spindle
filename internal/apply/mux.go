@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/five82/spindle/internal/language"
+	"github.com/five82/spindle/internal/textutil"
 )
 
 // MuxTrack describes one SRT track to mux into an MKV.
@@ -63,7 +64,7 @@ func MuxSubtitleTrack(ctx context.Context, req MuxRequest) (string, error) {
 	cmd := exec.CommandContext(ctx, "mkvmerge", buildSubtitleMuxArgs(tmpPath, req.VideoPath, req.Track, req.ReplaceExisting)...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("mkvmerge: %w: %s", err, output)
+		return "", fmt.Errorf("mkvmerge: %w: %s", err, textutil.Excerpt(output))
 	}
 	if err := os.Rename(tmpPath, outputPath); err != nil {
 		_ = os.Remove(tmpPath)

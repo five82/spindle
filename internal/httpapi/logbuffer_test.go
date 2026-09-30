@@ -1,11 +1,12 @@
 package httpapi
 
 import (
+	"bytes"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -42,23 +43,14 @@ func TestParseJSONLogLine(t *testing.T) {
 		},
 		{
 			name:   "known attribute keys",
-			line:   `{"time":"2026-03-28T10:00:00Z","level":"INFO","msg":"test","component":"encoder","stage":"encoding","item_id":42,"lane":"main","request":"abc123"}`,
+			line:   `{"time":"2026-03-28T10:00:00Z","level":"INFO","msg":"test","stage":"encoding","item_id":42}`,
 			wantOK: true,
 			checkFn: func(t *testing.T, e LogEntry) {
-				if e.Component != "encoder" {
-					t.Errorf("Component = %q, want %q", e.Component, "encoder")
-				}
 				if e.Stage != "encoding" {
 					t.Errorf("Stage = %q, want %q", e.Stage, "encoding")
 				}
 				if e.ItemID != 42 {
 					t.Errorf("ItemID = %d, want %d", e.ItemID, 42)
-				}
-				if e.Lane != "main" {
-					t.Errorf("Lane = %q, want %q", e.Lane, "main")
-				}
-				if e.Request != "abc123" {
-					t.Errorf("Request = %q, want %q", e.Request, "abc123")
 				}
 			},
 		},
@@ -266,19 +258,34 @@ func TestQueryCursorLosesNothing(t *testing.T) {
 	}
 }
 
-func TestLogHandlerCapturesDebugWhenOutputIsInfo(t *testing.T) {
+func TestLogHandlerKeepsDebugOutOfBufferButWritesItToOutput(t *testing.T) {
 	buf := NewLogBuffer(10)
-	inner := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})
+	var out bytes.Buffer
+	inner := slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug})
 	logger := slog.New(NewLogHandler(inner, buf))
 
-	logger.Debug("debug line", "item_id", int64(7))
-	logger.Info("info line")
+	logger.Debug("TQ probe", "item_id", int64(7))
+	logger.Info("info line", "item_id", int64(7))
 
 	entries, _ := buf.Query(LogQueryOpts{Limit: 10})
-	if len(entries) != 2 {
-		t.Fatalf("buffer captured %d entries, want 2 (DEBUG capture must not depend on output level)", len(entries))
+	if len(entries) != 1 || entries[0].Level != "INFO" || entries[0].ItemID != 7 {
+		t.Fatalf("buffer = %+v, want only the INFO entry", entries)
 	}
-	if entries[0].Level != "DEBUG" || entries[0].ItemID != 7 {
-		t.Fatalf("first entry = %+v, want DEBUG with item_id 7", entries[0])
+	if !strings.Contains(out.String(), "TQ probe") {
+		t.Fatalf("DEBUG record not written to output: %s", out.String())
+	}
+
+	dir := t.TempDir()
+	lines := `{"time":"2026-03-28T10:00:00Z","level":"DEBUG","msg":"TQ probe"}` + "\n" +
+		`{"time":"2026-03-28T10:00:01Z","level":"WARN","msg":"kept"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "spindle-20260328T100000.000Z.log"), []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hydrated := NewLogBuffer(10)
+	if err := hydrated.HydrateFromDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := hydrated.Query(LogQueryOpts{}); len(entries) != 1 || entries[0].Msg != "kept" {
+		t.Fatalf("hydrated = %+v, want only the WARN entry", entries)
 	}
 }

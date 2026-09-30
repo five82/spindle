@@ -123,12 +123,12 @@ func TestLogFiltersApplyAndCancel(t *testing.T) {
 		t.Fatal("filters did not open with default level")
 	}
 	m.logFilterInputs[0].SetValue(" error ")
-	m.logFilterInputs[1].SetValue(" api ")
-	m.logFilterInputs[2].SetValue(" rip ")
-	m.logFilterInputs[3].SetValue(" abc ")
+	m.logFilterInputs[1].SetValue(" encoding ")
+	m.logFilterInputs[2].SetValue(" main ")
+	m.logFilterInputs[3].SetValue(" 9 ")
 	model, _ = m.handleLogFiltersKey(appKey("enter"))
 	m = model.(Model)
-	if m.showLogFilters || m.logState.filterLevel != "error" || m.logState.filterComponent != "api" || m.logState.filterLane != "rip" || m.logState.filterRequest != "abc" || len(m.logState.rawLines) != 0 || m.logState.streamCursor != 0 {
+	if m.showLogFilters || m.logState.filterLevel != "error" || m.logState.filterStage != "encoding" || m.logState.filterAsset != "main" || m.logState.filterTask != "9" || len(m.logState.rawLines) != 0 || m.logState.streamCursor != 0 {
 		t.Fatalf("applied filters = %+v", m.logState)
 	}
 	model, _ = m.handleLogsKey(appKey("f"))

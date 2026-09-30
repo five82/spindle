@@ -79,14 +79,12 @@ func TestClient_FetchesEndpointsAndEncodesQueries(t *testing.T) {
 	}
 
 	_, err = c.FetchLogs(ctx, LogQuery{
-		Since:     7,
-		Limit:     13,
-		Tail:      true,
-		ItemID:    101,
-		Level:     "warn",
-		Component: "worker",
-		Lane:      "fast",
-		Request:   "abc",
+		Since:  7,
+		Limit:  13,
+		Tail:   true,
+		ItemID: 101,
+		Level:  "warn",
+		Stage:  "encoding",
 	})
 	if err != nil {
 		t.Fatalf("FetchLogs returned error: %v", err)
@@ -96,9 +94,7 @@ func TestClient_FetchesEndpointsAndEncodesQueries(t *testing.T) {
 		gotLogsQuery.Get("tail") != "1" ||
 		gotLogsQuery.Get("item") != "101" ||
 		gotLogsQuery.Get("level") != "warn" ||
-		gotLogsQuery.Get("component") != "worker" ||
-		gotLogsQuery.Get("lane") != "fast" ||
-		gotLogsQuery.Get("request") != "abc" {
+		gotLogsQuery.Get("stage") != "encoding" {
 		t.Fatalf("FetchLogs query = %v, want params encoded", gotLogsQuery)
 	}
 

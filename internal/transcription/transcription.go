@@ -14,6 +14,7 @@ import (
 
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/srtutil"
+	"github.com/five82/spindle/internal/textutil"
 )
 
 // Service provides WhisperX transcription.
@@ -61,7 +62,6 @@ type TranscribeRequest struct {
 	Language   string
 	OutputDir  string
 	Model      string // Override default model
-	ItemID     int64
 	EpisodeKey string
 	Purpose    string
 }
@@ -188,7 +188,7 @@ func (s *Service) TranscribeBatch(ctx context.Context, reqs []TranscribeRequest,
 			"-y",
 			wavPath,
 		}
-		s.logger.Info("extracting audio for transcription",
+		s.logger.InfoContext(ctx, "extracting audio for transcription",
 			transcriptionLogFields(req,
 				"event_type", "transcription_extract",
 				"input", req.InputPath,
@@ -197,7 +197,7 @@ func (s *Service) TranscribeBatch(ctx context.Context, reqs []TranscribeRequest,
 		)
 		ffmpegCmd := exec.CommandContext(ctx, "ffmpeg", ffmpegArgs...)
 		if output, err := ffmpegCmd.CombinedOutput(); err != nil {
-			return nil, fmt.Errorf("ffmpeg audio extraction (%s): %w: %s", req.InputPath, err, output)
+			return nil, fmt.Errorf("ffmpeg audio extraction (%s): %w: %s", req.InputPath, err, textutil.Excerpt(output))
 		}
 	}
 	extractTime := time.Since(extractStart)
@@ -210,10 +210,10 @@ func (s *Service) TranscribeBatch(ctx context.Context, reqs []TranscribeRequest,
 		onProgress(PhaseTranscribe, 0)
 	}
 	invocation := s.buildWhisperXInvocation(wavPaths, reqs, model)
-	s.logger.Info("running WhisperX transcription",
+	s.logger.InfoContext(ctx, "running WhisperX transcription",
 		transcriptionLogFields(reqs[0],
 			"event_type", "transcription_whisperx",
-			"decision_type", "transcription_profile",
+			"decision_type", logs.DecisionTranscriptionProfile,
 			"decision_result", invocation.TranscriptionProfileName,
 			"decision_reason", fmt.Sprintf("vad_method=%s device=%s compute_type=%s condition_on_previous_text=%t batch_size=%d chunk_size=%d", s.vadMethod, invocation.Device, invocation.ComputeType, invocation.ConditionOnPreviousText, whisperXBatchSize, whisperXVADChunkSize),
 			"model", model,
@@ -225,7 +225,7 @@ func (s *Service) TranscribeBatch(ctx context.Context, reqs []TranscribeRequest,
 	whisperCmd.Env = invocation.Env
 	ConfigureGroupKill(whisperCmd)
 	if output, err := whisperCmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("whisperx transcription: %w: %s", err, output)
+		return nil, fmt.Errorf("whisperx transcription: %w: %s", err, textutil.Excerpt(output))
 	}
 	transcribeTime := time.Since(transcribeStart)
 	if onProgress != nil {
@@ -258,7 +258,7 @@ func (s *Service) TranscribeBatch(ctx context.Context, reqs []TranscribeRequest,
 			TranscribeTime: transcribeTime,
 		}
 
-		s.logger.Info("WhisperX transcription completed",
+		s.logger.InfoContext(ctx, "WhisperX transcription completed",
 			transcriptionLogFields(req,
 				"event_type", "transcription_whisperx_complete",
 				"segments", segments,
@@ -275,9 +275,6 @@ func (s *Service) TranscribeBatch(ctx context.Context, reqs []TranscribeRequest,
 
 func transcriptionLogFields(req TranscribeRequest, fields ...any) []any {
 	out := make([]any, 0, len(fields)+8)
-	if req.ItemID != 0 {
-		out = append(out, "item_id", req.ItemID)
-	}
 	if req.EpisodeKey != "" {
 		out = append(out, "episode_key", req.EpisodeKey)
 	}

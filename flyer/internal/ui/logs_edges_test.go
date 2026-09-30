@@ -18,10 +18,10 @@ func TestLogStatusSearchAndItemFilters(t *testing.T) {
 	m.logState.follow = false
 	m.logState.searchActive = true
 	m.logState.searchInput.SetValue("needle")
-	m.logState.filterComponent, m.logState.filterLane, m.logState.filterRequest = "api", "rip", "request1"
+	m.logState.filterStage, m.logState.filterAsset, m.logState.filterTask = "encoding", "main", "9"
 	m.width = 160
 	status := stripANSI(m.renderLogStatus(styles))
-	for _, want := range []string{"Item #42 log", "paused", "search: needle", "comp=api", "lane=rip", "req=request1"} {
+	for _, want := range []string{"Item #42 log", "paused", "search: needle", "stage=encoding", "asset=main", "task=9"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("status %q missing %q", status, want)
 		}
@@ -50,7 +50,7 @@ func TestLogStatusSearchAndItemFilters(t *testing.T) {
 		t.Fatalf("unmatched search status = %q", got)
 	}
 	m.logState.searchRegex = nil
-	m.logState.filterLevel, m.logState.filterComponent, m.logState.filterLane, m.logState.filterRequest = "", "", "", ""
+	m.logState.filterLevel, m.logState.filterStage, m.logState.filterAsset, m.logState.filterTask = "", "", "", ""
 	if got := m.getLogTitle(); got != "Daemon Log" {
 		t.Fatalf("plain title = %q", got)
 	}

@@ -720,3 +720,34 @@ func TestCompressMediaProbes_NilConsistency(t *testing.T) {
 		t.Errorf("result count: got %d, want 1", len(result))
 	}
 }
+
+// A run the daemon died under is journaled as stage_interrupted by startup
+// recovery; unlike a drain's stage_canceled it is always a finding.
+func TestStageInterruptionIsCountedAndFlagged(t *testing.T) {
+	timings := computeStageTimings([]queue.Event{
+		{Time: "t1", Type: "stage_start", Stage: "encoding"},
+		{Time: "t2", Type: "stage_interrupted", Stage: "encoding", EpisodeKey: "s01_003", Message: "Encoding s01_003"},
+		{Time: "t3", Type: "stage_start", Stage: "encoding"},
+		{Time: "t4", Type: "stage_complete", Stage: "encoding", DurationSeconds: 60},
+		{Time: "t5", Type: "stage_start", Stage: "subtitling"},
+		{Time: "t6", Type: "stage_canceled", Stage: "subtitling"},
+	})
+	if len(timings) != 2 || timings[0].Interruptions != 1 || timings[0].Completions != 1 || timings[1].Interruptions != 0 {
+		t.Fatalf("timings = %+v", timings)
+	}
+	anomalies := detectAnomalies(&Report{}, &Analysis{StageTimings: timings})
+	var flagged []Anomaly
+	for _, a := range anomalies {
+		if a.Category == "stage_interrupted" {
+			flagged = append(flagged, a)
+		}
+	}
+	if len(flagged) != 1 || flagged[0].Severity != "warning" || !strings.Contains(flagged[0].Message, "encoding interrupted 1 time(s)") {
+		t.Fatalf("interruption anomalies = %+v", anomalies)
+	}
+	var b strings.Builder
+	writeDigestStageTimings(&b, &Report{Analysis: &Analysis{StageTimings: timings}})
+	if !strings.Contains(b.String(), "INTERRUPTED x1") {
+		t.Fatalf("digest timing row: %s", b.String())
+	}
+}

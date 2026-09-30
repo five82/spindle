@@ -25,12 +25,12 @@ func TestLogsEndpointParsesQueryOptionsAndFiltersOldItemHistory(t *testing.T) {
 	buffer := NewLogBuffer(16)
 	old := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339Nano)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	buffer.Append(LogEntry{Time: old, ItemID: item.ID, Component: "ripper", Lane: "drive", Level: "WARN", Msg: "old generation"})
-	buffer.Append(LogEntry{Time: now, ItemID: item.ID, Component: "ripper", Lane: "drive", Level: "WARN", Msg: "current item"})
-	buffer.Append(LogEntry{Time: now, ItemID: item.ID + 1, Component: "ripper", Lane: "drive", Level: "WARN", Msg: "other item"})
+	buffer.Append(LogEntry{Time: old, ItemID: item.ID, Stage: "ripping", Level: "WARN", Msg: "old generation"})
+	buffer.Append(LogEntry{Time: now, ItemID: item.ID, Stage: "ripping", Level: "WARN", Msg: "current item"})
+	buffer.Append(LogEntry{Time: now, ItemID: item.ID + 1, Stage: "ripping", Level: "WARN", Msg: "other item"})
 	srv := New(Params{Store: store, LogBuffer: buffer, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	w := httptest.NewRecorder()
-	srv.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/logs?item=1&component=ripper&lane=drive&level=warn&limit=10&since=0&tail=true&daemon_only=0", nil))
+	srv.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/logs?item=1&stage=ripping&level=warn&limit=10&since=0&tail=true&daemon_only=0", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}

@@ -50,7 +50,7 @@ func TestTargetRunPlanCancellation(t *testing.T) {
 
 func TestTargetProbeInvalidInputsAndCopy(t *testing.T) {
 	dir := t.TempDir()
-	r := newTargetQualityRun(TargetQualityConfig{Metric: quality.MetricCVVDP, CRFMin: 10, CRFMax: 50, InitialCRF: 30, MaxProbes: 1}, &EncodeConfig{}, filepath.Join(dir, "absent"), dir, testVideoInfo(), nil, 1920, 1080, newAdaptiveLimiter(2, 1, 2, 0, nil, nil), 1, nil, nil)
+	r := newTargetQualityRun(TargetQualityConfig{Metric: quality.MetricCVVDP, CRFMin: 10, CRFMax: 50, InitialCRF: 30, MaxProbes: 1}, &EncodeConfig{}, filepath.Join(dir, "absent"), dir, testVideoInfo(), nil, 1920, 1080, newAdaptiveLimiter(2, 1, 2, 0, nil), 1, nil, nil)
 	if _, err := r.encodeAndScoreProbe(context.Background(), chunk.Chunk{Idx: 2}, 30, nil, nil); err == nil || !strings.Contains(err.Error(), "no frames") {
 		t.Fatalf("empty chunk: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestTargetProbeInvalidInputsAndCopy(t *testing.T) {
 }
 
 func TestTargetWorkerPropagatesMissingSource(t *testing.T) {
-	r := newTargetQualityRun(TargetQualityConfig{Metric: quality.MetricCVVDP, Target: 9, Tolerance: 0.1, CRFMin: 10, CRFMax: 50, InitialCRF: 30, MaxProbes: 2, MetricWorkers: 1}, &EncodeConfig{}, "absent.y4m", t.TempDir(), testVideoInfo(), nil, 1920, 1080, newAdaptiveLimiter(1, 1, 1, 0, nil, nil), 1, nil, nil)
+	r := newTargetQualityRun(TargetQualityConfig{Metric: quality.MetricCVVDP, Target: 9, Tolerance: 0.1, CRFMin: 10, CRFMax: 50, InitialCRF: 30, MaxProbes: 2, MetricWorkers: 1}, &EncodeConfig{}, "absent.y4m", t.TempDir(), testVideoInfo(), nil, 1920, 1080, newAdaptiveLimiter(1, 1, 1, 0, nil), 1, nil, nil)
 	ch := chunk.Chunk{Idx: 4, Start: 0, End: 2}
 	chunks := make(chan chunk.Chunk, 1)
 	results := make(chan targetQualityResult, 1)

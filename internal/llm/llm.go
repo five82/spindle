@@ -60,7 +60,7 @@ func (c *Client) complete(ctx context.Context, endpoint, model string, request a
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 10 * time.Second}
 
 	start := time.Now()
-	c.logger.Info("LLM request started",
+	c.logger.InfoContext(ctx, "LLM request started",
 		"event_type", "llm_request_start",
 		"model", model,
 	)
@@ -73,7 +73,7 @@ func (c *Client) complete(ctx context.Context, endpoint, model string, request a
 			err = decode(body)
 		}
 		if err == nil {
-			c.logger.Info("LLM request completed",
+			c.logger.InfoContext(ctx, "LLM request completed",
 				"event_type", "llm_request_complete",
 				"model", model,
 				"attempt", attempt+1,
@@ -87,7 +87,7 @@ func (c *Client) complete(ctx context.Context, endpoint, model string, request a
 
 		// Only retry on retryable errors.
 		if !isRetryable(err) {
-			c.logger.Warn("LLM request failed (non-retryable)",
+			c.logger.WarnContext(ctx, "LLM request failed (non-retryable)",
 				"event_type", "llm_request_failed",
 				"error_hint", "non-retryable error",
 				"impact", "request abandoned",
@@ -96,7 +96,7 @@ func (c *Client) complete(ctx context.Context, endpoint, model string, request a
 			return err
 		}
 
-		c.logger.Warn("retrying LLM request",
+		c.logger.WarnContext(ctx, "retrying LLM request",
 			"event_type", "llm_retry",
 			"error_hint", fmt.Sprintf("attempt %d/%d", attempt+1, maxAttempts),
 			"impact", "delayed response",

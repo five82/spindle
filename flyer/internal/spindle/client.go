@@ -100,10 +100,7 @@ type LogQuery struct {
 	Tail       bool
 	ItemID     int64
 	Level      string
-	Component  string
-	Lane       string
 	DaemonOnly bool // Only logs without item association (ItemID == 0)
-	Request    string
 }
 
 // FetchLogs retrieves log events using the daemon's streaming API.
@@ -132,17 +129,8 @@ func (c *Client) FetchLogs(ctx context.Context, query LogQuery) (LogBatch, error
 	if level := strings.TrimSpace(query.Level); level != "" {
 		values.Set("level", level)
 	}
-	if component := strings.TrimSpace(query.Component); component != "" {
-		values.Set("component", component)
-	}
-	if lane := strings.TrimSpace(query.Lane); lane != "" {
-		values.Set("lane", lane)
-	}
 	if query.DaemonOnly {
 		values.Set("daemon_only", "1")
-	}
-	if req := strings.TrimSpace(query.Request); req != "" {
-		values.Set("request", req)
 	}
 	rel := &url.URL{Path: "/api/logs", RawQuery: values.Encode()}
 	var payload LogBatch

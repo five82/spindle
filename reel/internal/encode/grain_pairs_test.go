@@ -18,8 +18,8 @@ func TestGrainPairEstimatorMeasuresCeilingWithoutGPU(t *testing.T) {
 	const w, h = 512, 256
 	chunks := []chunk.Chunk{{Idx: 2, Start: 0, End: 8}, {Idx: 4, Start: 8, End: 16}}
 	in := GrainGateInput{Info: &video.Info{Width: w, Height: h}, Chunks: chunks}
-	var verbose []string
-	in.Verbose = func(s string) { verbose = append(verbose, s) }
+	logger, logs := captureLogger()
+	in.Logger = logger
 	stats := &perf.GrainTreatmentStats{SampleChunks: []int{2, 4}}
 	rng := rand.New(rand.NewSource(82))
 	observed := 0
@@ -46,8 +46,8 @@ func TestGrainPairEstimatorMeasuresCeilingWithoutGPU(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !stats.CeilingMeasured || *stats.DenoiseCeilingJODMean != 3 || *stats.DenoiseCeilingJODMin != 2 || len(verbose) != 2 || observed != 16 || len(estimate.Frames) != 8 || estimate.Table == "" {
-		t.Fatalf("grain estimate %+v, stats %+v, pairs %d, messages %v", estimate, stats, observed, verbose)
+	if !stats.CeilingMeasured || *stats.DenoiseCeilingJODMean != 3 || *stats.DenoiseCeilingJODMin != 2 || strings.Count(logs.String(), `msg="grain gate ceiling"`) != 2 || observed != 16 || len(estimate.Frames) != 8 || estimate.Table == "" {
+		t.Fatalf("grain estimate %+v, stats %+v, pairs %d, messages %v", estimate, stats, observed, logs.String())
 	}
 }
 

@@ -78,6 +78,13 @@ func Start(opts StartOptions) error {
 		return fmt.Errorf("create log directory: %w", err)
 	}
 
+	// Non-empty console output is a panic or pre-logging failure of the
+	// previous daemon; keep it for diagnosis instead of truncating it away.
+	if info, statErr := os.Stat(opts.LogPath); statErr == nil && info.Mode().IsRegular() && info.Size() > 0 {
+		if err := os.Rename(opts.LogPath, opts.LogPath+".prev"); err != nil {
+			return fmt.Errorf("preserve previous daemon console log: %w", err)
+		}
+	}
 	logFile, err := os.OpenFile(opts.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return fmt.Errorf("open daemon console log: %w", err)

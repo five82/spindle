@@ -131,7 +131,7 @@ type Model struct {
 
 	// Log filters modal state (separate from Modal interface for simplicity)
 	showLogFilters    bool
-	logFilterInputs   [8]textinput.Model // level, component, lane, request, stage, asset, task, attempt
+	logFilterInputs   [5]textinput.Model // level, stage, asset, task, attempt
 	logFilterFocusIdx int
 
 	// Transient error display

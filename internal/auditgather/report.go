@@ -109,6 +109,7 @@ type LogDecision struct {
 	DecisionResult string         `json:"decision_result"`
 	DecisionReason string         `json:"decision_reason,omitempty"`
 	Message        string         `json:"message"`
+	Stage          string         `json:"stage,omitempty"`
 	Extras         map[string]any `json:"extras,omitempty"`
 }
 
@@ -119,6 +120,7 @@ type LogEntry struct {
 	Message   string         `json:"message"`
 	EventType string         `json:"event_type,omitempty"`
 	ErrorHint string         `json:"error_hint,omitempty"`
+	Stage     string         `json:"stage,omitempty"`
 	Extras    map[string]any `json:"extras,omitempty"`
 }
 
@@ -192,6 +194,9 @@ type StageTiming struct {
 	DurationSeconds float64 `json:"duration_seconds,omitempty"`
 	Starts          int     `json:"starts,omitempty"`
 	Completions     int     `json:"completions,omitempty"`
+	// Interruptions counts runs cut off without a terminal outcome (daemon
+	// crash or kill), recorded by startup recovery as stage_interrupted.
+	Interruptions int `json:"interruptions,omitempty"`
 }
 
 // SourceSummary captures deterministic source/output traits used for external validation.

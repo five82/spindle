@@ -5,16 +5,17 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/five82/spindle/reel/internal/config"
 	"github.com/five82/spindle/reel/internal/discovery"
-	"github.com/five82/spindle/reel/internal/logging"
 	"github.com/five82/spindle/reel/internal/processing"
 	"github.com/five82/spindle/reel/internal/quality"
 	"github.com/five82/spindle/reel/internal/reporter"
@@ -256,17 +257,14 @@ func executeEncodeWithProcess(ea encodeArgs, process func(context.Context, *conf
 	// Resolve log directory
 	logDir := ea.logDir
 	if logDir == "" {
-		logDir = logging.DefaultLogDir()
+		logDir = defaultLogDir()
 	}
 
-	// Setup file logging
-	logger, err := logging.Setup(logDir, ea.verbose, ea.noLog, os.Args)
+	logger, logPath, closeLog, err := setupLogging(logDir, ea.verbose, ea.noLog)
 	if err != nil {
 		return fmt.Errorf("failed to setup logging: %w", err)
 	}
-	if logger != nil {
-		defer func() { _ = logger.Close() }()
-	}
+	defer closeLog()
 
 	// Discover files to process
 	var filesToProcess []string
@@ -278,24 +276,16 @@ func executeEncodeWithProcess(ea encodeArgs, process func(context.Context, *conf
 		if len(filesToProcess) == 0 {
 			return fmt.Errorf("no video files found in %s", inputPath)
 		}
-		if logger != nil {
-			logger.Info("Discovered %d video files in %s", len(filesToProcess), inputPath)
-			for i, f := range filesToProcess {
-				logger.Debug("  %d. %s", i+1, f)
-			}
-		}
+		logger.Info("discovered video files", "count", len(filesToProcess), "dir", inputPath, "files", filesToProcess)
 	} else {
 		filesToProcess = []string{inputPath}
-		if logger != nil {
-			logger.Info("Processing single file: %s", inputPath)
-		}
+		logger.Info("processing single file", "input", inputPath)
 	}
 
 	// Build configuration
 	cfg := config.NewConfig(inputPath, outputDir, logDir)
-	if logger != nil {
-		cfg.LogFile = logger.FilePath()
-	}
+	cfg.LogFile = logPath
+	cfg.Logger = logger
 
 	if !quality.VshipBuildEnabled() && targetQualityOptionsRequested(ea) {
 		return fmt.Errorf("target-quality options are not available in no_vship builds; rebuild with libvship support or use --quality-mode crf")
@@ -349,7 +339,6 @@ func executeEncodeWithProcess(ea encodeArgs, process func(context.Context, *conf
 	}
 	cfg.GrainTable = strings.TrimSpace(ea.fgsTable)
 	// Debug options
-	cfg.Verbose = ea.verbose
 	cfg.KeepWorkDir = ea.keepWorkDir
 
 	// Validate configuration
@@ -357,23 +346,15 @@ func executeEncodeWithProcess(ea encodeArgs, process func(context.Context, *conf
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	// Log configuration
-	if logger != nil {
-		logger.Info("Output directory: %s", outputDir)
-		logger.Info("Quality mode: %s", cfg.QualityMode)
-		if cfg.QualityMode == config.QualityModeTarget {
-			logger.Info("Target quality: %s (target %.2f +/- %.2f), CRF range %s", cfg.TargetQuality, cfg.TargetQualityTarget, cfg.TargetQualityTolerance, cfg.CRFSearchRange)
-		} else {
-			logger.Info("CRF quality: SD=%s, HD=%s, UHD=%s", quality.FormatCRF(cfg.CRFSD), quality.FormatCRF(cfg.CRFHD), quality.FormatCRF(cfg.CRFUHD))
-		}
-		logger.Info("SVT-AV1 preset: %d", cfg.SVTAV1Preset)
-		logger.Info("Crop mode: %s", cfg.CropMode)
-		logger.Info("Grain treatment: %s", cfg.GrainTreatment)
-		if cfg.Denoise != "" {
-			logger.Info("Denoise filter (experimental): %s", cfg.Denoise)
-		}
-		logger.Info("Adaptive encoding enabled")
+	attrs := []any{"output_dir", outputDir, "quality_mode", cfg.QualityMode, "svtav1_preset", cfg.SVTAV1Preset,
+		"crop_mode", cfg.CropMode, "grain_treatment", cfg.GrainTreatment, "denoise", cfg.Denoise}
+	if cfg.QualityMode == config.QualityModeTarget {
+		attrs = append(attrs, "target_quality", cfg.TargetQuality, "target", cfg.TargetQualityTarget,
+			"tolerance", cfg.TargetQualityTolerance, "crf_range", cfg.CRFSearchRange)
+	} else {
+		attrs = append(attrs, "crf_sd", quality.FormatCRF(cfg.CRFSD), "crf_hd", quality.FormatCRF(cfg.CRFHD), "crf_uhd", quality.FormatCRF(cfg.CRFUHD))
 	}
+	logger.Info("encode configuration", attrs...)
 
 	// Configure color output
 	switch ea.colorMode {
@@ -386,10 +367,9 @@ func executeEncodeWithProcess(ea encodeArgs, process func(context.Context, *conf
 	// Create reporters
 	termRep := reporter.NewTerminalReporterVerbose(ea.verbose)
 	var rep reporter.Reporter = termRep
-	if logger != nil {
+	if logPath != "" {
 		// Combine terminal and log reporter so all events go to both
-		logRep := reporter.NewLogReporter(logger.Writer())
-		rep = reporter.NewCompositeReporter(termRep, logRep)
+		rep = reporter.NewCompositeReporter(termRep, reporter.NewLogReporter(logger))
 	}
 
 	// Setup context with signal handling
@@ -410,6 +390,50 @@ func executeEncodeWithProcess(ea encodeArgs, process func(context.Context, *conf
 	// Run encoding
 	_, err = process(ctx, cfg, filesToProcess, targetFilename, rep)
 	return err
+}
+
+// defaultLogDir follows the XDG Base Directory Spec:
+// $XDG_STATE_HOME/reel/logs, defaulting to ~/.local/state/reel/logs.
+func defaultLogDir() string {
+	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
+		return filepath.Join(dir, "reel", "logs")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", "reel", "logs")
+	}
+	return filepath.Join(home, ".local", "state", "reel", "logs")
+}
+
+// setupLogging builds the run logger: warnings (every level when verbose) on
+// the terminal and, unless noLog, a timestamped structured log file in logDir
+// at INFO (DEBUG when verbose). The returned path is empty without a file.
+func setupLogging(logDir string, verbose, noLog bool) (*slog.Logger, string, func(), error) {
+	fileLevel, termLevel := slog.LevelInfo, slog.LevelWarn
+	if verbose {
+		fileLevel, termLevel = slog.LevelDebug, slog.LevelDebug
+	}
+	dropTime := func(_ []string, a slog.Attr) slog.Attr {
+		if a.Key == slog.TimeKey {
+			return slog.Attr{}
+		}
+		return a
+	}
+	term := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: termLevel, ReplaceAttr: dropTime})
+	if noLog {
+		return slog.New(term), "", func() {}, nil
+	}
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return nil, "", nil, fmt.Errorf("failed to create log directory %s: %w", logDir, err)
+	}
+	path := filepath.Join(logDir, fmt.Sprintf("reel_encode_run_%s.log", time.Now().Format("20060102_150405")))
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("failed to create log file %s: %w", path, err)
+	}
+	logger := slog.New(slog.NewMultiHandler(term, slog.NewTextHandler(file, &slog.HandlerOptions{Level: fileLevel})))
+	logger.Info("reel encoder starting", "command", strings.Join(os.Args, " "), "log_file", path, "verbose", verbose)
+	return logger, path, func() { _ = file.Close() }, nil
 }
 
 // resolveOutputPath determines the output directory and optional target filename.

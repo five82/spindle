@@ -589,6 +589,7 @@ func (m *Manager) dispatch(ctx context.Context, workers *sync.WaitGroup) {
 			p.logger.Error("unknown task type",
 				"event_type", "unknown_stage",
 				"error_hint", "task type not in pipeline map",
+				"error", "unknown task type "+string(task.Type),
 				"item_id", task.ItemID,
 				"stage", task.Type,
 			)
@@ -843,6 +844,7 @@ func (m *Manager) processItem(ctx context.Context, task *queue.Task, item *queue
 	itemLogger.Info("stage completed",
 		"decision_type", logs.DecisionStageExecution,
 		"decision_result", "completed",
+		"decision_reason", "stage handler returned success",
 		"stage", ps.Stage,
 		"stage_duration", logs.FormatDuration(res.Duration),
 	)
@@ -912,15 +914,13 @@ func (m *Manager) finalizeItem(itemID int64) {
 		return
 	}
 	p.logger.Debug("item stage derived",
-		"decision_type", logs.DecisionStageExecution,
-		"decision_result", "advanced",
-		"decision_reason", fmt.Sprintf("earliest incomplete task is %s", derived),
+		"reason", fmt.Sprintf("earliest incomplete task is %s", derived),
 		"item_id", itemID,
 		"stage", derived,
 	)
 	if derived == queue.StageCompleted {
 		m.logItemCompleted(item, tasks)
-		m.writeMetricsRecord(item, tasks)
+		m.writeMetricsRecord(item, tasks, "", nil)
 	}
 }
 
@@ -964,6 +964,15 @@ func (m *Manager) recordStageFailure(ctx context.Context, item *queue.Item, err 
 	if m.statusTracker != nil {
 		m.statusTracker.RecordFailure(err.Error())
 	}
+	tasks, tasksErr := m.store.TasksForItem(item.ID)
+	if tasksErr != nil {
+		itemLogger.Warn("failed item tasks unavailable for metrics",
+			"event_type", "queue_fetch_error",
+			"error_hint", tasksErr.Error(),
+			"impact", "failure metrics record omits stage timings",
+		)
+	}
+	m.writeMetricsRecord(item, tasks, ps.Stage, err)
 
 	stageName := queue.HumanStage(ps.Stage)
 	title := fmt.Sprintf("Failed during %s: %s", stageName, notificationItemTitle(item))

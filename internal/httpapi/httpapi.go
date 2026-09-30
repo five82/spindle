@@ -157,7 +157,7 @@ func (s *Server) handleQueueList(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := s.store.List(stages...)
 	if err != nil {
-		s.logger.Error("list queue items", "error", err)
+		s.logger.Error("list queue items", "event_type", "api_request_failed", "error_hint", "failed to list queue items", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list queue items")
 		return
 	}
@@ -176,7 +176,7 @@ func (s *Server) handleQueueGet(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := s.store.GetByID(id)
 	if err != nil {
-		s.logger.Error("get queue item", "error", err, "id", id)
+		s.logger.Error("get queue item", "event_type", "api_request_failed", "error_hint", "failed to get queue item", "error", err, "item_id", id)
 		writeError(w, http.StatusInternalServerError, "failed to get queue item")
 		return
 	}
@@ -258,7 +258,7 @@ func (s *Server) handleQueueRetry(w http.ResponseWriter, r *http.Request) {
 	}
 	count, err := s.store.RetryFailed(body.IDs...)
 	if err != nil {
-		s.logger.Error("retry failed items", "error", err)
+		s.logger.Error("retry failed items", "event_type", "api_request_failed", "error_hint", "failed to retry items", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to retry items")
 		return
 	}
@@ -284,7 +284,7 @@ func (s *Server) handleQueueRetryEpisode(w http.ResponseWriter, r *http.Request)
 	}
 	result, err := retryEpisode(s.store, body.ID, body.EpisodeKey)
 	if err != nil {
-		s.logger.Error("retry episode", "error", err, "id", body.ID, "episode_key", body.EpisodeKey)
+		s.logger.Error("retry episode", "event_type", "api_request_failed", "error_hint", "failed to retry episode", "error", err, "item_id", body.ID, "episode_key", body.EpisodeKey)
 		writeError(w, http.StatusInternalServerError, "failed to retry episode")
 		return
 	}
@@ -306,7 +306,7 @@ func (s *Server) handleQueueStop(w http.ResponseWriter, r *http.Request) {
 	}
 	count, err := s.store.StopItems(body.IDs...)
 	if err != nil {
-		s.logger.Error("stop items", "error", err)
+		s.logger.Error("stop items", "event_type", "api_request_failed", "error_hint", "failed to stop items", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to stop items")
 		return
 	}
@@ -338,7 +338,7 @@ func (s *Server) handleQueueEnqueueCached(w http.ResponseWriter, r *http.Request
 	if !body.AllowDuplicate {
 		existing, err := s.store.FindByFingerprint(body.Fingerprint)
 		if err != nil {
-			s.logger.Error("check duplicate cached enqueue", "error", err, "fingerprint", body.Fingerprint)
+			s.logger.Error("check duplicate cached enqueue", "event_type", "api_request_failed", "error_hint", "failed to check duplicate fingerprint", "error", err, "fingerprint", body.Fingerprint)
 			writeError(w, http.StatusInternalServerError, "failed to check duplicate fingerprint")
 			return
 		}
@@ -364,7 +364,7 @@ func (s *Server) handleQueueEnqueueCached(w http.ResponseWriter, r *http.Request
 	}
 	item, err := s.store.NewCachedRip(body.DiscTitle, body.Fingerprint, body.RipSpecData, body.MetadataJSON)
 	if err != nil {
-		s.logger.Error("enqueue cached rip", "error", err, "fingerprint", body.Fingerprint)
+		s.logger.Error("enqueue cached rip", "event_type", "api_request_failed", "error_hint", "failed to enqueue cached rip", "error", err, "fingerprint", body.Fingerprint)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue cached rip")
 		return
 	}
@@ -385,7 +385,7 @@ func (s *Server) handleQueueRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.Remove(id); err != nil {
-		s.logger.Error("remove queue item", "error", err, "id", id)
+		s.logger.Error("remove queue item", "event_type", "api_request_failed", "error_hint", "failed to remove item", "error", err, "item_id", id)
 		writeError(w, http.StatusInternalServerError, "failed to remove item")
 		return
 	}
@@ -414,7 +414,7 @@ func (s *Server) handleQueueClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.logger.Error("clear queue", "error", err, "scope", body.Scope)
+		s.logger.Error("clear queue", "event_type", "api_request_failed", "error_hint", "failed to clear queue", "error", err, "scope", body.Scope)
 		writeError(w, http.StatusInternalServerError, "failed to clear queue")
 		return
 	}
@@ -434,10 +434,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	opts := LogQueryOpts{
 		Stage: q.Get("stage"), Asset: q.Get("asset"), TaskID: q.Get("task"), Attempt: q.Get("attempt"),
-		Component: q.Get("component"),
-		Lane:      q.Get("lane"),
-		Request:   q.Get("request"),
-		Level:     q.Get("level"),
+		Level: q.Get("level"),
 	}
 
 	if v := q.Get("limit"); v != "" {
@@ -479,7 +476,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	stats, err := s.store.Stats()
 	if err != nil {
-		s.logger.Error("get queue stats", "error", err)
+		s.logger.Error("get queue stats", "event_type", "api_request_failed", "error_hint", "failed to get stats", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to get stats")
 		return
 	}
@@ -578,7 +575,7 @@ func (s *Server) handleDiscDetect(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := s.discMonitor.DetectAsync(r.Context())
 	if err != nil {
-		s.logger.Error("disc detect failed", "error", err)
+		s.logger.Error("disc detect failed", "event_type", "api_request_failed", "error_hint", "disc detect failed: ", "error", err)
 		writeError(w, http.StatusInternalServerError, "disc detect failed: "+err.Error())
 		return
 	}

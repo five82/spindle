@@ -122,7 +122,6 @@ func (h *Handler) detectCommentary(
 	epKey string,
 ) ([]ripspec.CommentaryTrackRef, []ripspec.ExcludedTrackRef) {
 	logger := sess.Logger
-	itemID := sess.Item.ID
 	var (
 		comms    []ripspec.CommentaryTrackRef
 		excluded []ripspec.ExcludedTrackRef
@@ -187,7 +186,7 @@ func (h *Handler) detectCommentary(
 		rawLang, allowed := allowedAudioLanguage(stream.Tags)
 		if !allowed {
 			logger.Info("track excluded by language",
-				"decision_type", "audio_language_filter",
+				"decision_type", logs.DecisionAudioLanguageFilter,
 				"decision_result", "excluded",
 				"decision_reason", fmt.Sprintf("language=%s is not english or unknown", rawLang),
 				"track_index", as.absIndex,
@@ -228,7 +227,6 @@ func (h *Handler) detectCommentary(
 				AudioIndex: c.audioIndex,
 				Language:   "en",
 				OutputDir:  tempOutputDir(fingerprint, epKey, c.audioIndex),
-				ItemID:     itemID,
 				EpisodeKey: epKey,
 				Purpose:    "commentary_candidate",
 			}
@@ -382,7 +380,6 @@ func (h *Handler) primaryFingerprint(
 		AudioIndex: primaryIdx,
 		Language:   "en",
 		OutputDir:  filepath.Join(stagingRoot, "transcripts", epKey),
-		ItemID:     sess.Item.ID,
 		EpisodeKey: epKey,
 		Purpose:    "commentary_similarity_primary",
 	})

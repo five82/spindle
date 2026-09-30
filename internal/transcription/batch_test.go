@@ -35,7 +35,7 @@ done
 	s := New(Params{}, nil)
 	dir := t.TempDir()
 	reqs := []TranscribeRequest{
-		{InputPath: "first.mkv", OutputDir: filepath.Join(dir, "one"), Language: "en", ItemID: 7},
+		{InputPath: "first.mkv", OutputDir: filepath.Join(dir, "one"), Language: "en"},
 		{InputPath: "second.mkv", OutputDir: filepath.Join(dir, "two"), Language: "fr", AudioIndex: 1},
 	}
 	var phases []Phase

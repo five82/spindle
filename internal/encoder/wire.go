@@ -10,17 +10,19 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/five82/spindle/internal/textutil"
 	"github.com/five82/spindle/reel"
 )
 
 // The encode worker re-executes this binary, runs Reel in the child, and
-// forwards reporter callbacks as JSON lines. The daemon replays the events
-// into spindleReporter so persistence and logging stay daemon-owned, while a
-// Reel/cgo crash kills only the file's worker process.
+// forwards reporter callbacks and Reel's structured log records as JSON
+// lines. The daemon replays the events into spindleReporter so persistence
+// and logging stay daemon-owned (replayed records gain the stage's item,
+// stage, and episode attribution), while a Reel/cgo crash kills only the
+// file's worker process.
 
 type wireEvent struct {
 	Event   string          `json:"event"`
@@ -36,8 +38,7 @@ const (
 	wireEncodingProgress   = "encoding_progress"
 	wireValidationComplete = "validation_complete"
 	wireEncodingComplete   = "encoding_complete"
-	wireWarning            = "warning"
-	wireVerbose            = "verbose"
+	wireLog                = "log"
 	wireError              = "error"
 	wireResult             = "result"
 	wireFailure            = "failure"
@@ -49,6 +50,74 @@ type wireStarted struct {
 
 type wireMessage struct {
 	Message string `json:"message"`
+}
+
+// wireRecord is one Reel slog record. Attributes stay an ordered list so the
+// replayed line reads like the original.
+type wireRecord struct {
+	Level slog.Level `json:"level"`
+	Msg   string     `json:"msg"`
+	Attrs []wireAttr `json:"attrs,omitempty"`
+}
+
+type wireAttr struct {
+	Key   string `json:"k"`
+	Value any    `json:"v"`
+}
+
+// wireLogHandler is the worker's slog handler: it forwards every Reel record
+// to the daemon, which applies the configured file level on replay.
+type wireLogHandler struct {
+	w      *wireWriter
+	attrs  []wireAttr
+	prefix string
+}
+
+func (h *wireLogHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *wireLogHandler) Handle(_ context.Context, r slog.Record) error {
+	rec := wireRecord{Level: r.Level, Msg: r.Message, Attrs: append([]wireAttr(nil), h.attrs...)}
+	r.Attrs(func(a slog.Attr) bool {
+		rec.Attrs = appendWireAttr(rec.Attrs, h.prefix, a)
+		return true
+	})
+	h.w.emit(wireLog, rec)
+	return nil
+}
+
+func (h *wireLogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := &wireLogHandler{w: h.w, attrs: append([]wireAttr(nil), h.attrs...), prefix: h.prefix}
+	for _, a := range attrs {
+		next.attrs = appendWireAttr(next.attrs, h.prefix, a)
+	}
+	return next
+}
+
+func (h *wireLogHandler) WithGroup(name string) slog.Handler {
+	return &wireLogHandler{w: h.w, attrs: h.attrs, prefix: h.prefix + name + "."}
+}
+
+// appendWireAttr flattens groups and reduces values to JSON-stable forms:
+// errors, durations, and times would otherwise marshal as {} or nanoseconds.
+func appendWireAttr(out []wireAttr, prefix string, a slog.Attr) []wireAttr {
+	v := a.Value.Resolve()
+	switch v.Kind() {
+	case slog.KindGroup:
+		for _, ga := range v.Group() {
+			out = appendWireAttr(out, prefix+a.Key+".", ga)
+		}
+		return out
+	case slog.KindDuration, slog.KindTime:
+		return append(out, wireAttr{Key: prefix + a.Key, Value: v.String()})
+	case slog.KindAny:
+		if err, ok := v.Any().(error); ok {
+			return append(out, wireAttr{Key: prefix + a.Key, Value: err.Error()})
+		}
+	}
+	if a.Key == "" {
+		return out
+	}
+	return append(out, wireAttr{Key: prefix + a.Key, Value: v.Any()})
 }
 
 // wireWriter serializes events to the worker's stdout. Reel invokes
@@ -87,8 +156,6 @@ func (r *wireReporter) ValidationComplete(s reel.ValidationSummary) {
 	r.w.emit(wireValidationComplete, s)
 }
 func (r *wireReporter) EncodingComplete(s reel.EncodingOutcome) { r.w.emit(wireEncodingComplete, s) }
-func (r *wireReporter) Warning(message string)                  { r.w.emit(wireWarning, wireMessage{Message: message}) }
-func (r *wireReporter) Verbose(message string)                  { r.w.emit(wireVerbose, wireMessage{Message: message}) }
 func (r *wireReporter) Error(e reel.ReporterError)              { r.w.emit(wireError, e) }
 
 // RunWorker is the `spindle encode-worker` entry point: encode one file in
@@ -97,13 +164,13 @@ func (r *wireReporter) Error(e reel.ReporterError)              { r.w.emit(wireE
 func RunWorker(ctx context.Context, input, outputDir string, out io.Writer) error {
 	w := &wireWriter{enc: json.NewEncoder(out)}
 
-	enc, err := reel.New(reel.WithQualityMode("target"))
+	enc, err := reel.New(reel.WithQualityMode("target"), reel.WithLogger(slog.New(&wireLogHandler{w: w})))
 	if err != nil {
 		w.emit(wireFailure, wireMessage{Message: fmt.Sprintf("create reel encoder: %v", err)})
 		return err
 	}
 
-	result, err := enc.EncodeWithReporter(ctx, input, outputDir, &wireReporter{w: w})
+	result, err := enc.Encode(ctx, input, outputDir, &wireReporter{w: w})
 	if err != nil {
 		w.emit(wireFailure, wireMessage{Message: err.Error()})
 		return err
@@ -164,18 +231,12 @@ func dispatchWireEvent(ev wireEvent, rep *spindleReporter) (*reel.Result, string
 			return nil, "", err
 		}
 		rep.EncodingComplete(s)
-	case wireWarning:
-		var s wireMessage
-		if err := json.Unmarshal(ev.Payload, &s); err != nil {
+	case wireLog:
+		var rec wireRecord
+		if err := json.Unmarshal(ev.Payload, &rec); err != nil {
 			return nil, "", err
 		}
-		rep.Warning(s.Message)
-	case wireVerbose:
-		var s wireMessage
-		if err := json.Unmarshal(ev.Payload, &s); err != nil {
-			return nil, "", err
-		}
-		rep.Verbose(s.Message)
+		rep.Log(rec)
 	case wireError:
 		var e reel.ReporterError
 		if err := json.Unmarshal(ev.Payload, &e); err != nil {
@@ -266,11 +327,16 @@ func runWorkerProcess(ctx context.Context, logger *slog.Logger, input, outputDir
 		return nil, fmt.Errorf("encode worker: %s", failureMsg)
 	}
 	if waitErr != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if len(detail) > 500 {
-			detail = "..." + detail[len(detail)-500:]
-		}
-		return nil, fmt.Errorf("encode worker exited: %w (stderr: %s)", waitErr, detail)
+		return nil, fmt.Errorf("encode worker exited: %w (stderr: %s)", waitErr, textutil.Excerpt(stderr.Bytes()))
+	}
+	// Reel reports through the event stream and silences SVT-AV1, so stderr
+	// from a successful worker is unexpected native or runtime output.
+	if detail := textutil.Excerpt(stderr.Bytes()); detail != "" {
+		logger.Warn("encode worker wrote to stderr",
+			"event_type", "encode_worker_stderr",
+			"error_hint", detail,
+			"impact", "encode succeeded; output may indicate a native library problem",
+		)
 	}
 	if scanErr != nil {
 		return nil, fmt.Errorf("encode worker stream: %w", scanErr)

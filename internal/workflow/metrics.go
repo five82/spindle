@@ -12,7 +12,7 @@ import (
 )
 
 // The metrics log is one JSON object per line, appended when an item
-// completes. It is the durable cross-item performance record: the queue DB is
+// completes or fails. It is the durable cross-item performance record: the queue DB is
 // transient and log files expire, but this file accumulates for trend
 // analysis (rip speed per drive, encode speed per resolution class, stage
 // bottlenecks). Fields are self-describing so it can be queried directly with
@@ -26,8 +26,14 @@ type metricsStage struct {
 }
 
 type metricsRecord struct {
-	Schema           int                   `json:"schema"`
-	CompletedAt      time.Time             `json:"completed_at"`
+	Schema int `json:"schema"`
+	// Outcome is "completed" or "failed". Records written before failures
+	// were recorded lack it and are all completions.
+	Outcome          string                `json:"outcome"`
+	CompletedAt      time.Time             `json:"completed_at,omitzero"`
+	FailedAt         time.Time             `json:"failed_at,omitzero"`
+	FailedStage      queue.Stage           `json:"failed_stage,omitempty"`
+	Error            string                `json:"error,omitempty"`
 	ItemID           int64                 `json:"item_id"`
 	Title            string                `json:"title"`
 	MediaType        string                `json:"media_type,omitempty"`
@@ -40,23 +46,31 @@ type metricsRecord struct {
 	Rip              *ripspec.RipStats     `json:"rip,omitempty"`
 	Encodes          []ripspec.EncodeStats `json:"encodes,omitempty"`
 	Hostname         string                `json:"hostname,omitempty"`
-	SpindleVersion   string                `json:"spindle_version,omitempty"`
-	ReelVersion      string                `json:"reel_version,omitempty"`
+	// SpindleVersion identifies the build, which includes Reel: both live
+	// in one module.
+	SpindleVersion string `json:"spindle_version,omitempty"`
 }
 
-// writeMetricsRecord appends the completed item's metrics line. Best-effort:
-// metrics must never affect pipeline outcomes, so failures only warn.
-func (m *Manager) writeMetricsRecord(item *queue.Item, tasks []*queue.Task) {
+// writeMetricsRecord appends the item's terminal metrics line: a completion
+// when failure is nil, otherwise the failure at failedStage, so failed items
+// outlive the transient queue and expiring logs too. Best-effort: metrics
+// must never affect pipeline outcomes, so write failures only warn.
+func (m *Manager) writeMetricsRecord(item *queue.Item, tasks []*queue.Task, failedStage queue.Stage, failure error) {
 	if m.metricsPath == "" {
 		return
 	}
 	rec := metricsRecord{
 		Schema:          1,
-		CompletedAt:     time.Now().UTC(),
+		Outcome:         "completed",
 		ItemID:          item.ID,
 		Title:           item.DisplayTitle(),
 		DiscFingerprint: item.DiscFingerprint,
 		NeedsReview:     item.NeedsReview == 1,
+	}
+	if failure != nil {
+		rec.Outcome, rec.FailedAt, rec.FailedStage, rec.Error = "failed", time.Now().UTC(), failedStage, failure.Error()
+	} else {
+		rec.CompletedAt = time.Now().UTC()
 	}
 	if created, ok := item.CreatedTime(); ok {
 		rec.TotalWallSeconds = time.Since(created).Seconds()
@@ -77,7 +91,7 @@ func (m *Manager) writeMetricsRecord(item *queue.Item, tasks []*queue.Task) {
 		rec.Encodes = env.Attributes.EncodeStats
 	}
 	rec.Hostname, _ = os.Hostname()
-	rec.SpindleVersion, rec.ReelVersion = buildVersions()
+	rec.SpindleVersion = buildVersion()
 
 	line, err := json.Marshal(rec)
 	if err != nil {
@@ -107,7 +121,7 @@ func (m *Manager) warnMetrics(itemID int64, err error) {
 	m.pipeline.logger.Warn("metrics record not written",
 		"event_type", "metrics_write_error",
 		"error_hint", err.Error(),
-		"impact", "completed item missing from metrics log",
+		"impact", "item missing from metrics log",
 		"item_id", itemID,
 	)
 }
@@ -122,25 +136,9 @@ func (m *Manager) takeWaits(itemID int64) map[queue.Stage]float64 {
 	return waits
 }
 
-var versionOnce = sync.OnceValues(func() (string, string) {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "", ""
+var buildVersion = sync.OnceValue(func() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		return info.Main.Version
 	}
-	spindle := info.Main.Version
-	reel := ""
-	for _, dep := range info.Deps {
-		if dep.Path == "github.com/five82/spindle/reel" {
-			reel = dep.Version
-			if dep.Replace != nil {
-				reel = dep.Replace.Version
-			}
-			break
-		}
-	}
-	return spindle, reel
+	return ""
 })
-
-func buildVersions() (spindleVersion, reelVersion string) {
-	return versionOnce()
-}

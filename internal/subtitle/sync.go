@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 
+	"github.com/five82/spindle/internal/textutil"
 	"github.com/five82/spindle/internal/transcription"
 )
 
@@ -30,7 +30,7 @@ func syncSubtitleToReference(ctx context.Context, referenceSRT, inputSRT, output
 	args := []string{ffsubsyncPackage, referenceSRT, "-i", inputSRT, "-o", outputSRT}
 	output, err := runFFSubsync(ctx, args)
 	if err != nil {
-		return fmt.Errorf("ffsubsync: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("ffsubsync: %w: %s", err, textutil.Excerpt(output))
 	}
 	if _, err := os.Stat(outputSRT); err != nil {
 		return fmt.Errorf("ffsubsync produced no output: %w", err)

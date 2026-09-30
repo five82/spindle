@@ -6,10 +6,10 @@ import (
 )
 
 var (
-	controlCharRe  = regexp.MustCompile(`[\x00-\x1f\x7f]`)
+	controlCharRe   = regexp.MustCompile(`[\x00-\x1f\x7f]`)
 	collapseSpaceRe = regexp.MustCompile(`\s{2,}`)
-	multiHyphenRe  = regexp.MustCompile(`-{2,}`)
-	multiSpaceRe   = regexp.MustCompile(`\s+`)
+	multiHyphenRe   = regexp.MustCompile(`-{2,}`)
+	multiSpaceRe    = regexp.MustCompile(`\s+`)
 )
 
 // SanitizeDisplayName replaces :/\ and control chars with spaces, removes ?"<>|*,

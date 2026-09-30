@@ -11,7 +11,7 @@ func TestDispatchWireEventBadPayload(t *testing.T) {
 	for _, event := range []string{
 		wireInitialization, wireStageProgress, wireCropResult, wireEncodingConfig,
 		wireEncodingStarted, wireEncodingProgress, wireValidationComplete,
-		wireEncodingComplete, wireWarning, wireVerbose, wireError, wireResult, wireFailure,
+		wireEncodingComplete, wireLog, wireError, wireResult, wireFailure,
 	} {
 		t.Run(event, func(t *testing.T) {
 			_, _, err := dispatchWireEvent(wireEvent{Event: event, Payload: json.RawMessage("{")}, &spindleReporter{})
@@ -32,7 +32,7 @@ func TestWireWriterConcurrentEmission(t *testing.T) {
 	done := make(chan struct{}, count)
 	for range count {
 		go func() {
-			w.emit(wireWarning, wireMessage{Message: "warning"})
+			w.emit(wireLog, wireRecord{Msg: "warning"})
 			done <- struct{}{}
 		}()
 	}
@@ -45,7 +45,7 @@ func TestWireWriterConcurrentEmission(t *testing.T) {
 	}
 	for _, line := range lines {
 		var ev wireEvent
-		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Event != wireWarning {
+		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Event != wireLog {
 			t.Fatalf("corrupted event %q: %v", line, err)
 		}
 	}

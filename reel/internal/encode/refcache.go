@@ -3,6 +3,7 @@ package encode
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -35,7 +36,7 @@ type chunkRefCache struct {
 	frames    int
 	frameSize int
 	reserved  int64
-	warn      func(string)
+	log       *slog.Logger
 
 	ready    bool
 	disabled bool
@@ -56,7 +57,7 @@ var refCacheBudget = struct {
 
 // newChunkRefCache prepares (but does not fill) the cache for one chunk, or
 // returns nil when the disk budget is already spoken for.
-func newChunkRefCache(workDir string, ch chunk.Chunk, frameSize int, warn func(string)) *chunkRefCache {
+func newChunkRefCache(workDir string, ch chunk.Chunk, frameSize int, log *slog.Logger) *chunkRefCache {
 	size := int64(ch.Frames()) * int64(frameSize)
 	refCacheBudget.mu.Lock()
 	defer refCacheBudget.mu.Unlock()
@@ -70,7 +71,7 @@ func newChunkRefCache(workDir string, ch chunk.Chunk, frameSize int, warn func(s
 		frames:    ch.Frames(),
 		frameSize: frameSize,
 		reserved:  size,
-		warn:      warn,
+		log:       log,
 	}
 }
 
@@ -141,8 +142,12 @@ func (c *chunkRefCache) fail(message string) {
 	c.disabled = true
 	c.ready = false
 	_ = os.Remove(c.path)
-	if c.warn != nil {
-		c.warn(message + "; falling back to re-reading the source")
+	if c.log != nil {
+		c.log.Warn("filtered reference cache disabled",
+			"event_type", "refcache_fallback",
+			"error_hint", message,
+			"impact", "chunk re-reads and re-filters the source for every probe; slower, same quality",
+		)
 	}
 }
 

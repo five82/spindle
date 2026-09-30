@@ -80,7 +80,7 @@ func (h *Handler) AdoptForFile(ctx context.Context, req AdoptFileRequest) (*Adop
 		fileIDs[i] = candidate.FileID
 	}
 	logger.Info("subtitle candidate attempt set selected",
-		"decision_type", "subtitle_candidate_ranking",
+		"decision_type", logs.DecisionSubtitleCandidateRanking,
 		"decision_result", "selected",
 		"decision_reason", "source affinity orders release/file matches before generic or conflicting candidates",
 		"source_profile", profile.class,

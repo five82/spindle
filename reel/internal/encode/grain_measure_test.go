@@ -18,8 +18,8 @@ import (
 func TestGrainGateMeasuresSampleCostsWithoutEncoder(t *testing.T) {
 	info := &video.Info{Width: config.HDWidthThreshold, Height: 1080, Frames: 200, FPSNum: 25, FPSDen: 1}
 	in := GrainGateInput{WorkDir: t.TempDir(), Info: info, Chunks: []chunk.Chunk{{Idx: 7, Start: 0, End: 100}, {Idx: 8, Start: 100, End: 200}}}
-	var verbose []string
-	in.Verbose = func(s string) { verbose = append(verbose, s) }
+	logger, logs := captureLogger()
+	in.Logger = logger
 	cfg := &EncodeConfig{CRF: 40, Denoise: "hflip"}
 	measured := 0
 	measure := func(_ context.Context, c *EncodeConfig, _ GrainGateInput, ch chunk.Chunk, path string, w, h uint32) (float64, error) {
@@ -30,8 +30,8 @@ func TestGrainGateMeasuresSampleCostsWithoutEncoder(t *testing.T) {
 		return 0.02, nil
 	}
 	stats, err := runGrainGateWithMeasure(context.Background(), cfg, in, measure)
-	if err != nil || stats.Treated || stats.GateStage != grainStageBPP || len(stats.SampleBPP) != 2 || measured != 2 || len(verbose) != 2 {
-		t.Fatalf("gate: %+v, measured %d, log %v, err %v", stats, measured, verbose, err)
+	if err != nil || stats.Treated || stats.GateStage != grainStageBPP || len(stats.SampleBPP) != 2 || measured != 2 || strings.Count(logs.String(), `msg="grain gate sample"`) != 2 {
+		t.Fatalf("gate: %+v, measured %d, log %s, err %v", stats, measured, logs.String(), err)
 	}
 	if _, err := os.Stat(filepath.Join(in.WorkDir, "gate")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("temporary samples not cleaned up: %v", err)

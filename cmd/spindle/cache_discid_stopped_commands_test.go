@@ -284,9 +284,9 @@ func TestLogsCommandStoppedDaemon(t *testing.T) {
 		t.Fatalf("missing log: %v", err)
 	}
 	got = captureStdout(t, func() {
-		printLogEntry(queueaccess.LogEntry{Time: "now", Level: "INFO", Msg: "message", Component: "stage", Lane: "gpu", ItemID: 7, Fields: map[string]string{"key": "value"}})
+		printLogEntry(queueaccess.LogEntry{Time: "now", Level: "INFO", Msg: "message", Stage: "encoding", ItemID: 7, Fields: map[string]string{"key": "value"}})
 	})
-	for _, want := range []string{"now INFO message", "component=stage", "lane=gpu", "item_id=7", "key=value"} {
+	for _, want := range []string{"now INFO message", "item_id=7", "stage=encoding", "key=value"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("log output %q missing %q", got, want)
 		}

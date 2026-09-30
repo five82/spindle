@@ -322,7 +322,7 @@ func (h *Handler) generateEpisodeTranscripts(ctx context.Context, sess *stage.Se
 			return fmt.Errorf("select audio %s: %w", ep.Key, err)
 		}
 		batched = append(batched, ep)
-		reqs = append(reqs, transcription.TranscribeRequest{InputPath: asset.Path, AudioIndex: selectedAudio.Index, Language: selectedAudio.Language, OutputDir: workDir, ItemID: sess.Item.ID, EpisodeKey: ep.Key, Purpose: "episode_identification"})
+		reqs = append(reqs, transcription.TranscribeRequest{InputPath: asset.Path, AudioIndex: selectedAudio.Index, Language: selectedAudio.Language, OutputDir: workDir, EpisodeKey: ep.Key, Purpose: "episode_identification"})
 	}
 	if len(reqs) == 0 {
 		return nil

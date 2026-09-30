@@ -1,7 +1,8 @@
 // Package reel provides a Go library for AV1 video encoding with SVT-AV1.
 //
 // This file re-exports the internal Reporter interface and associated types
-// to allow callers to receive all encoding events directly.
+// to allow callers to receive all encoding events directly. Diagnostics and
+// decisions are not reporter events; see WithLogger.
 
 package reel
 
@@ -33,8 +34,6 @@ type ProgressSnapshot = reporter.ProgressSnapshot
 type ValidationSummary = reporter.ValidationSummary
 
 // ReporterValidationStep represents a single validation check from the reporter.
-// Note: This is distinct from the ValidationStep type in events.go which is
-// used for JSON serialization. Use reporter.ValidationStep internally.
 type ReporterValidationStep = reporter.ValidationStep
 
 // EncodingOutcome contains final encoding results.

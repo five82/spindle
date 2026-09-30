@@ -42,9 +42,8 @@ func Load(explicitPath string, logger *slog.Logger) (*Config, error) {
 	}
 
 	logger.Debug("configuration loaded",
-		"decision_type", logs.DecisionConfigLoad,
-		"decision_result", source,
-		"decision_reason", configSourceReason(source, explicitPath),
+		"source", source,
+		"reason", configSourceReason(source, explicitPath),
 	)
 	if len(envKeys) > 0 {
 		logger.Debug("environment overrides applied", "keys", envKeys)

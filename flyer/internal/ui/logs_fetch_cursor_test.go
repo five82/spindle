@@ -38,9 +38,7 @@ func TestLogFetchCommandsAndCursors(t *testing.T) {
 	m.initLogState()
 	m.initLogViewport()
 	m.logState.filterLevel = "warn"
-	m.logState.filterComponent = "ripper"
-	m.logState.filterLane = "drive"
-	m.logState.filterRequest = "abc"
+	m.logState.filterStage = "ripping"
 	cmd := m.refreshLogs(nil)
 	if cmd == nil {
 		t.Fatal("online log refresh must return command")
@@ -49,7 +47,7 @@ func TestLogFetchCommandsAndCursors(t *testing.T) {
 	if !ok || msg.source != logSourceDaemon || msg.next != 11 {
 		t.Fatalf("daemon batch = %#v", msg)
 	}
-	if q := queries[0]; q.Get("tail") != "1" || q.Get("daemon_only") != "1" || q.Get("level") != "warn" || q.Get("component") != "ripper" || q.Get("lane") != "drive" || q.Get("request") != "abc" {
+	if q := queries[0]; q.Get("tail") != "1" || q.Get("daemon_only") != "1" || q.Get("level") != "warn" || q.Get("stage") != "ripping" {
 		t.Fatalf("daemon query = %v", q)
 	}
 	if cmd := m.refreshLogs(nil); cmd != nil {

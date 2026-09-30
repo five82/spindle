@@ -16,18 +16,21 @@ import (
 
 const defaultLogBufferCapacity = 10000
 
+// bufferMinLevel keeps DEBUG out of the ring. DEBUG is raw measurement data
+// (Reel's per-probe target-quality records alone run to thousands per title)
+// that would evict every other item's INFO history within one encode; it
+// stays in the daemon log file, which the audit reads directly.
+const bufferMinLevel = slog.LevelInfo
+
 // LogEntry is a single structured log event stored in the buffer.
 type LogEntry struct {
-	Seq       uint64            `json:"seq"`
-	Time      string            `json:"ts"`
-	Level     string            `json:"level"`
-	Msg       string            `json:"msg"`
-	Component string            `json:"component,omitempty"`
-	Stage     string            `json:"stage,omitempty"`
-	ItemID    int64             `json:"item_id,omitempty"`
-	Lane      string            `json:"lane,omitempty"`
-	Request   string            `json:"request,omitempty"`
-	Fields    map[string]string `json:"fields,omitempty"`
+	Seq    uint64            `json:"seq"`
+	Time   string            `json:"ts"`
+	Level  string            `json:"level"`
+	Msg    string            `json:"msg"`
+	Stage  string            `json:"stage,omitempty"`
+	ItemID int64             `json:"item_id,omitempty"`
+	Fields map[string]string `json:"fields,omitempty"`
 
 	// parsedTime is Time parsed once at capture so per-query filters
 	// (MinTime clamp) never re-parse the string. Zero when Time was
@@ -83,9 +86,6 @@ type LogQueryOpts struct {
 	Limit      int    // max entries to return (default 200)
 	Tail       bool   // return the most recent entries (ignored when Since > 0)
 	ItemID     int64  // filter by item ID (0 = no filter)
-	Component  string // filter by component (case-insensitive)
-	Lane       string // filter by lane (case-insensitive)
-	Request    string // filter by request ID (case-insensitive)
 	Level      string // minimum log level (debug, info, warn, error)
 	DaemonOnly bool   // only entries with ItemID == 0
 
@@ -207,15 +207,6 @@ func (b *LogBuffer) matchesFilter(e LogEntry, opts LogQueryOpts, minLevel int) b
 	if opts.DaemonOnly && e.ItemID != 0 {
 		return false
 	}
-	if opts.Component != "" && !strings.EqualFold(e.Component, opts.Component) {
-		return false
-	}
-	if opts.Lane != "" && !strings.EqualFold(e.Lane, opts.Lane) {
-		return false
-	}
-	if opts.Request != "" && !strings.EqualFold(e.Request, opts.Request) {
-		return false
-	}
 	if minLevel >= 0 && levelRank(e.Level) < minLevel {
 		return false
 	}
@@ -243,15 +234,16 @@ func NewLogHandler(inner slog.Handler, buffer *LogBuffer) *LogHandler {
 	return &LogHandler{inner: inner, buffer: buffer}
 }
 
-// Enabled keeps buffer capture independent of the output handlers' levels:
-// the API can always serve DEBUG from the ring even when SIGUSR1 has toggled
-// the file handler to INFO. Output stays gated because multiHandler.Handle
-// re-checks each sub-handler's Enabled before writing.
+// Enabled keeps INFO+ capture independent of the output handlers' levels, so
+// the ring stays complete even if every output were raised above INFO.
 func (h *LogHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return level >= slog.LevelDebug || h.inner.Enabled(ctx, level)
+	return level >= bufferMinLevel || h.inner.Enabled(ctx, level)
 }
 
 func (h *LogHandler) Handle(ctx context.Context, record slog.Record) error {
+	if record.Level < bufferMinLevel {
+		return h.inner.Handle(ctx, record)
+	}
 	ts := record.Time.UTC()
 	entry := LogEntry{
 		Time:       ts.Format(time.RFC3339Nano),
@@ -314,16 +306,10 @@ func (h *LogHandler) extractAttr(entry *LogEntry, fields map[string]string, a sl
 	val := a.Value.Resolve()
 
 	switch key {
-	case "component":
-		entry.Component = val.String()
 	case "stage":
 		entry.Stage = val.String()
 	case "item_id":
 		entry.ItemID = val.Int64()
-	case "lane":
-		entry.Lane = val.String()
-	case "request":
-		entry.Request = val.String()
 	default:
 		if val.Kind() == slog.KindGroup {
 			// Flatten group attrs.
@@ -338,7 +324,7 @@ func (h *LogHandler) extractAttr(entry *LogEntry, fields map[string]string, a sl
 }
 
 // HydrateFromDir reads all spindle-*.log files in dir, parses JSON log lines,
-// and loads entries into the buffer. Files are processed in lexicographic order
+// and loads INFO+ entries into the buffer. Files are processed in lexicographic order
 // (oldest first, since filenames contain timestamps). If total entries exceed
 // buffer capacity, only the most recent entries are retained.
 func (b *LogBuffer) HydrateFromDir(dir string) error {
@@ -399,7 +385,7 @@ func parseLogFile(path string) ([]LogEntry, error) {
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 	for scanner.Scan() {
-		if e, ok := parseJSONLogLine(scanner.Bytes()); ok {
+		if e, ok := parseJSONLogLine(scanner.Bytes()); ok && levelRank(e.Level) >= levelRank(bufferMinLevel.String()) {
 			entries = append(entries, e)
 		}
 	}
@@ -431,10 +417,6 @@ func parseJSONLogLine(line []byte) (LogEntry, bool) {
 			if s, ok := v.(string); ok {
 				e.Msg = s
 			}
-		case "component":
-			if s, ok := v.(string); ok {
-				e.Component = s
-			}
 		case "stage":
 			if s, ok := v.(string); ok {
 				e.Stage = s
@@ -447,14 +429,6 @@ func parseJSONLogLine(line []byte) (LogEntry, bool) {
 				if n, err := val.Int64(); err == nil {
 					e.ItemID = n
 				}
-			}
-		case "lane":
-			if s, ok := v.(string); ok {
-				e.Lane = s
-			}
-		case "request":
-			if s, ok := v.(string); ok {
-				e.Request = s
 			}
 		default:
 			fields[k] = fmt.Sprint(v)

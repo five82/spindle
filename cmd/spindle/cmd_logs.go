@@ -29,10 +29,9 @@ Without filters, tails the log file directly (works with the daemon stopped).
 Filters and --follow use the daemon API and require a running daemon.`,
 		Example: `  spindle logs -n 50
   spindle logs -f --item 3
-  spindle logs --level warn --component encoder`,
+  spindle logs --level warn --item 3 --stage encoding`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			hasFilter := query.Component != "" || query.Lane != "" || query.Request != "" ||
-				query.ItemID != 0 || query.Level != ""
+			hasFilter := query.ItemID != 0 || query.Stage != "" || query.Level != ""
 
 			// When filters are set or follow is requested, use the daemon API.
 			if hasFilter || follow {
@@ -64,11 +63,9 @@ Filters and --follow use the daemon API and require a running daemon.`,
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow log output")
 	cmd.Flags().IntVarP(&lines, "lines", "n", 10, "Number of lines to show")
-	cmd.Flags().StringVar(&query.Component, "component", "", "Filter by component label")
-	cmd.Flags().StringVar(&query.Lane, "lane", "", "Filter by processing lane")
-	cmd.Flags().StringVar(&query.Request, "request", "", "Filter by request/correlation ID")
 	cmd.Flags().Int64VarP(&query.ItemID, "item", "i", 0, "Filter by queue item ID")
-	cmd.Flags().StringVar(&query.Level, "level", "", "Minimum log level (debug, info, warn, error)")
+	cmd.Flags().StringVar(&query.Stage, "stage", "", "Filter by pipeline stage (e.g. encoding, subtitling)")
+	cmd.Flags().StringVar(&query.Level, "level", "", "Minimum log level (info, warn, error; DEBUG is only in the log file)")
 	return cmd
 }
 
@@ -108,14 +105,11 @@ func logsFromAPI(ctx context.Context, acc *queueaccess.HTTPAccess, query queueac
 
 func printLogEntry(e queueaccess.LogEntry) {
 	fmt.Printf("%s %s %s", e.Time, e.Level, e.Msg)
-	if e.Component != "" {
-		fmt.Printf(" component=%s", e.Component)
-	}
-	if e.Lane != "" {
-		fmt.Printf(" lane=%s", e.Lane)
-	}
 	if e.ItemID != 0 {
 		fmt.Printf(" item_id=%d", e.ItemID)
+	}
+	if e.Stage != "" {
+		fmt.Printf(" stage=%s", e.Stage)
 	}
 	for k, v := range e.Fields {
 		fmt.Printf(" %s=%s", k, v)

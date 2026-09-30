@@ -37,7 +37,7 @@ func buildAdoptContext(ctx context.Context, logger *slog.Logger, reference *tran
 	}
 	videoSeconds, durationSource := resolveSubtitleVideoDuration(ctx, logger, videoPath, reference.Duration)
 	logger.Info("subtitle duration selected",
-		"decision_type", "subtitle_duration_source",
+		"decision_type", logs.DecisionSubtitleDurationSource,
 		"decision_result", durationSource,
 		"decision_reason", fmt.Sprintf("video_seconds=%.3f transcript_seconds=%.3f", videoSeconds, reference.Duration),
 	)

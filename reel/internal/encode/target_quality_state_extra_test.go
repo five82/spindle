@@ -14,7 +14,7 @@ import (
 )
 
 func TestTargetRunProgressAndFirstError(t *testing.T) {
-	r := &targetQualityRun{limiter: newAdaptiveLimiter(3, 2, 3, 0, nil, nil)}
+	r := &targetQualityRun{limiter: newAdaptiveLimiter(3, 2, 3, 0, nil)}
 	r.flightCond = sync.NewCond(&r.flightMu)
 	var events []worker.Progress
 	r.progressCb = func(p worker.Progress) { events = append(events, p) }
@@ -45,7 +45,7 @@ func TestTargetRunProgressAndFirstError(t *testing.T) {
 }
 
 func TestConcurrentProgressDeliveryNeverRegresses(t *testing.T) {
-	r := &targetQualityRun{limiter: newAdaptiveLimiter(3, 2, 3, 0, nil, nil)}
+	r := &targetQualityRun{limiter: newAdaptiveLimiter(3, 2, 3, 0, nil)}
 	last, reports := 0, 0
 	r.progressCb = func(p worker.Progress) {
 		if p.FramesComplete < last {
@@ -65,7 +65,7 @@ func TestConcurrentProgressDeliveryNeverRegresses(t *testing.T) {
 
 func TestTargetRunDispatchAndCollect(t *testing.T) {
 	dir := t.TempDir()
-	r := newTargetQualityRun(TargetQualityConfig{Metric: quality.MetricCVVDP, MetricWorkers: 1, InitialCRF: 30}, &EncodeConfig{}, "input", dir, testVideoInfo(), nil, 1920, 1080, newAdaptiveLimiter(2, 1, 2, 0, nil, nil), 2, nil, nil)
+	r := newTargetQualityRun(TargetQualityConfig{Metric: quality.MetricCVVDP, MetricWorkers: 1, InitialCRF: 30}, &EncodeConfig{}, "input", dir, testVideoInfo(), nil, 1920, 1080, newAdaptiveLimiter(2, 1, 2, 0, nil), 2, nil, nil)
 	if err := os.Mkdir(filepath.Join(dir, "encode"), 0700); err != nil {
 		t.Fatal(err)
 	}

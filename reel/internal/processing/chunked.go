@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	nativeaudio "github.com/five82/spindle/reel/internal/audio"
@@ -63,10 +65,8 @@ func processChunkedWithEncoder(
 		return CropResult{}, fmt.Errorf("failed to create work directory: %w", err)
 	}
 	perfc.SetWorkDir(workDir)
-
-	if cfg.KeepWorkDir {
-		rep.Verbose(fmt.Sprintf("Work directory: %s", workDir))
-	}
+	log := cfg.Log()
+	log.Debug("work directory", "path", workDir, "keep", cfg.KeepWorkDir)
 
 	// Cleanup on completion (unless resuming a failed encode or explicitly keeping the work directory).
 	defer func() {
@@ -81,7 +81,7 @@ func processChunkedWithEncoder(
 
 	// One phase is open at a time; the deferred end closes whichever phase an
 	// early return leaves open.
-	phases := newPhaseTracker(perfc, rep)
+	phases := newPhaseTracker(perfc, rep, log)
 	defer phases.end()
 
 	// ========================================================================
@@ -119,7 +119,7 @@ func processChunkedWithEncoder(
 		if err != nil {
 			return CropResult{}, fmt.Errorf("invalid crop filter %q: %w", cropResult.CropFilter, err)
 		}
-		rep.Verbose(fmt.Sprintf("Crop rectangle: %dx%d at +%d+%d", cropRect.Width, cropRect.Height, cropRect.X, cropRect.Y))
+		log.Debug("crop rectangle", "width", cropRect.Width, "height", cropRect.Height, "x", cropRect.X, "y", cropRect.Y)
 	}
 
 	// Generate shot-aware chunks based on resolution (using config values).
@@ -159,7 +159,6 @@ func processChunkedWithEncoder(
 			now := time.Now()
 			if current == total || percent >= lastPlanPercent+5 || now.Sub(lastPlanProgress) >= 10*time.Second {
 				rep.StageProgress(reporter.StageProgress{Lane: "work", State: "running", Stage: "Shot cut detection", Message: "Scanning source frames", Completed: int64(current), Total: int64(total), Unit: "frames"})
-				rep.Verbose(fmt.Sprintf("Shot cut detection progress: %d%% (%d/%d frames)", percent, current, total))
 				lastPlanPercent = percent
 				lastPlanProgress = now
 			}
@@ -170,13 +169,8 @@ func processChunkedWithEncoder(
 		return CropResult{}, fmt.Errorf("shot cut detection failed: %w", err)
 	}
 	if planResult.Frames > 0 && planResult.Frames != vidInf.Frames {
-		rep.Verbose(fmt.Sprintf("Video frame count adjusted after decode: probed %d, decoded %d", vidInf.Frames, planResult.Frames))
+		log.Debug("video frame count adjusted after decode", "probed_frames", vidInf.Frames, "decoded_frames", planResult.Frames)
 		vidInf.Frames = planResult.Frames
-	}
-	if planResult.MergedWeakCuts > 0 {
-		rep.Verbose(fmt.Sprintf("Detected %d natural shot cuts, merged %d short shots, merged %d weak cuts, and added %d duration splits", planResult.NaturalCuts, planResult.MergedShortShots, planResult.MergedWeakCuts, planResult.SyntheticSplits))
-	} else {
-		rep.Verbose(fmt.Sprintf("Detected %d natural shot cuts, merged %d short shots, and added %d duration splits", planResult.NaturalCuts, planResult.MergedShortShots, planResult.SyntheticSplits))
 	}
 	retainedNaturalCuts := 0
 	for _, kind := range planResult.BoundaryKinds {
@@ -184,7 +178,6 @@ func processChunkedWithEncoder(
 			retainedNaturalCuts++
 		}
 	}
-	rep.Verbose(fmt.Sprintf("Chunk boundaries: %d natural shot cuts, %d duration splits", retainedNaturalCuts, planResult.SyntheticSplits))
 
 	// Load planned chunk boundaries
 	phases.start("Chunk planning")
@@ -192,21 +185,30 @@ func processChunkedWithEncoder(
 	if err != nil {
 		return CropResult{}, fmt.Errorf("failed to load chunk boundaries: %w", err)
 	}
-	rep.Verbose(fmt.Sprintf("Created %d content-aware chunks", len(segments)))
 
 	// Convert planned segments to chunks
 	chunks := chunk.Chunkify(segments)
 	rep.StageProgress(reporter.StageProgress{Stage: "Chunking", Message: fmt.Sprintf("Split video into %d chunks", len(chunks))})
 
-	// Calculate average chunk duration for verbose output
 	totalFrames := 0
 	for _, c := range chunks {
 		totalFrames += int(c.End - c.Start)
 	}
 	avgChunkFrames := float64(totalFrames) / float64(len(chunks))
-	avgChunkDuration := avgChunkFrames / fps
-	rep.Verbose(fmt.Sprintf("Average chunk duration: %.1fs (%d frames)", avgChunkDuration, int(avgChunkFrames)))
-	rep.Verbose(chunkDistributionSummary(chunks, fps))
+	log.Info("chunk plan decided",
+		"decision_type", "chunk_plan",
+		"decision_result", fmt.Sprintf("%d chunks", len(chunks)),
+		"decision_reason", fmt.Sprintf("shot-aware split with %.0fs max chunk duration", chunkDuration),
+		"chunks", len(chunks),
+		"natural_cuts", planResult.NaturalCuts,
+		"retained_natural_cuts", retainedNaturalCuts,
+		"merged_short_shots", planResult.MergedShortShots,
+		"merged_weak_cuts", planResult.MergedWeakCuts,
+		"duration_splits", planResult.SyntheticSplits,
+		"avg_chunk_seconds", math.Round(avgChunkFrames/fps*10)/10,
+		"avg_chunk_frames", int(avgChunkFrames),
+		"distribution", chunkDistributionSummary(chunks, fps),
+	)
 	phases.end()
 
 	// Setup encode config
@@ -228,17 +230,7 @@ func processChunkedWithEncoder(
 		Denoise:               cfg.Denoise,
 	}
 	var grainStats *perf.GrainTreatmentStats
-	if cfg.Verbose {
-		encCfg.StatusCallback = func(message string) {
-			rep.Verbose(message)
-		}
-	}
-	// Worker reductions and the critical cancel are degraded-behavior events
-	// (they change what the encode does), so they reach the reporter
-	// unconditionally rather than only in verbose mode.
-	encCfg.WarningCallback = func(message string) {
-		rep.Warning(message)
-	}
+	encCfg.Logger = log
 
 	// Grain treatment. The gate needs the chunk plan and the crop rectangle,
 	// and its verdict must be settled before the first chunk is encoded, so it
@@ -253,7 +245,7 @@ func processChunkedWithEncoder(
 		CropRect:      cropRect,
 		BandTopJOD:    float64(cfg.TargetQualityTarget + cfg.TargetQualityTolerance),
 		BandCenterJOD: float64(cfg.TargetQualityTarget),
-		Verbose:       rep.Verbose,
+		Logger:        log,
 	}
 
 	phases.start("Resume setup")
@@ -278,7 +270,11 @@ func processChunkedWithEncoder(
 		return CropResult{}, err
 	}
 	if resumeReset {
-		rep.Warning("Input or encode settings changed since the interrupted encode; discarded stale resume state and starting over")
+		log.Warn("discarded stale resume state",
+			"event_type", "resume_state_discarded",
+			"error_hint", "input or encode settings changed since the interrupted encode",
+			"impact", "encode restarts from the first chunk",
+		)
 	}
 	phases.end()
 
@@ -318,8 +314,28 @@ func processChunkedWithEncoder(
 		grainStats = treatment.Stats
 		perfc.SetGrainTreatment(grainStats)
 		perfc.UpdateMeta(func(m *perf.Meta) { m.Denoise = encCfg.Denoise })
-		for _, line := range encode.GrainTreatmentSummary(grainStats) {
+		summary := encode.GrainTreatmentSummary(grainStats)
+		for _, line := range summary {
 			rep.StageProgress(reporter.StageProgress{Stage: "Encoding", State: "done", Message: line})
+		}
+		if gs := grainStats; gs != nil {
+			result := "untreated"
+			if gs.Treated {
+				result = "treated"
+			}
+			log.Info("grain treatment decided",
+				"decision_type", "grain_treatment",
+				"decision_result", result,
+				"decision_reason", strings.Join(summary, " "),
+				"mode", gs.Mode,
+				"gate_stage", gs.GateStage,
+				"median_bpp", gs.MedianBPP,
+				"treat_above_bpp", gs.LightBPPCutoff,
+				"stage2_median_bpp", gs.Stage2MedianBPP,
+				"stage2_error", gs.Stage2Error,
+				"denoise", gs.Denoise,
+				"reused", gs.Reused,
+			)
 		}
 	}
 
@@ -439,7 +455,7 @@ func processChunkedWithEncoder(
 	encodeCtx, cancelEncode := context.WithCancel(ctx)
 	defer cancelEncode()
 
-	audio = startAudioJob(encodeCtx, cancelEncode, inputPath, workDir, audioStreams, videoProps.DurationSecs, rep, perfc)
+	audio = startAudioJob(encodeCtx, cancelEncode, inputPath, workDir, audioStreams, videoProps.DurationSecs, rep, log, perfc)
 	// Every return path must stop audio and join its goroutine; canceling
 	// first keeps the join prompt on error returns.
 	defer func() {
@@ -453,13 +469,25 @@ func processChunkedWithEncoder(
 	if cfg.QualityMode == config.QualityModeTarget {
 		metric := probeMetricFor(cfg, vidInf)
 		tqTarget, tqTolerance := cfg.TargetQualityTarget, cfg.TargetQualityTolerance
-		if metric == quality.MetricCVVDP {
-			rep.Verbose(fmt.Sprintf("Target-quality CVVDP: target %.2f +/- %.2f JOD, CRF range %s, initial CRF %s with adaptive priors, whole-chunk probes (every probe scores the full chunk), metric workers %d, display %s", tqTarget, tqTolerance, cfg.CRFSearchRange, quality.FormatCRF(qualitySetting), cfg.MetricWorkers, displayPath))
-			rep.Verbose(cvvdpDisplaySummary(cfg, vidInf))
-		} else {
+		reason := "HDR or above-1080p source scored directly with CVVDP"
+		if cfg.ProbeMetric == "cvvdp" || cfg.TargetQuality != config.DefaultTargetQuality || cfg.CVVDPDisplay != "" {
+			reason = "CVVDP forced by probe metric, custom target, or display override"
+		} else if metric != quality.MetricCVVDP {
 			tqTarget, tqTolerance = quality.SSIMU2Target, quality.SSIMU2Tolerance
-			rep.Verbose(fmt.Sprintf("Target-quality SSIMULACRA2 (SDR <=1080p): target %.1f +/- %.1f after per-title CVVDP warmup calibration, CRF range %s, initial CRF %s with adaptive priors, whole-chunk probes (every probe scores the full chunk), metric workers %d", tqTarget, tqTolerance, cfg.CRFSearchRange, quality.FormatCRF(qualitySetting), cfg.MetricWorkers))
+			reason = "SDR <=1080p source scored with SSIMULACRA2 after per-title CVVDP warmup calibration"
 		}
+		log.Info("target-quality metric selected",
+			"decision_type", "target_quality_metric",
+			"decision_result", string(metric),
+			"decision_reason", reason,
+			"target", tqTarget,
+			"tolerance", tqTolerance,
+			"crf_range", cfg.CRFSearchRange,
+			"initial_crf", quality.FormatCRF(qualitySetting),
+			"metric_workers", cfg.MetricWorkers,
+			"display", cvvdpDisplaySummary(cfg, vidInf),
+			"display_path", displayPath,
+		)
 		var tqStats *perf.TargetQualityStats
 		_, tqStats, encodeErr = encodeTarget(
 			encodeCtx,
@@ -481,9 +509,7 @@ func processChunkedWithEncoder(
 				DisplayPath:    displayPath,
 				InitialCRF:     qualitySetting,
 				GrainTreatment: grainStats,
-				Verbose: func(message string) {
-					rep.Verbose(message)
-				},
+				Logger:         log,
 			},
 		)
 		// Recorded even on error so a failed run's perf.json carries the
@@ -563,7 +589,7 @@ type audioJob struct {
 // goroutine only joins after merge), massively over-reporting audio cost in
 // perf.json. An extraction error cancels the shared encode context so the
 // video encode stops promptly.
-func startAudioJob(ctx context.Context, cancel context.CancelFunc, inputPath, workDir string, streams []media.AudioStreamInfo, videoDurationSecs float64, rep reporter.Reporter, perfc *perf.Collector) *audioJob {
+func startAudioJob(ctx context.Context, cancel context.CancelFunc, inputPath, workDir string, streams []media.AudioStreamInfo, videoDurationSecs float64, rep reporter.Reporter, log *slog.Logger, perfc *perf.Collector) *audioJob {
 	job := &audioJob{done: make(chan struct{}), finishStep: func() {}, reporter: rep}
 	if len(streams) == 0 {
 		job.reported = true
@@ -571,7 +597,7 @@ func startAudioJob(ctx context.Context, cancel context.CancelFunc, inputPath, wo
 		return job
 	}
 	rep.StageProgress(reporter.StageProgress{Lane: "audio", Stage: "audio", Message: fmt.Sprintf("Extracting %d audio tracks", len(streams))})
-	job.finishStep = startVerboseStep(rep, "Audio extraction")
+	job.finishStep = startStep(log, "Audio extraction")
 	phaseStart := time.Now()
 	go func() {
 		defer close(job.done)
@@ -584,7 +610,7 @@ func startAudioJob(ctx context.Context, cancel context.CancelFunc, inputPath, wo
 	return job
 }
 
-// join waits for extraction to finish and closes its verbose step. Safe to
+// join waits for extraction to finish and closes its timing step. Safe to
 // call repeatedly, but only from the orchestration goroutine.
 func (a *audioJob) join() ([]nativeaudio.EncodedStream, error) {
 	if !a.joined {

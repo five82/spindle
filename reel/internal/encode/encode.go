@@ -4,6 +4,7 @@ package encode
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"sort"
 	"sync"
@@ -38,12 +39,8 @@ type EncodeConfig struct {
 	// rather than the original. Empty disables it.
 	Denoise            string
 	LevelOfParallelism uint32 // SVT-AV1 level_of_parallelism (1-6); 0 lets Reel choose
-	// StatusCallback receives verbose-only limiter status (ramp-up messages).
-	StatusCallback func(message string)
-	// WarningCallback receives degraded-behavior limiter status (worker
-	// reductions and the critical cancel) unconditionally, independent of
-	// verbose mode, since these describe output-affecting decisions.
-	WarningCallback func(message string)
+	// Logger receives adaptive worker decisions and memory-pressure warnings.
+	Logger *slog.Logger
 
 	// Advanced SVT-AV1 parameters
 	ACBias                float32
@@ -128,7 +125,7 @@ func EncodeAll(
 	maxWorkers := MaxAdaptiveWorkers()
 	initialWorkers := initialAdaptiveWorkers(maxWorkers, width, height, availableMemoryBytes())
 	rampCeiling := resolutionRampCeiling(maxWorkers, width, height)
-	limiter := newAdaptiveLimiter(maxWorkers, initialWorkers, rampCeiling, totalFrames, cfg.StatusCallback, cfg.WarningCallback)
+	limiter := newAdaptiveLimiter(maxWorkers, initialWorkers, rampCeiling, totalFrames, cfg.Logger)
 	cfg.LevelOfParallelism = resolveLevelOfParallelism(cfg.LevelOfParallelism, rampCeiling)
 
 	ctx, cancel := context.WithCancel(ctx)

@@ -308,11 +308,6 @@ func (r *TerminalReporter) EncodingComplete(summary EncodingOutcome) {
 	r.printLabel("Saved to:", r.green.Sprint(summary.OutputPath))
 }
 
-func (r *TerminalReporter) Warning(message string) {
-	fmt.Println()
-	_, _ = r.yellow.Printf("WARN: %s\n", message)
-}
-
 func (r *TerminalReporter) Error(err ReporterError) {
 	_, _ = fmt.Fprintln(os.Stderr)
 	_, _ = r.red.Fprintf(os.Stderr, "ERROR %s\n", err.Title)
@@ -363,11 +358,4 @@ func (r *TerminalReporter) BatchComplete(summary BatchSummary) {
 	for _, result := range summary.FileResults {
 		fmt.Printf("  - %s (%.1f%% reduction)\n", result.Filename, result.Reduction)
 	}
-}
-
-func (r *TerminalReporter) Verbose(message string) {
-	if !r.verbose {
-		return
-	}
-	fmt.Printf("  %s %s\n", r.dim.Sprint("›"), r.dim.Sprint(message))
 }

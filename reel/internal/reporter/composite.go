@@ -64,12 +64,6 @@ func (c *CompositeReporter) EncodingComplete(summary EncodingOutcome) {
 	}
 }
 
-func (c *CompositeReporter) Warning(message string) {
-	for _, r := range c.reporters {
-		r.Warning(message)
-	}
-}
-
 func (c *CompositeReporter) Error(err ReporterError) {
 	for _, r := range c.reporters {
 		r.Error(err)
@@ -97,11 +91,5 @@ func (c *CompositeReporter) FileProgress(context FileProgressContext) {
 func (c *CompositeReporter) BatchComplete(summary BatchSummary) {
 	for _, r := range c.reporters {
 		r.BatchComplete(summary)
-	}
-}
-
-func (c *CompositeReporter) Verbose(message string) {
-	for _, r := range c.reporters {
-		r.Verbose(message)
 	}
 }

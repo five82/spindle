@@ -12,6 +12,7 @@ import (
 
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/ripspec"
+	"github.com/five82/spindle/internal/textutil"
 )
 
 // commentaryLabel formats a stream title for a commentary track.
@@ -72,7 +73,7 @@ func applyCommentaryDisposition(
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		_ = os.Remove(tmpPath)
-		return fmt.Errorf("ffmpeg disposition: %w: %s", err, output)
+		return fmt.Errorf("ffmpeg disposition: %w: %s", err, textutil.Excerpt(output))
 	}
 
 	if err := os.Rename(tmpPath, path); err != nil {

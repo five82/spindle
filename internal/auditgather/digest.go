@@ -148,6 +148,9 @@ func writeLogEntries(b *strings.Builder, label string, entries []LogEntry) {
 	}
 	for _, e := range entries {
 		line := fmt.Sprintf("- %s", shortTS(e.TS))
+		if e.Stage != "" {
+			line += " (" + e.Stage + ")"
+		}
 		if e.EventType != "" {
 			line += " [" + e.EventType + "]"
 		}
@@ -174,6 +177,9 @@ func writeDigestStageTimings(b *strings.Builder, r *Report) {
 		}
 		if st.Starts > 1 || st.Completions > 1 || st.Starts != st.Completions {
 			line += fmt.Sprintf("  (starts=%d completions=%d)", st.Starts, st.Completions)
+		}
+		if st.Interruptions > 0 {
+			line += fmt.Sprintf("  INTERRUPTED x%d", st.Interruptions)
 		}
 		fmt.Fprintln(b, line)
 	}

@@ -147,18 +147,18 @@ func TestRetryClassificationAndCancellation(t *testing.T) {
 	}
 	c.rateDelay = time.Hour
 	c.lastCall = time.Now().Add(-2 * time.Hour)
-	c.rateLimit()
+	c.rateLimit(context.Background())
 	if time.Since(c.lastCall) > time.Second {
 		t.Fatal("last call not updated")
 	}
 	c.rateDelay = 50 * time.Millisecond
 	c.lastCall = time.Now()
-	c.rateLimit() // delay active: future requests may not overtake the minimum interval
+	c.rateLimit(context.Background()) // delay active: future requests may not overtake the minimum interval
 	if c.lastCall.IsZero() {
 		t.Fatal("rate limiter lost last call")
 	}
 	fresh := New(Params{APIKey: "key"}, nil)
-	fresh.rateLimit() // first call never sleeps
+	fresh.rateLimit(context.Background()) // first call never sleeps
 	if fresh.lastCall.IsZero() {
 		t.Fatal("first request not recorded")
 	}

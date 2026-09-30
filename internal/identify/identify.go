@@ -189,6 +189,7 @@ func (h *Handler) scanDisc(ctx context.Context, item *queue.Item, logger *slog.L
 			logger.Info("bd_info results",
 				"decision_type", logs.DecisionBDInfoScan,
 				"decision_result", "completed",
+				"decision_reason", "bd_info returned disc metadata",
 				"disc_id", result.BDInfo.DiscID,
 				"studio", strings.TrimSpace(result.BDInfo.Studio),
 				"year", result.BDInfo.Year,
@@ -256,7 +257,7 @@ func (h *Handler) refreshKeyDB(ctx context.Context, bdInfo *BDInfoResult, logger
 	h.keydbCat = cat
 	if cat != current {
 		logger.Info("KeyDB catalog loaded",
-			"decision_type", "keydb_refresh",
+			"decision_type", logs.DecisionKeyDBRefresh,
 			"decision_result", "loaded",
 			"decision_reason", "point-of-use freshness check",
 			"entries", cat.Size(),
@@ -312,6 +313,9 @@ func (h *Handler) applyCachedIdentity(ctx context.Context, item *queue.Item, res
 	)
 	if result.MediaHint == "tv" && entry.MediaType == "movie" {
 		logger.Warn("disc ID cache invalidated: TV hint contradicts cached movie type",
+			"event_type", "disc_id_cache_contradiction",
+			"error_hint", "cached entry says movie but the disc title hints TV",
+			"impact", "cached identification discarded; disc identified fresh",
 			"decision_type", logs.DecisionDiscIDCache,
 			"decision_result", "invalidated",
 			"decision_reason", fmt.Sprintf("raw_title=%q has TV hint but cache says movie", result.RawTitle),
@@ -822,7 +826,7 @@ func (h *Handler) createEpisodePlaceholders(ctx context.Context, logger *slog.Lo
 				"segment_count", decision.Title.SegmentCount,
 			)
 		case decision.Reason == "below_min_title_length":
-			logger.Debug("tv title excluded",
+			logger.Info("tv title excluded",
 				"decision_type", logs.DecisionTitleSelection,
 				"decision_result", "excluded",
 				"decision_reason", decision.Reason,

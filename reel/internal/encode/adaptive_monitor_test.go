@@ -1,8 +1,10 @@
 package encode
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -10,8 +12,9 @@ import (
 )
 
 func TestAdaptiveMonitorSamplePreservesSwapAndPressureDecisions(t *testing.T) {
-	var warnings []string
-	limiter := newAdaptiveLimiter(8, 6, 8, 0, nil, func(s string) { warnings = append(warnings, s) })
+	var logs bytes.Buffer
+	limiter := newAdaptiveLimiter(8, 6, 8, 0, slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	warnings := func() []string { return strings.Split(strings.TrimSpace(logs.String()), "\n") }
 	stats := util.MemoryStats{MemTotal: 1000, MemAvailable: 900, SwapTotal: 10 << 30, SwapFree: (10 << 30) - 100}
 	canceled := false
 	var fatalErr error
@@ -32,18 +35,18 @@ func TestAdaptiveMonitorSamplePreservesSwapAndPressureDecisions(t *testing.T) {
 	stats.SwapFree = stats.SwapTotal - 410
 	last = limiter.monitorSample(stats, 100, last, cancel, setError)
 	_, target, _ = limiter.stats()
-	if target >= 6 || len(warnings) != 1 || fatalErr != nil {
-		t.Fatalf("pressure: target %d, warnings %v, err %v", target, warnings, fatalErr)
+	if target >= 6 || len(warnings()) != 1 || !strings.Contains(logs.String(), "event_type=encode_workers_reduced") || fatalErr != nil {
+		t.Fatalf("pressure: target %d, warnings %v, err %v", target, warnings(), fatalErr)
 	}
 	stats.MemAvailable = 0
 	limiter.monitorSample(stats, 100, last, cancel, setError)
-	if !errors.Is(fatalErr, ErrMemoryPressure) || !canceled || len(warnings) != 2 || !strings.Contains(warnings[1], "canceling") {
-		t.Fatalf("critical: err %v, canceled %v, warnings %v", fatalErr, canceled, warnings)
+	if !errors.Is(fatalErr, ErrMemoryPressure) || !canceled || len(warnings()) != 2 || !strings.Contains(warnings()[1], "event_type=memory_pressure_cancel") {
+		t.Fatalf("critical: err %v, canceled %v, warnings %v", fatalErr, canceled, warnings())
 	}
 }
 
 func TestAdaptiveMonitorStopsOnAlreadyCanceledContext(t *testing.T) {
-	limiter := newAdaptiveLimiter(2, 1, 2, 0, nil, nil)
+	limiter := newAdaptiveLimiter(2, 1, 2, 0, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	limiter.monitor(ctx, cancel, func(error) { t.Fatal("error on canceled monitor") })

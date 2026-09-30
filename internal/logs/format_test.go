@@ -2,7 +2,6 @@ package logs
 
 import (
 	"log/slog"
-	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,16 +17,8 @@ func TestDurationAndCountsFormatting(t *testing.T) {
 	}
 	duration := time.Minute + 1234*time.Millisecond
 	text := FormatDuration(duration)
-	if text != "1m1.234s" || math.Abs(DurationSeconds(text)-duration.Seconds()) > 1e-9 {
-		t.Fatalf("round trip %q", text)
-	}
-	if got := DurationSeconds(float64(time.Second)); got != 1 {
-		t.Fatalf("legacy nanoseconds: %v", got)
-	}
-	for _, v := range []any{"bad", "-1s", float64(-1), nil} {
-		if got := DurationSeconds(v); got != 0 {
-			t.Fatalf("invalid duration %v: %v", v, got)
-		}
+	if parsed, err := time.ParseDuration(text); text != "1m1.234s" || err != nil || parsed != duration {
+		t.Fatalf("round trip %q: %v", text, err)
 	}
 	if got := FormatCounts(nil); got != "none" {
 		t.Fatal(got)

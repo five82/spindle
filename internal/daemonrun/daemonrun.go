@@ -99,13 +99,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		}, handlers...)
 		consoleLogging = true
 	}
-	multi := newMultiHandler(handlers...)
+	multi := slog.NewMultiHandler(handlers...)
 
 	logBuffer := httpapi.NewLogBuffer(0) // default capacity
 	if err := logBuffer.HydrateFromDir(logDir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: log buffer hydration failed: %v\n", err)
 	}
-	slog.SetDefault(slog.New(httpapi.NewLogHandler(multi, logBuffer)))
+	slog.SetDefault(slog.New(logs.NewContextHandler(httpapi.NewLogHandler(multi, logBuffer))))
 	logger := slog.Default()
 
 	logger.Info("daemon log file opened", "path", logFilePath, "console_logging", consoleLogging)
@@ -272,13 +272,16 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("another daemon instance is running (lock: %s)", lockPath)
 	}
 
-	// Startup recovery: reset any stale running tasks.
-	if err := store.ResetRunningTasks(); err != nil {
+	// Startup recovery: a task still marked running was cut off by a crash
+	// or kill of the previous daemon.
+	if interrupted, err := store.ResetRunningTasks(); err != nil {
 		logger.Error("startup recovery failed",
 			"event_type", "startup_recovery_failed",
 			"error_hint", "failed to reset running tasks on startup",
 			"error", err,
 		)
+	} else {
+		logInterruptedTasks(logger, interrupted, "previous daemon exited without finishing the run (crash or kill)")
 	}
 
 	// Summarize what the scheduler is resuming so a restart's starting point
@@ -393,13 +396,16 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Wait for workflow to finish.
 	wg.Wait()
 
-	// Shutdown recovery: clear running tasks.
-	if err := store.ResetRunningTasks(); err != nil {
+	// Shutdown recovery: drained workers already recorded their outcome, so
+	// anything still running here did not stop cleanly.
+	if interrupted, err := store.ResetRunningTasks(); err != nil {
 		logger.Error("shutdown recovery failed",
 			"event_type", "shutdown_recovery_failed",
 			"error_hint", "failed to reset running tasks on shutdown",
 			"error", err,
 		)
+	} else {
+		logInterruptedTasks(logger, interrupted, "task still running after workers stopped")
 	}
 
 	// Shutdown HTTP API.
@@ -452,6 +458,26 @@ func CheckDependencies() []httpapi.DependencyResponse {
 		}
 	}
 	return depResponses
+}
+
+// logInterruptedTasks records each task ResetRunningTasks reverted: the run
+// had no terminal outcome, so it will restart from pending.
+func logInterruptedTasks(logger *slog.Logger, tasks []*queue.Task, reason string) {
+	for _, t := range tasks {
+		logger.Info("interrupted stage reset to pending",
+			"decision_type", logs.DecisionStageExecution,
+			"decision_result", "interrupted",
+			"decision_reason", reason,
+			"event_type", "stage_interrupted",
+			"item_id", t.ItemID,
+			"stage", t.Type,
+			"task_id", t.ID,
+			"attempt", t.Attempts,
+			"episode_key", t.ActiveAssetKey,
+			"last_progress", t.ProgressMessage,
+			"last_percent", t.ProgressPercent,
+		)
+	}
 }
 
 // cleanOldLogs removes timestamped daemon log files older than retentionDays.

@@ -466,6 +466,7 @@ func (h *Handler) discoverNewRippedFile(logger *slog.Logger, rippedDir string, t
 			"decision_reason", fmt.Sprintf("title_id=%d", titleID),
 			"event_type", "rip_output_missing",
 			"error_hint", "makemkv rip returned success but no new mkv appeared in staging",
+			"error", "no new MKV file",
 			"title_id", titleID,
 			"ripped_dir", rippedDir,
 		)
@@ -745,8 +746,7 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 		for _, t := range env.Titles {
 			if needed[t.ID] {
 				logger.Debug("rip candidate evaluated",
-					"decision_type", logs.DecisionTrackSelect,
-					"decision_result", "selected",
+					"selected", true,
 					"title_id", t.ID,
 					"duration_s", t.Duration,
 					"episode_referenced", true,
@@ -754,8 +754,7 @@ func (h *Handler) selectRipTargets(logger *slog.Logger, env *ripspec.Envelope) (
 				targets = append(targets, t)
 			} else {
 				logger.Debug("rip candidate evaluated",
-					"decision_type", logs.DecisionTrackSelect,
-					"decision_result", "skipped",
+					"selected", false,
 					"title_id", t.ID,
 					"duration_s", t.Duration,
 					"episode_referenced", false,

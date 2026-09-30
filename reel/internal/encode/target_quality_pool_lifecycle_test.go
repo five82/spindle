@@ -42,7 +42,7 @@ func TestResumedSSIMU2RunDoesNotOpenWarmupPool(t *testing.T) {
 		created++
 		return &closeTrackingScorer{closed: &closed}, nil
 	}}
-	r := newTargetQualityRun(tq, &EncodeConfig{}, "unused", work, testVideoInfo(), nil, 1920, 1080, newAdaptiveLimiter(1, 1, 1, 0, nil, nil), 1, nil, nil)
+	r := newTargetQualityRun(tq, &EncodeConfig{}, "unused", work, testVideoInfo(), nil, 1920, 1080, newAdaptiveLimiter(1, 1, 1, 0, nil), 1, nil, nil)
 	if err := r.openScorerPools(); err != nil {
 		t.Fatal(err)
 	}

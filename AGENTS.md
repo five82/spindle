@@ -89,6 +89,8 @@ exported surface, and what was removed or simplified.
   `decision_type`, `decision_result`, `decision_reason`. WARN includes
   `event_type`, `error_hint`, `impact`; ERROR includes `event_type`,
   `error_hint`, `error`. DEBUG is raw data and metrics, never decisions.
+  `TestLogCallsFollowFieldContract` enforces these fields and the
+  `logs.Decision*` vocabulary on every literal-keyed slog call.
 - Progress format: `"Phase N/M - Action (context)"`.
 
 ## Hard invariants
@@ -118,19 +120,19 @@ workstation must pass race detection before deployment.
 ## Metrics
 
 `<state_dir>/metrics.jsonl` is the durable performance record: one
-self-describing JSON object appended per completed item (the queue DB is
-transient and daemon logs expire; this file accumulates). Use it to answer
-performance questions — stage durations and resource-wait seconds, rip
-throughput with `rip.drive_vendor`/`rip.drive_model` identifying the physical
-drive, and per-episode encode stats (`encodes[]`: `resolution_class`
-2160p/1080p/sd, `speed` as video-seconds per wall-second, `phase_seconds`,
-Reel's `target_quality` CRF-search aggregate including the
-`ssimu2_calibration_offset` grain/complexity proxy, and `grain_treatment` — the
-grain gate's verdict (`treated`, `median_bpp` against its treatment cutoff) with
-source-matched grain estimation details and the
-`denoise_ceiling_jod_mean`/`_min` that caps a treated title's reported scores).
-Records are append-only; fields may be added over time, so query by field name,
-not position. Example:
+self-describing JSON object appended per finished item, `outcome` `completed` or
+`failed` (with `failed_stage` and `error`); the queue DB is transient and daemon
+logs expire, so this file accumulates. Use it to answer performance questions —
+stage durations and resource-wait seconds, rip throughput with
+`rip.drive_vendor`/`rip.drive_model` identifying the physical drive, and
+per-episode encode stats (`encodes[]`: `resolution_class` 2160p/1080p/sd,
+`speed` as video-seconds per wall-second, `phase_seconds`, Reel's
+`target_quality` CRF-search aggregate including the `ssimu2_calibration_offset`
+grain/complexity proxy, and `grain_treatment` — the grain gate's verdict
+(`treated`, `median_bpp` against its treatment cutoff) with source-matched grain
+estimation details and the `denoise_ceiling_jod_mean`/`_min` that caps a treated
+title's reported scores). Records are append-only; fields may be added over
+time, so query by field name, not position. Example:
 
 ```sh
 jq -s '[.[] | .encodes[]] | group_by(.resolution_class)

@@ -86,7 +86,10 @@ func (m *Manager) waitForDisk(ctx context.Context, task *queue.Task, item *queue
 				m.pipeline.logger.Warn("disk space recovery persistence failed", "event_type", "progress_persist_error", "error_hint", saveErr.Error(), "impact", "wait display may be stale")
 				return true
 			}
-			_ = m.store.RecordEvent(queue.Event{ItemID: item.ID, TaskID: task.ID, Type: "disk_space_available", Stage: task.Type})
+			if err := m.store.RecordEvent(queue.Event{ItemID: item.ID, TaskID: task.ID, Type: "disk_space_available", Stage: task.Type}); err != nil {
+				m.pipeline.logger.Warn("item journal write failed", "event_type", "journal_write_failed", "error_hint", err.Error(),
+					"impact", "disk-space transition missing from item history")
+			}
 			m.pipeline.logger.Info("disk space available", "item_id", item.ID, "stage", task.Type,
 				"decision_type", logs.DecisionStageExecution, "decision_result", "unblocked",
 				"decision_reason", "staging volume has enough available space", "wait_started_at", since)
@@ -111,8 +114,11 @@ func (m *Manager) waitForDisk(ctx context.Context, task *queue.Task, item *queue
 		}
 	}
 	if first {
-		_ = m.store.RecordEvent(queue.Event{ItemID: item.ID, TaskID: task.ID, Type: "disk_space_wait", Stage: task.Type, Message: message})
 		logger := m.pipeline.logger.With("item_id", item.ID, "stage", task.Type)
+		if err := m.store.RecordEvent(queue.Event{ItemID: item.ID, TaskID: task.ID, Type: "disk_space_wait", Stage: task.Type, Message: message}); err != nil {
+			logger.Warn("item journal write failed", "event_type", "journal_write_failed", "error_hint", err.Error(),
+				"impact", "disk-space transition missing from item history")
+		}
 		logger.Info("task waiting for disk space", "decision_type", logs.DecisionStageExecution,
 			"decision_result", "blocked", "decision_reason", message,
 			"required_bytes", required, "free_bytes", free)

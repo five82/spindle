@@ -1,6 +1,8 @@
 package reporter
 
-// Reporter defines the interface for progress reporting.
+// Reporter defines the interface for progress reporting. Diagnostics,
+// decisions, and warnings are not reporter events: they go to the
+// configured *slog.Logger (config.Config.Logger).
 type Reporter interface {
 	Hardware(summary HardwareSummary)
 	Initialization(summary InitializationSummary)
@@ -11,13 +13,11 @@ type Reporter interface {
 	EncodingProgress(progress ProgressSnapshot)
 	ValidationComplete(summary ValidationSummary)
 	EncodingComplete(summary EncodingOutcome)
-	Warning(message string)
 	Error(err ReporterError)
 	OperationComplete(message string)
 	BatchStarted(info BatchStartInfo)
 	FileProgress(context FileProgressContext)
 	BatchComplete(summary BatchSummary)
-	Verbose(message string)
 }
 
 // NullReporter is a no-op reporter that discards all updates.
@@ -32,10 +32,8 @@ func (NullReporter) EncodingStarted(uint64)               {}
 func (NullReporter) EncodingProgress(ProgressSnapshot)    {}
 func (NullReporter) ValidationComplete(ValidationSummary) {}
 func (NullReporter) EncodingComplete(EncodingOutcome)     {}
-func (NullReporter) Warning(string)                       {}
 func (NullReporter) Error(ReporterError)                  {}
 func (NullReporter) OperationComplete(string)             {}
 func (NullReporter) BatchStarted(BatchStartInfo)          {}
 func (NullReporter) FileProgress(FileProgressContext)     {}
 func (NullReporter) BatchComplete(BatchSummary)           {}
-func (NullReporter) Verbose(string)                       {}

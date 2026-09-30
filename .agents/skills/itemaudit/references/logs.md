@@ -53,17 +53,18 @@ daemon log file has rotated away or is missing.
      whose rip completes first.
    - Disk admission waits: `decision_type=stage_execution` with
      `decision_result=blocked` / `unblocked` and `disk_space_wait` /
-     `disk_space_available` transitions mean the item paused before a write,
-     not that ripping or encoding failed. Check the persisted task activity
-     (`operation=disk_space`) for required/available GiB, the staging filesystem,
-     and whether the wait is still active. A blocked identification needs 150 GiB;
-     a fresh rip needs max(150 GiB, 1.1x selected title bytes + 100 GiB);
-     encoding needs 100 GiB before dispatch and before each asset. A cache hit
-     uses its cached size instead of selected title estimates. Distinguish an
-     expected low-space wait (operator action) from an actual ENOSPC after the
-     check (check concurrent writes and per-encode scratch usage). The rip
-     cache cap is retention, not a free-space reservation. One ntfy warning
-     is sent on entry into each wait; do not count polling as repeated failures.
+     `disk_space_available` transitions mean the item paused before a write, not
+     that ripping or encoding failed. Check the persisted task activity
+     (`operation=disk_space`) for required/available GiB, the staging
+     filesystem, and whether the wait is still active. A blocked identification
+     needs 150 GiB; a fresh rip needs max(150 GiB, 1.1x selected title bytes +
+     100 GiB); encoding needs 100 GiB before dispatch and before each asset. A
+     cache hit uses its cached size instead of selected title estimates.
+     Distinguish an expected low-space wait (operator action) from an actual
+     ENOSPC after the check (check concurrent writes and per-encode scratch
+     usage). The rip cache cap is retention, not a free-space reservation. One
+     ntfy warning is sent on entry into each wait; do not count polling as
+     repeated failures.
    - Warnings/errors and decision entries include `extras` maps with
      non-standard log fields for diagnostic context, including the underlying
      `extras.error` when logged. Jev commentary decisions carry
@@ -111,12 +112,12 @@ daemon log file has rotated away or is missing.
      `kept_encoded_state=true` when completed rips are recorded, and
      `decision_type=title_rip` with `decision_result=skipped` for titles
      preserved across the restart; `event_type=makemkv_rip_cancelled` when a
-     force-stop killed a rip. A fresh queue item for the same fingerprint
-     with no recorded completed rips discards inherited encoded state
-     (`kept_encoded_state=false`); it cannot resume the previous item's
-     encode. Timing caveat: a resumed run's native
-     `durationSeconds`/task timing covers only that run, while `total_wall_time`
-     includes time the daemon was stopped — do not flag that mismatch as a hang.
+     force-stop killed a rip. A fresh queue item for the same fingerprint with
+     no recorded completed rips discards inherited encoded state
+     (`kept_encoded_state=false`); it cannot resume the previous item's encode.
+     Timing caveat: a resumed run's native `durationSeconds`/task timing covers
+     only that run, while `total_wall_time` includes time the daemon was stopped
+     — do not flag that mismatch as a hang.
    - A drain during commentary transcription can log
      `commentary_detection_failed` and temporarily persist conservative
      commentary labels even when the handler returns success. The executor now
@@ -130,20 +131,30 @@ daemon log file has rotated away or is missing.
    - What IS a finding around a stop/restart: an item marked failed by the
      interruption itself (e.g. `error_message` containing `signal: killed` or
      `context canceled` — cancellation must revert tasks to pending, never fail
-     the item), or reel's "discarded stale resume state" warning when neither
-     the source was re-ripped nor reel/encode settings changed (after a reel
-     upgrade or a rip re-run it is the designed auto-reset, costing a
-     from-scratch encode but producing correct output). When this warning
-     appears on a fresh item for the same fingerprint, inspect earlier daemon
-     logs for a previous queue run and disk/write failures; the current item's
-     audit logs intentionally exclude earlier items. With the fresh-item
-     staging reset, inherited resume state should no longer cause this warning.
+     the item), a `stage_interrupted` transition (the daemon died under the run:
+     crash or kill, never a drain; the pre-flagged `stage_interrupted` anomaly
+     names the stage, the transition keeps its last progress, and
+     `daemon-console.log.prev` in the state directory holds any panic), or
+     Reel's `event_type=resume_state_discarded` warning when neither the source
+     was re-ripped nor reel/encode settings changed (after a reel upgrade or a
+     rip re-run it is the designed auto-reset, costing a from-scratch encode but
+     producing correct output). When this warning appears on a fresh item for
+     the same fingerprint, inspect earlier daemon logs for a previous queue run
+     and disk/write failures; the current item's audit logs intentionally
+     exclude earlier items. With the fresh-item staging reset, inherited resume
+     state should no longer cause this warning.
    - Level layout: the stage executor records `stage_start` and exactly one
      terminal outcome per run in the queue journal, NOT at DEBUG in daemon logs.
      `stage_complete` has numeric `durationSeconds`; failed, cancelled, stopped,
-     or degraded runs have their own terminal type. The workflow still writes
-     INFO "stage started/completed" decision logs, with a human-readable
-     `stage_duration`; "item stage derived" remains DEBUG.
+     degraded, or interrupted runs have their own terminal type. The workflow
+     still writes INFO "stage started/completed" decision logs, with a
+     human-readable `stage_duration`; "item stage derived" is raw DEBUG. Every
+     line logged in a stage run carries `stage`, so digest warning/error rows
+     show it in parentheses.
+   - Failed items get a durable record too: `metrics.jsonl` in the state
+     directory appends `outcome=failed` with `failed_stage`, `error`, and stage
+     timings when an item fails, alongside the `outcome=completed` records, so a
+     failure stays findable after logs expire and the queue is cleared.
    - Transcription is BATCHED: expect one `transcription_whisperx[_complete]`
      pair per batch (with a `batch_files` extra), not one per episode;
      `transcription_extract` still fires per file. A missing per-episode
@@ -165,11 +176,10 @@ daemon log file has rotated away or is missing.
      and ripped assets. A contiguous resolved sequence does not prove the first
      or last episode is present. If a disc listing includes E1 but a selected
      title remains unresolved, trace the title selection, trusted show/season
-     identity, catalog/reference coverage and title trust, transcript asset status,
-     and Jev decision
-     before accepting a missing-E1 conclusion. An unresolved title is not a
-     probable extra; high episode probability alone does not prove complete file
-     coverage.
+     identity, catalog/reference coverage and title trust, transcript asset
+     status, and Jev decision before accepting a missing-E1 conclusion. An
+     unresolved title is not a probable extra; high episode probability alone
+     does not prove complete file coverage.
    - Title-level TV deduplication only runs on Blu-ray segment maps: DVD maps
      are title-local and TitleHash is metadata-only, so identification refuses
      to dedup non-Blu-ray titles at all. A `duplicate_detection` decision
@@ -219,7 +229,8 @@ daemon log file has rotated away or is missing.
    - TV title exclusions carry their evidence:
      `outlier_bar_seconds`/`weighted_median_seconds` on `gross_runtime_outlier`,
      `expected_runtimes_seconds` on
-     `expected_runtime_mismatch`/`over_expected_episode_count` — compare the
+     `expected_runtime_mismatch`/`over_expected_episode_count`, and
+     `min_title_length` on `below_min_title_length` (all INFO) — compare the
      excluded title's `duration` against these to judge the exclusion
    - Asset keys are PERMANENT placeholder identifiers (stable-key model):
      `episodeid` never renames `s01_001`-style keys. Episode identity lives in

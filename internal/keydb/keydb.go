@@ -363,7 +363,7 @@ func LoadOrDownload(ctx context.Context, path, url string, timeout time.Duration
 		reason = "catalog_stale"
 	}
 	logger.Info("KeyDB catalog needs refresh",
-		"decision_type", "keydb_refresh",
+		"decision_type", logs.DecisionKeyDBRefresh,
 		"decision_result", reason,
 		"decision_reason", fmt.Sprintf("path=%s", path),
 	)

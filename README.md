@@ -126,7 +126,8 @@ selected reference can be reused for display subtitles only after passing the
 normal cleanup, synchronization, and full-program verification checks. Duplicate
 episode assignments and runtime inconsistencies also trigger review; runtime
 alone never renumbers episodes or creates an episode range. Both classifiers
-report option probabilities and decision rules instead of generated explanations.
+report option probabilities and decision rules instead of generated
+explanations.
 
 To expose the daemon API to the read-only [Flyer](flyer/README.md) monitor,
 configure a TCP listener and, for anything beyond trusted localhost access, a
@@ -159,7 +160,7 @@ spindle status
 spindle queue list
 spindle queue show <id>
 spindle queue audit <id>       # digest to stdout, full JSON report to a temp file
-spindle logs --follow --item <id>
+spindle logs --follow --item <id> [--stage encoding]
 ```
 
 `status`, `queue list`, and `queue show` also work while the daemon is stopped:
@@ -272,21 +273,22 @@ Locations come from the generated configuration:
 - `library_dir`: clean movie and TV outputs using Loom-style names
 - `review_dir`: per-item folders named for the review reason and disc
   fingerprint, holding outputs that require operator inspection
-- `state_dir`: timestamped JSON daemon logs, the transient queue database, and
-  `metrics.jsonl` — one appended record per completed item, holding stage
-  durations and resource waits, rip throughput per physical drive, and
-  per-episode encode stats; durable across queue clears and queryable with `jq`
-  or an LLM
+- `state_dir`: timestamped JSON daemon logs, the transient queue database,
+  `daemon-console.log` (a detached daemon's panic output; the previous run's is
+  kept as `daemon-console.log.prev`), and `metrics.jsonl` — one appended record
+  per completed or failed item, holding the outcome, stage durations and
+  resource waits, rip throughput per physical drive, and per-episode encode
+  stats; durable across queue clears and queryable with `jq` or an LLM
 - XDG cache: rip cache, disc-ID cache, and OpenSubtitles cache
 - XDG runtime directory, with `/tmp` fallback: daemon socket and lock
 
 The rip-cache size cap controls retention, not free working space. When staging
 space is low, an item waits instead of starting identification (150 GiB floor),
-ripping (at least 150 GiB, or 1.1x the selected title estimate plus 100 GiB),
-or an encode (100 GiB floor). Flyer marks the waiting task in amber; Spindle
-sends one ntfy warning
-when each wait begins. Free space on the staging volume to let processing resume
-automatically. A cache copy is skipped if it would consume the 100 GiB cushion.
+ripping (at least 150 GiB, or 1.1x the selected title estimate plus 100 GiB), or
+an encode (100 GiB floor). Flyer marks the waiting task in amber; Spindle sends
+one ntfy warning when each wait begins. Free space on the staging volume to let
+processing resume automatically. A cache copy is skipped if it would consume the
+100 GiB cushion.
 
 Identified library paths include Loom TMDB IDs:
 

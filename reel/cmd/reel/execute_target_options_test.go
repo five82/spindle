@@ -37,7 +37,7 @@ func TestExecuteEncodeForwardsTargetQualityOptions(t *testing.T) {
 	}
 	err := executeEncodeWithProcess(ea, func(ctx context.Context, cfg *config.Config, files []string, name string, rep reporter.Reporter) ([]processing.EncodeResult, error) {
 		called = true
-		if cfg.QualityMode != config.QualityModeTarget || cfg.MetricWorkers != 3 || cfg.TargetQualityMaxProbes != 4 || cfg.TargetQuality != "8.0-9.0" || cfg.CRFSearchRange != "20-40" || cfg.CVVDPDisplay != display || cfg.ProbeMetric != "cvvdp" || cfg.GrainTreatment != config.GrainTreatmentOff || !cfg.Verbose || cfg.LogFile == "" {
+		if cfg.QualityMode != config.QualityModeTarget || cfg.MetricWorkers != 3 || cfg.TargetQualityMaxProbes != 4 || cfg.TargetQuality != "8.0-9.0" || cfg.CRFSearchRange != "20-40" || cfg.CVVDPDisplay != display || cfg.ProbeMetric != "cvvdp" || cfg.GrainTreatment != config.GrainTreatmentOff || cfg.Logger == nil || cfg.LogFile == "" {
 			t.Errorf("target options not forwarded: %+v", cfg)
 		}
 		if len(files) != 1 || files[0] != input || name != "" || rep == nil || ctx.Err() != nil || color.NoColor {

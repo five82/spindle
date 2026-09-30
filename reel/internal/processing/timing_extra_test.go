@@ -1,38 +1,32 @@
 package processing
 
 import (
+	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/five82/spindle/reel/internal/reporter"
 )
 
-type verboseReporter struct {
-	reporter.NullReporter
-	messages []string
-}
-
-func (r *verboseReporter) Verbose(s string) { r.messages = append(r.messages, s) }
-
 func TestPhaseTrackerClosesPreviousPhaseAndEndIsIdempotent(t *testing.T) {
-	rep := &verboseReporter{}
-	tracker := newPhaseTracker(nil, rep)
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	tracker := newPhaseTracker(nil, reporter.NullReporter{}, log)
 	tracker.end()
 	tracker.start("Analyze")
 	tracker.start("Encode")
 	tracker.end()
 	tracker.end()
-	if len(rep.messages) != 4 {
-		t.Fatalf("messages: %v", rep.messages)
-	}
-	for i, want := range []string{"Analyze started at ", "Analyze stopped at ", "Encode started at ", "Encode stopped at "} {
-		if !strings.HasPrefix(rep.messages[i], want) {
-			t.Errorf("message %d: %q", i, rep.messages[i])
-		}
-	}
-	stop := startVerboseStep(rep, "Audio")
+	stop := startStep(log, "Audio")
 	stop()
-	if len(rep.messages) != 6 || !strings.Contains(rep.messages[5], "(duration ") {
-		t.Fatalf("verbose timing: %v", rep.messages)
+	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("phase logs: %v", lines)
+	}
+	for i, want := range []string{"phase=Analyze", "phase=Encode", "phase=Audio"} {
+		if !strings.Contains(lines[i], `msg="phase finished" `+want) || !strings.Contains(lines[i], "duration_seconds=") {
+			t.Errorf("line %d: %q", i, lines[i])
+		}
 	}
 }

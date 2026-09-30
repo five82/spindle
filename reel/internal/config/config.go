@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/five82/spindle/reel/internal/quality"
@@ -183,8 +184,21 @@ type Config struct {
 	ChunkDurationUHD float64 // Chunk duration for UHD content (>=3840 width)
 
 	// Debug options
-	Verbose     bool // Enable verbose output
 	KeepWorkDir bool // Keep .reel work directory after successful encodes
+
+	// Logger receives diagnostics and decisions as structured records: DEBUG
+	// raw measurements (per-probe scores, timings), INFO decisions with
+	// decision_type/decision_result/decision_reason, WARN degraded behavior
+	// with event_type/error_hint/impact. Nil discards them.
+	Logger *slog.Logger
+}
+
+// Log returns the configured logger, or one that discards everything.
+func (c *Config) Log() *slog.Logger {
+	if c.Logger == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return c.Logger
 }
 
 // NewConfig creates a new Config with default values.

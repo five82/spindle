@@ -3,6 +3,7 @@ package queue
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -323,13 +324,54 @@ func (s *Store) FinishTask(t *Task, state TaskState, errMsg string) error {
 	return nil
 }
 
-// ResetRunningTasks reverts running tasks to pending. Called on daemon
-// startup and shutdown.
-func (s *Store) ResetRunningTasks() error {
-	return retryOnBusy(func() error {
-		_, err := s.db.Exec(`UPDATE tasks SET state = ?, active_asset_key = '', activities = '[]', encoding_details_json = '' WHERE state = ?`, string(TaskPending), string(TaskRunning))
-		return err
+// ResetRunningTasks reverts running tasks to pending and returns them as they
+// were. A task still running here was cut off without a terminal outcome (a
+// crash or kill; a drain cancels its workers first), so each reset records a
+// stage_interrupted journal event carrying the task's last progress. This
+// keeps every stage_start paired with a terminal event.
+func (s *Store) ResetRunningTasks() ([]*Task, error) {
+	var reset []*Task
+	err := retryOnBusy(func() error {
+		reset = nil
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		rows, err := tx.Query(`SELECT `+taskColumns+` FROM tasks WHERE state = ? ORDER BY id`, string(TaskRunning))
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			t, err := scanTask(rows)
+			if err != nil {
+				_ = rows.Close()
+				return err
+			}
+			reset = append(reset, t)
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		for _, t := range reset {
+			var seconds float64
+			if start, err := parseTimestamp(t.StartedAt); err == nil && now.After(start) {
+				seconds = now.Sub(start).Seconds()
+			}
+			if _, err := tx.Exec(`INSERT INTO item_events
+                (item_id, time, type, stage, task_id, attempt, episode_key, message, percent, duration_seconds)
+                VALUES (?, ?, 'stage_interrupted', ?, ?, ?, ?, ?, ?, ?)`, t.ItemID, now.Format(time.RFC3339Nano),
+				string(t.Type), t.ID, t.Attempts, t.ActiveAssetKey, t.ProgressMessage, t.ProgressPercent, seconds); err != nil {
+				return fmt.Errorf("record interruption for task %d: %w", t.ID, err)
+			}
+		}
+		if _, err := tx.Exec(`UPDATE tasks SET state = ?, active_asset_key = '', activities = '[]', encoding_details_json = '' WHERE state = ?`, string(TaskPending), string(TaskRunning)); err != nil {
+			return err
+		}
+		return tx.Commit()
 	})
+	return reset, err
 }
 
 // DeleteTasks removes all task rows for the given items so the scheduler

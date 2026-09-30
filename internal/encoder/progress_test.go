@@ -1,6 +1,7 @@
 package encoder
 
 import (
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -22,7 +23,7 @@ func TestReporterRetainsScopedCountersAndConcurrentAudio(t *testing.T) {
 	})
 	wg.Go(func() {
 		for range 20 {
-			rep.Warning("Worker concurrency reduced")
+			rep.Log(wireRecord{Level: slog.LevelWarn, Msg: "Worker concurrency reduced"})
 		}
 	})
 	wg.Go(func() {

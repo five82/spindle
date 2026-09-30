@@ -1,7 +1,9 @@
 package encode
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +19,13 @@ func testVideoInfo() *video.Info {
 // newSSIMU2TestRun builds a run in SSIMU2 mode without scorer pools; the
 // stand-in pool channels only need identity, since chunkPlan routes pools but
 // never scores.
-func newSSIMU2TestRun(t *testing.T, verbose func(string)) *targetQualityRun {
+// captureLogger returns a DEBUG-level text logger and the buffer it writes.
+func captureLogger() (*slog.Logger, *bytes.Buffer) {
+	var buf bytes.Buffer
+	return slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})), &buf
+}
+
+func newSSIMU2TestRun(t *testing.T, logger *slog.Logger) *targetQualityRun {
 	t.Helper()
 	tq := TargetQualityConfig{
 		Metric:        quality.MetricSSIMU2,
@@ -28,9 +36,9 @@ func newSSIMU2TestRun(t *testing.T, verbose func(string)) *targetQualityRun {
 		MaxProbes:     4,
 		MetricWorkers: 2,
 		InitialCRF:    30,
-		Verbose:       verbose,
+		Logger:        logger,
 	}
-	limiter := newAdaptiveLimiter(4, 2, 4, 0, nil, nil)
+	limiter := newAdaptiveLimiter(4, 2, 4, 0, nil)
 	r := newTargetQualityRun(tq, &EncodeConfig{}, "input.mkv", t.TempDir(), testVideoInfo(), nil, 1920, 1080, limiter, 3, nil, nil)
 	r.metricPool = make(chan quality.ChunkScorer, tq.MetricWorkers)
 	r.warmupPool = make(chan quality.ChunkScorer, tq.MetricWorkers)
@@ -54,7 +62,7 @@ func nearlyEqual(a, b float32) bool {
 }
 
 func TestWithSlotReleasedRestoresSlot(t *testing.T) {
-	r := &targetQualityRun{limiter: newAdaptiveLimiter(2, 1, 2, 0, nil, nil)}
+	r := &targetQualityRun{limiter: newAdaptiveLimiter(2, 1, 2, 0, nil)}
 	ctx := context.Background()
 	if _, err := r.limiter.acquire(ctx); err != nil {
 		t.Fatal(err)
@@ -77,7 +85,7 @@ func TestWithSlotReleasedRestoresSlot(t *testing.T) {
 func TestFlightCapPrimesThenGrowsWithPriors(t *testing.T) {
 	r := &targetQualityRun{
 		tq:               TargetQualityConfig{MetricWorkers: 2},
-		limiter:          newAdaptiveLimiter(16, 4, 16, 0, nil, nil),
+		limiter:          newAdaptiveLimiter(16, 4, 16, 0, nil),
 		prior:            newTargetQualityPrior(30, 10, 50, 9.5, 0.025, quality.MetricCVVDP),
 		primeConcurrency: 3,
 	}
@@ -115,7 +123,7 @@ func TestChunkPlanCVVDPUsesBaseSearch(t *testing.T) {
 		MetricWorkers: 2,
 		InitialCRF:    30,
 	}
-	limiter := newAdaptiveLimiter(4, 2, 4, 0, nil, nil)
+	limiter := newAdaptiveLimiter(4, 2, 4, 0, nil)
 	r := newTargetQualityRun(tq, &EncodeConfig{}, "input.mkv", t.TempDir(), testVideoInfo(), nil, 1920, 1080, limiter, 3, nil, nil)
 	r.metricPool = make(chan quality.ChunkScorer, tq.MetricWorkers)
 
@@ -156,12 +164,8 @@ func TestChunkPlanClaimsWarmupWhileCalibrating(t *testing.T) {
 }
 
 func TestChunkPlanUsesOffsetCorrectedTargetOnceLocked(t *testing.T) {
-	lockLines := 0
-	r := newSSIMU2TestRun(t, func(msg string) {
-		if strings.Contains(msg, "calibration locked") {
-			lockLines++
-		}
-	})
+	logger, logs := captureLogger()
+	r := newSSIMU2TestRun(t, logger)
 	lockCalibration(r.calibration, 2)
 
 	for i := 0; i < 2; i++ {
@@ -179,8 +183,8 @@ func TestChunkPlanUsesOffsetCorrectedTargetOnceLocked(t *testing.T) {
 			t.Fatal("post-lock chunks must score with the metric pool only")
 		}
 	}
-	if lockLines != 1 {
-		t.Fatalf("calibration lock logged %d times, want exactly once", lockLines)
+	if n := strings.Count(logs.String(), "decision_type=ssimu2_calibration"); n != 1 {
+		t.Fatalf("calibration lock logged %d times, want exactly once", n)
 	}
 }
 

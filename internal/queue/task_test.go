@@ -188,13 +188,35 @@ func TestResetRunningTasks(t *testing.T) {
 	if err := store.StartTask(ready[0]); err != nil {
 		t.Fatalf("start: %v", err)
 	}
+	ready[0].ActiveAssetKey, ready[0].ProgressMessage, ready[0].ProgressPercent = "main", "Scanning disc", 40
+	if err := store.UpdateTaskProgress(ready[0]); err != nil {
+		t.Fatal(err)
+	}
 
-	if err := store.ResetRunningTasks(); err != nil {
+	reset, err := store.ResetRunningTasks()
+	if err != nil {
 		t.Fatalf("reset: %v", err)
+	}
+	if len(reset) != 1 || reset[0].ID != ready[0].ID || reset[0].State != TaskRunning || reset[0].ProgressMessage != "Scanning disc" {
+		t.Fatalf("reset tasks = %+v", reset)
 	}
 	states := taskStatesByType(t, store, item.ID)
 	if states[StageIdentification] != TaskPending {
 		t.Fatalf("state after reset = %q, want pending", states[StageIdentification])
+	}
+	events, _, err := store.Events(item.ID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %+v", events)
+	}
+	if e := events[0]; e.Type != "stage_interrupted" || e.Stage != StageIdentification || e.TaskID != ready[0].ID || e.Attempt != 1 ||
+		e.EpisodeKey != "main" || e.Message != "Scanning disc" || e.Percent != 40 {
+		t.Fatalf("interruption event = %+v", e)
+	}
+	if again, err := store.ResetRunningTasks(); err != nil || len(again) != 0 {
+		t.Fatalf("second reset = %v, %v", again, err)
 	}
 }
 
@@ -239,7 +261,7 @@ func TestTaskLifecycleClearsActiveAsset(t *testing.T) {
 	if err := store.UpdateTaskProgress(task); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ResetRunningTasks(); err != nil {
+	if _, err := store.ResetRunningTasks(); err != nil {
 		t.Fatal(err)
 	}
 	check("")

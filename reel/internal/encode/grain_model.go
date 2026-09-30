@@ -81,9 +81,7 @@ func estimateGrainFromPairs(ctx context.Context, in GrainGateInput, stats *perf.
 			return grain.Estimate{}, fmt.Errorf("paired-frame analysis of chunk %04d: %w", idx, err)
 		}
 		scores = append(scores, float64(score))
-		if in.Verbose != nil {
-			in.Verbose(fmt.Sprintf("Grain gate ceiling chunk=%04d denoise_ceiling_jod=%.4f", ch.Idx, score))
-		}
+		in.log().Debug("grain gate ceiling", "chunk", ch.Idx, "denoise_ceiling_jod", score)
 	}
 	if err := ctx.Err(); err != nil {
 		return grain.Estimate{}, err

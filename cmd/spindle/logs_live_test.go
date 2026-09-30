@@ -95,15 +95,15 @@ func TestLogsCommandFiltersThroughDaemonAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	buf := httpapi.NewLogBuffer(10)
-	buf.Append(httpapi.LogEntry{Time: time.Now().UTC().Format(time.RFC3339Nano), Level: "WARN", Msg: "disk slow", Component: "ripper", ItemID: item.ID})
-	buf.Append(httpapi.LogEntry{Time: time.Now().UTC().Format(time.RFC3339Nano), Level: "INFO", Msg: "other item", Component: "ripper", ItemID: 8})
+	buf.Append(httpapi.LogEntry{Time: time.Now().UTC().Format(time.RFC3339Nano), Level: "WARN", Msg: "disk slow", Stage: "ripping", ItemID: item.ID})
+	buf.Append(httpapi.LogEntry{Time: time.Now().UTC().Format(time.RFC3339Nano), Level: "INFO", Msg: "other item", Stage: "ripping", ItemID: 8})
 	server := httpapi.New(httpapi.Params{Store: store, LogBuffer: buf, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err := server.ListenUnix(flagSocket); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = server.Shutdown(context.Background()) }()
 	cmd := newLogsCmd()
-	for name, value := range map[string]string{"component": "ripper", "item": "1", "level": "warn", "lines": "1"} {
+	for name, value := range map[string]string{"stage": "ripping", "item": "1", "level": "warn", "lines": "1"} {
 		if err := cmd.Flags().Set(name, value); err != nil {
 			t.Fatal(err)
 		}

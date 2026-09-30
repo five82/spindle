@@ -134,7 +134,7 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, result
 		}
 		lastErr = err
 		if attempt < maxRequestAttempts {
-			c.logger.Warn("TMDB request failed, retrying",
+			c.logger.WarnContext(ctx, "TMDB request failed, retrying",
 				"event_type", "tmdb_retry",
 				"error_hint", err.Error(),
 				"impact", "identification delayed",
@@ -368,8 +368,7 @@ func SelectBestResult(results []SearchResult, query string, year, minVoteCountEx
 		}
 
 		logger.Debug("TMDB candidate scored",
-			"decision_type", logs.DecisionTMDBSearch,
-			"decision_result", r.DisplayTitle(),
+			"candidate", r.DisplayTitle(),
 			"score", score,
 			"exact_match", exactMatch,
 			"year_match", yearMatch,

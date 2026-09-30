@@ -3,6 +3,7 @@ package workflow
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -79,7 +80,7 @@ func TestWriteMetricsRecord(t *testing.T) {
 	// Simulate an accumulated resource wait for the ripping stage.
 	m.waits[7] = map[queue.Stage]float64{queue.StageRipping: 12.5}
 
-	m.writeMetricsRecord(item, tasks)
+	m.writeMetricsRecord(item, tasks, "", nil)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -91,6 +92,9 @@ func TestWriteMetricsRecord(t *testing.T) {
 	}
 	if rec.Schema != 1 || rec.ItemID != 7 || rec.Title != "Example Movie" {
 		t.Errorf("identity fields wrong: %+v", rec)
+	}
+	if rec.Outcome != "completed" || rec.CompletedAt.IsZero() || bytes.Contains(data, []byte(`"failed_at"`)) || bytes.Contains(data, []byte(`reel_version`)) {
+		t.Errorf("completion outcome wrong: %s", data)
 	}
 	if rec.MediaType != "movie" || rec.DiscType != "bluray" {
 		t.Errorf("envelope metadata not carried: %+v", rec)
@@ -132,13 +136,36 @@ func TestWriteMetricsRecord(t *testing.T) {
 	}
 
 	// A second write appends a second line.
-	m.writeMetricsRecord(item, tasks)
+	m.writeMetricsRecord(item, tasks, "", nil)
 	data, err = os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("re-read metrics file: %v", err)
 	}
 	if lines := len(splitNonEmptyLines(data)); lines != 2 {
 		t.Errorf("lines = %d, want 2", lines)
+	}
+}
+
+func TestWriteMetricsRecordForFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "metrics.jsonl")
+	m := New(nil, nil, nil, slog.Default())
+	m.SetMetricsPath(path)
+	item := &queue.Item{ID: 9, DiscTitle: "Broken Disc"}
+	tasks := []*queue.Task{{ItemID: 9, Type: queue.StageIdentification}, {ItemID: 9, Type: queue.StageRipping}}
+
+	m.writeMetricsRecord(item, tasks, queue.StageRipping, errors.New("makemkv: read error"))
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec metricsRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Outcome != "failed" || rec.FailedStage != queue.StageRipping || rec.Error != "makemkv: read error" ||
+		rec.FailedAt.IsZero() || len(rec.Stages) != 2 || bytes.Contains(data, []byte(`"completed_at"`)) {
+		t.Fatalf("failure record: %s", data)
 	}
 }
 
@@ -162,5 +189,5 @@ func splitNonEmptyLines(data []byte) [][]byte {
 func TestWriteMetricsRecordDisabledByDefault(t *testing.T) {
 	m := New(nil, nil, nil, slog.Default())
 	// No path set: must be a no-op, not a panic or a write to "".
-	m.writeMetricsRecord(&queue.Item{ID: 1}, nil)
+	m.writeMetricsRecord(&queue.Item{ID: 1}, nil, "", nil)
 }

@@ -24,9 +24,9 @@ func TestTargetQualityWarmupScoresSameProbeInBothMetrics(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var lines []string
-	tq := TargetQualityConfig{Metric: quality.MetricSSIMU2, Target: 80, Tolerance: 2, CRFMin: 10, CRFMax: 50, MaxProbes: 1, InitialCRF: 30, Verbose: func(s string) { lines = append(lines, s) }}
-	limiter := newAdaptiveLimiter(1, 1, 1, 3, nil, nil)
+	logger, logs := captureLogger()
+	tq := TargetQualityConfig{Metric: quality.MetricSSIMU2, Target: 80, Tolerance: 2, CRFMin: 10, CRFMax: 50, MaxProbes: 1, InitialCRF: 30, Logger: logger}
+	limiter := newAdaptiveLimiter(1, 1, 1, 3, nil)
 	r := newTargetQualityRun(tq, &EncodeConfig{CRF: 30, Preset: 12}, path, work, inf, nil, 32, 32, limiter, 1, nil, nil)
 	cv := &syntheticScorer{t: t}
 	ss := &syntheticScorer{t: t}
@@ -39,10 +39,10 @@ func TestTargetQualityWarmupScoresSameProbeInBothMetrics(t *testing.T) {
 	}
 	result := r.processChunk(context.Background(), chunk.Chunk{Idx: 0, End: 3})
 	limiter.release()
-	if result.Error != nil || result.Frames != 3 || cv.calls != 1 || ss.calls != 1 || r.calibration.SampleCount() != 1 || r.warmupOutstanding.Load() != 0 || len(lines) == 0 {
-		t.Fatalf("warmup: %+v, cv=%d ss=%d samples=%d lines=%v", result, cv.calls, ss.calls, r.calibration.SampleCount(), lines)
+	if result.Error != nil || result.Frames != 3 || cv.calls != 1 || ss.calls != 1 || r.calibration.SampleCount() != 1 || r.warmupOutstanding.Load() != 0 {
+		t.Fatalf("warmup: %+v, cv=%d ss=%d samples=%d", result, cv.calls, ss.calls, r.calibration.SampleCount())
 	}
-	if !strings.Contains(strings.Join(lines, " "), "TQ final") {
-		t.Fatalf("missing final probe log: %v", lines)
+	if !strings.Contains(logs.String(), `msg="TQ final" chunk=0`) || !strings.Contains(logs.String(), `msg="TQ probe" chunk=0 round=1`) {
+		t.Fatalf("missing structured probe logs: %s", logs.String())
 	}
 }

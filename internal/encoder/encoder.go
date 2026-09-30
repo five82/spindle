@@ -202,7 +202,10 @@ func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encodedDi
 					if warned {
 						logger.Info("disk space available for encoding", "decision_type", logs.DecisionStageExecution,
 							"decision_result", "unblocked", "decision_reason", "staging volume has 100 GiB free")
-						_ = sess.Store.RecordEvent(queue.Event{ItemID: sess.Item.ID, TaskID: sess.Task.ID, Type: "disk_space_available", Stage: queue.StageEncoding})
+						if err := sess.Store.RecordEvent(queue.Event{ItemID: sess.Item.ID, TaskID: sess.Task.ID, Type: "disk_space_available", Stage: queue.StageEncoding}); err != nil {
+							logger.Warn("item journal write failed", "event_type", "journal_write_failed", "error_hint", err.Error(),
+								"impact", "disk-space transition missing from item history")
+						}
 					}
 					break
 				}
@@ -215,7 +218,10 @@ func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encodedDi
 					sess.Activity(queue.Activity{Operation: "disk_space", State: "waiting", Message: message})
 					logger.Info("encoding waiting for disk space", "decision_type", logs.DecisionStageExecution,
 						"decision_result", "blocked", "decision_reason", message)
-					_ = sess.Store.RecordEvent(queue.Event{ItemID: sess.Item.ID, TaskID: sess.Task.ID, Type: "disk_space_wait", Stage: queue.StageEncoding, Message: message})
+					if err := sess.Store.RecordEvent(queue.Event{ItemID: sess.Item.ID, TaskID: sess.Task.ID, Type: "disk_space_wait", Stage: queue.StageEncoding, Message: message}); err != nil {
+						logger.Warn("item journal write failed", "event_type", "journal_write_failed", "error_hint", err.Error(),
+							"impact", "disk-space transition missing from item history")
+					}
 					_ = notify.SendLogged(ctx, notify.New(h.cfg.Notifications.NtfyTopic, h.cfg.Notifications.RequestTimeout),
 						logger, notify.EventDiskSpaceLow, fmt.Sprintf("Spindle: item %d waiting for disk space", sess.Item.ID), message)
 				}
@@ -325,6 +331,7 @@ func (h *Handler) initialEncodingSnapshot(ctx context.Context, logger *slog.Logg
 	logger.Info("input file probed",
 		"decision_type", logs.DecisionFileProbe,
 		"decision_result", "success",
+		"decision_reason", "ffprobe read the ripped input's streams",
 		"resolution", resolution,
 		"codecs", strings.Join(codecs, ","),
 		"original_size_bytes", snap.OriginalSize,
@@ -416,7 +423,7 @@ func (h *Handler) handleEncodeSuccess(logger *slog.Logger, sess *stage.Session, 
 
 // encodeStatsFromResult flattens Reel's per-encode stats into the envelope's
 // per-episode record for the item-completion metrics line. Returns nil when
-// Reel reported no stats (older pin, or the encode skipped the pipeline).
+// Reel reported no stats (the encode skipped the pipeline, e.g. an existing output).
 func encodeStatsFromResult(key string, result *reel.Result) *ripspec.EncodeStats {
 	s := result.Stats
 	if s == nil {
@@ -566,6 +573,9 @@ func (r *spindleReporter) updateSnapshotLocked(mutate func(*encodingstate.Snapsh
 		snap.ActiveWorkers, snap.TargetWorkers = 0, 0
 		snap.Probing, snap.Scoring, snap.Finishing = 0, 0, 0
 		snap.Percent = 0
+		// Re-apply so values the event set explicitly (e.g. completion's
+		// 100%) survive the reset of the previous substage's telemetry.
+		mutate(&snap)
 	}
 	opts := []stage.ProgressOption{stage.WithEncodingDetails(snap.Marshal())}
 	if len(detail) > 0 {
@@ -582,7 +592,10 @@ func (r *spindleReporter) EncodingProgress(p reel.ProgressSnapshot) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
-	if now.Sub(r.lastPush) < throttleInterval {
+	// The terminal update must always persist: a throttled final tick would
+	// leave the completed snapshot showing e.g. 309/310 chunks.
+	terminal := p.Percent >= 100 || (p.ChunksTotal > 0 && p.ChunksComplete >= p.ChunksTotal)
+	if !terminal && now.Sub(r.lastPush) < throttleInterval {
 		return
 	}
 	r.lastPush = now
@@ -607,7 +620,7 @@ func (r *spindleReporter) EncodingProgress(p reel.ProgressSnapshot) {
 		snap.Probing, snap.Scoring, snap.Finishing = p.Probing, p.Scoring, p.Finishing
 	}, reel.StageProgress{Lane: "video", Stage: "encoding", Message: "Video frame progress",
 		Completed: int64(p.CurrentFrame), Total: int64(p.TotalFrames), Unit: unit})
-	if r.lastLog.IsZero() || now.Sub(r.lastLog) >= encodingProgressLogInterval || p.Percent >= 100 {
+	if r.lastLog.IsZero() || now.Sub(r.lastLog) >= encodingProgressLogInterval || terminal {
 		r.lastLog = now
 		r.logger.Info("encoding progress",
 			"event_type", "encoding_progress",
@@ -661,14 +674,6 @@ func (r *spindleReporter) StageProgress(s reel.StageProgress) {
 			}
 		}
 	}, s)
-}
-
-func (r *spindleReporter) Verbose(message string) {
-	r.logger.Debug("reel verbose",
-		"event_type", "reel_verbose",
-		"episode_key", r.episodeKey,
-		"message", message,
-	)
 }
 
 func (r *spindleReporter) EncodingConfig(s reel.EncodingConfigSummary) {
@@ -792,27 +797,37 @@ func (r *spindleReporter) EncodingComplete(s reel.EncodingOutcome) {
 	)
 }
 
-func (r *spindleReporter) Warning(message string) {
-	r.updateSnapshot(func(snap *encodingstate.Snapshot) {
-		snap.Warning = message
-	})
-
-	r.logger.Warn("reel warning",
-		"event_type", "reel_warning",
-		"error_hint", message,
-		// Spindle cannot know what an arbitrary reel warning means for the
-		// encode; target-quality mode enforces per-chunk quality regardless,
-		// so most warnings (e.g. worker reductions) cost wall time, not
-		// quality. The specifics live in error_hint.
-		"impact", "reel reported degraded behavior; see error_hint",
-	)
+// Log replays one Reel log record through the stage logger, which adds the
+// item and stage attribution; the episode key tells concurrent assets apart.
+// Reel warnings describe degraded behavior the operator should see, so the
+// latest one also rides on the encoding snapshot.
+func (r *spindleReporter) Log(rec wireRecord) {
+	if rec.Level >= slog.LevelWarn {
+		warning := rec.Msg
+		for _, a := range rec.Attrs {
+			if a.Key == "error_hint" {
+				warning = fmt.Sprintf("%s: %v", rec.Msg, a.Value)
+			}
+		}
+		r.updateSnapshot(func(snap *encodingstate.Snapshot) {
+			snap.Warning = warning
+		})
+	}
+	args := make([]any, 0, 2*len(rec.Attrs)+2)
+	args = append(args, "episode_key", r.episodeKey)
+	for _, a := range rec.Attrs {
+		args = append(args, a.Key, a.Value)
+	}
+	r.logger.Log(context.Background(), rec.Level, rec.Msg, args...)
 }
 
 func (r *spindleReporter) Error(e reel.ReporterError) {
 	r.logger.Error("reel encoding error",
 		"event_type", "reel_error",
-		"error_hint", e.Message,
-		"error", e.Title,
+		"error_hint", e.Suggestion,
+		"error", e.Title+": "+e.Message,
+		"context", e.Context,
+		"episode_key", r.episodeKey,
 	)
 
 	r.updateSnapshot(func(snap *encodingstate.Snapshot) {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -25,14 +24,17 @@ func TestMain(m *testing.M) {
 	if os.Getenv("SPINDLE_TEST_ENCODE_WORKER") != "" && len(os.Args) > 1 && os.Args[1] == "encode-worker" {
 		switch os.Getenv("SPINDLE_TEST_ENCODE_WORKER") {
 		case "success":
+			_, _ = fmt.Fprintln(os.Stderr, "native library warning")
 			_, _ = fmt.Fprintln(os.Stdout, `not-json`)
-			_, _ = fmt.Fprintln(os.Stdout, `{"event":"warning","payload":{}`)
+			_, _ = fmt.Fprintln(os.Stdout, `{"event":"log","payload":{}`)
 			_, _ = fmt.Fprintln(os.Stdout, `{"event":"encoding_started","payload":{"total_frames":42}}`)
 			_ = json.NewEncoder(os.Stdout).Encode(wireEvent{Event: wireResult, Payload: mustWorkerResult()})
 		case "failure":
 			_, _ = fmt.Fprintln(os.Stdout, `{"event":"failure","payload":{"message":"reel failed"}}`)
 		case "exit":
-			_, _ = fmt.Fprintln(os.Stderr, "worker crashed")
+			// A panic states its fault first; the trace that follows is long.
+			_, _ = fmt.Fprintln(os.Stderr, "panic: worker crashed")
+			_, _ = fmt.Fprint(os.Stderr, strings.Repeat("\tgithub.com/five82/spindle/reel/internal/encode.frame()\n", 200))
 			os.Exit(2)
 		}
 		os.Exit(0)
@@ -91,16 +93,17 @@ func TestRunWorkerProcess(t *testing.T) {
 	}{
 		{"success", "", true},
 		{"failure", "encode worker: reel failed", false},
-		{"exit", "worker crashed", false},
+		{"exit", "panic: worker crashed", false},
 		{"empty", "produced no result", false},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
 			t.Setenv("SPINDLE_TEST_ENCODE_WORKER", tc.mode)
 			sess := encoderSession(t, ripspec.Envelope{})
 			sess.Task = &queue.Task{}
+			var logs strings.Builder
 			rep := &spindleReporter{
 				sess:   sess,
-				logger: slog.New(slog.NewTextHandler(io.Discard, nil)), now: time.Now,
+				logger: slog.New(slog.NewTextHandler(&logs, nil)), now: time.Now,
 			}
 			result, err := runWorkerProcess(context.Background(), rep.logger, "input.mkv", t.TempDir(), rep)
 			if tc.wantError == "" && err != nil || tc.wantError != "" && (err == nil || !strings.Contains(err.Error(), tc.wantError)) {
@@ -113,6 +116,9 @@ func TestRunWorkerProcess(t *testing.T) {
 				snap, err := encodingstate.Unmarshal(sess.Task.EncodingDetailsJSON)
 				if err != nil || snap.TotalFrames != 42 {
 					t.Fatalf("worker event not replayed: %+v %v", snap, err)
+				}
+				if !strings.Contains(logs.String(), "event_type=encode_worker_stderr") || !strings.Contains(logs.String(), "native library warning") {
+					t.Fatalf("successful worker stderr not logged: %s", logs.String())
 				}
 			}
 		})

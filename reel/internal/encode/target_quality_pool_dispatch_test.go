@@ -11,8 +11,8 @@ import (
 )
 
 func TestTargetRunClosesBothScorerPoolsOnce(t *testing.T) {
-	var messages []string
-	r := newSSIMU2TestRun(t, func(s string) { messages = append(messages, s) })
+	logger, logs := captureLogger()
+	r := newSSIMU2TestRun(t, logger)
 	for _, pool := range []chan quality.ChunkScorer{r.metricPool, r.warmupPool} {
 		for range cap(pool) {
 			pool <- &syntheticScorer{}
@@ -20,8 +20,8 @@ func TestTargetRunClosesBothScorerPoolsOnce(t *testing.T) {
 	}
 	r.closeScorerPools()
 	r.closeWarmupPool()
-	if len(messages) != 1 || !strings.Contains(messages[0], "closed") {
-		t.Fatalf("warmup close: %v", messages)
+	if strings.Count(logs.String(), "scorers closed") != 1 {
+		t.Fatalf("warmup close: %s", logs.String())
 	}
 	// A nil pool and an empty run require no GPU resources.
 	closeScorerPool(nil)
@@ -61,7 +61,7 @@ func TestTargetRunWorkerCancellationAndPriorError(t *testing.T) {
 }
 
 func TestTargetRunDispatchFeedsChunksAndHonorsPriorFailure(t *testing.T) {
-	r := newTargetQualityRun(TargetQualityConfig{Metric: quality.MetricCVVDP, MetricWorkers: 1, InitialCRF: 30}, &EncodeConfig{}, "input", t.TempDir(), testVideoInfo(), nil, 1920, 1080, newAdaptiveLimiter(2, 2, 2, 0, nil, nil), 2, nil, nil)
+	r := newTargetQualityRun(TargetQualityConfig{Metric: quality.MetricCVVDP, MetricWorkers: 1, InitialCRF: 30}, &EncodeConfig{}, "input", t.TempDir(), testVideoInfo(), nil, 1920, 1080, newAdaptiveLimiter(2, 2, 2, 0, nil), 2, nil, nil)
 	jobs := make(chan chunk.Chunk, 2)
 	r.dispatch(context.Background(), []chunk.Chunk{{Idx: 1}, {Idx: 2}}, jobs)
 	if a, b := (<-jobs).Idx, (<-jobs).Idx; a != 1 || b != 2 {
@@ -86,7 +86,7 @@ func TestTargetRunDispatchFeedsChunksAndHonorsPriorFailure(t *testing.T) {
 }
 
 func TestTargetRunWithSlotReleasedPreservesCallbackError(t *testing.T) {
-	r := &targetQualityRun{limiter: newAdaptiveLimiter(1, 1, 1, 0, nil, nil)}
+	r := &targetQualityRun{limiter: newAdaptiveLimiter(1, 1, 1, 0, nil)}
 	if _, err := r.limiter.acquire(context.Background()); err != nil {
 		t.Fatal(err)
 	}

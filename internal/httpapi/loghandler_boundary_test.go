@@ -12,18 +12,18 @@ import (
 func TestLogHandlerGroupsAndStructuredFields(t *testing.T) {
 	buf := NewLogBuffer(4)
 	logger := slog.New(NewLogHandler(slog.NewTextHandler(io.Discard, nil), buf))
-	logger.With("component", "encoder", "item_id", int64(12), "stage", "encoding", "lane", "gpu", "request", "req-1").Info("started", "nested", slog.GroupValue(slog.String("reason", "started")))
-	logger.WithGroup("outer").With("name", "prebound").Warn("grouped", "request", "scoped")
+	logger.With("item_id", int64(12), "stage", "encoding").Info("started", "nested", slog.GroupValue(slog.String("reason", "started")))
+	logger.WithGroup("outer").With("name", "prebound").Warn("grouped", "stage", "scoped")
 	entries, _ := buf.Query(LogQueryOpts{})
 	if len(entries) != 2 {
 		t.Fatalf("entries: %+v", entries)
 	}
 	a := entries[0]
-	if a.Component != "encoder" || a.ItemID != 12 || a.Stage != "encoding" || a.Lane != "gpu" || a.Request != "req-1" || a.Fields["nested.reason"] != "started" {
+	if a.ItemID != 12 || a.Stage != "encoding" || a.Fields["nested.reason"] != "started" {
 		t.Fatalf("entry: %+v", a)
 	}
 	b := entries[1]
-	if b.Fields["outer.name"] != "prebound" || b.Fields["outer.request"] != "scoped" || b.Request != "" {
+	if b.Fields["outer.name"] != "prebound" || b.Fields["outer.stage"] != "scoped" || b.Stage != "" {
 		t.Fatalf("group: %+v", b)
 	}
 	for _, tc := range []struct {

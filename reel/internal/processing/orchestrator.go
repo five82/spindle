@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/five82/spindle/reel/internal/config"
@@ -44,6 +45,7 @@ func ProcessVideos(
 	if rep == nil {
 		rep = reporter.NullReporter{}
 	}
+	log := cfg.Log()
 
 	var results []EncodeResult
 
@@ -69,7 +71,11 @@ func ProcessVideos(
 	for fileIdx, inputPath := range filesToProcess {
 		// Check for cancellation before starting each file
 		if ctx.Err() != nil {
-			rep.Warning(fmt.Sprintf("Encoding cancelled: %v", ctx.Err()))
+			log.Warn("encoding cancelled",
+				"event_type", "encode_cancelled",
+				"error_hint", ctx.Err().Error(),
+				"impact", "remaining files are not encoded",
+			)
 			break
 		}
 
@@ -95,12 +101,16 @@ func ProcessVideos(
 
 		// Skip if output exists
 		if util.FileExists(outputPath) {
-			rep.Warning(fmt.Sprintf("Output file already exists: %s. Skipping encode.", outputPath))
+			log.Warn("output file already exists; skipping encode",
+				"event_type", "encode_output_exists",
+				"error_hint", outputPath,
+				"impact", "input is not encoded",
+			)
 			continue
 		}
 
 		// Analyze video properties (container/codec parameters).
-		finishStep := startPhase(perfc, rep, "Video property analysis")
+		finishStep := startPhase(perfc, rep, log, "Video property analysis")
 		videoProps, err := media.GetVideoProperties(inputPath)
 		finishStep()
 		if err != nil {
@@ -118,7 +128,7 @@ func ProcessVideos(
 		// dominant media-probe cost (~0.7s on 4K); probing it twice (once here
 		// for HDR, again inside ProcessChunked) was pure waste. vidInf is passed
 		// into ProcessChunked instead of letting it re-probe.
-		finishStep = startPhase(perfc, rep, "Video probe")
+		finishStep = startPhase(perfc, rep, log, "Video probe")
 		vidInf, err := video.Probe(inputPath)
 		finishStep()
 		if err != nil {
@@ -131,7 +141,7 @@ func ProcessVideos(
 			continue
 		}
 
-		finishStep = startPhase(perfc, rep, "HDR analysis")
+		finishStep = startPhase(perfc, rep, log, "HDR analysis")
 		refinedHDR := media.RefineHDR(videoProps.HDRInfo, vidInf)
 		finishStep()
 		hdrInfo := &refinedHDR
@@ -144,7 +154,7 @@ func ProcessVideos(
 
 		// Get audio info. Channels are derived from the stream info rather than
 		// re-probed, so the file is opened once for audio analysis.
-		finishStep = startPhase(perfc, rep, "Audio analysis")
+		finishStep = startPhase(perfc, rep, log, "Audio analysis")
 		audioStreams := GetAudioStreamInfo(inputPath)
 		audioChannels := audioChannelsFromStreams(audioStreams)
 		audioDescription := FormatAudioDescription(audioChannels)
@@ -160,11 +170,8 @@ func ProcessVideos(
 			AudioDescription: audioDescription,
 		})
 
-		// Verbose video analysis details
-		rep.Verbose(fmt.Sprintf("Video duration: %.2f seconds", videoProps.DurationSecs))
-		if isHDR {
-			rep.Verbose(fmt.Sprintf("Color primaries: %s, transfer: %s", hdrInfo.ColourPrimaries, hdrInfo.TransferCharacteristics))
-		}
+		log.Debug("video properties", "duration_seconds", videoProps.DurationSecs, "hdr", isHDR,
+			"color_primaries", hdrInfo.ColourPrimaries, "transfer", hdrInfo.TransferCharacteristics)
 
 		// Setup encode parameters (for display only)
 		encodeParams := setupEncodeParams(&fileCfg, quality, hdrInfo)
@@ -211,7 +218,7 @@ func ProcessVideos(
 		})
 
 		// Run chunked encoding with FFmpeg/libav + SVT-AV1 library
-		finishStep = startVerboseStep(rep, "Chunked encode pipeline")
+		finishStep = startStep(log, "Chunked encode pipeline")
 		cropResult, encodeError := ProcessChunked(ctx, &fileCfg, inputPath, outputPath, videoProps, vidInf, audioStreams, quality, rep, perfc)
 		finishStep()
 		encodeSuccess := encodeError == nil
@@ -223,7 +230,7 @@ func ProcessVideos(
 			// to the failure is exactly what attribution wants here.
 			if cfg.KeepWorkDir || !util.FileExists(outputPath) {
 				if err := perfc.Write(); err != nil {
-					rep.Verbose(fmt.Sprintf("Could not write perf.json: %v", err))
+					log.Debug("perf.json not written", "error", err)
 				}
 			}
 			// Check if the user canceled the operation (Ctrl+C / SIGTERM)
@@ -258,11 +265,11 @@ func ProcessVideos(
 
 		inputSize, _ := util.GetFileSize(inputPath)
 		outputSize, _ := util.GetFileSize(outputPath)
-		finishStep = startPhase(perfc, rep, "Stream size scan (input)")
-		inputVideoSize := videoStreamBytes(inputPath, "input", rep)
+		finishStep = startPhase(perfc, rep, log, "Stream size scan (input)")
+		inputVideoSize := videoStreamBytes(inputPath, "input", log)
 		finishStep()
-		finishStep = startPhase(perfc, rep, "Stream size scan (output)")
-		outputVideoSize := videoStreamBytes(outputPath, "output", rep)
+		finishStep = startPhase(perfc, rep, log, "Stream size scan (output)")
+		outputVideoSize := videoStreamBytes(outputPath, "output", log)
 		finishStep()
 		encodingSpeed := float32(videoProps.DurationSecs) / float32(fileElapsedTime.Seconds())
 
@@ -275,7 +282,7 @@ func ProcessVideos(
 		expectedAudioTracks := len(audioChannels)
 		expectedDisplayAspect := expectedDisplayAspectAfterCrop(videoProps, expectedWidth, expectedHeight)
 
-		finishStep = startPhase(perfc, rep, "Output validation")
+		finishStep = startPhase(perfc, rep, log, "Output validation")
 		validationResult, err := validation.ValidateOutputVideo(inputPath, outputPath, validation.Options{
 			ExpectedDimensions:    expectedDims,
 			ExpectedDuration:      &expectedDuration,
@@ -350,9 +357,9 @@ func ProcessVideos(
 		// which only survives when the user keeps it, so only write it then.
 		if cfg.KeepWorkDir {
 			if err := perfc.Write(); err != nil {
-				rep.Verbose(fmt.Sprintf("Could not write perf.json: %v", err))
+				log.Debug("perf.json not written", "error", err)
 			} else {
-				rep.Verbose("Wrote perf.json timing artifact to work directory")
+				log.Debug("perf.json timing artifact written to work directory")
 			}
 		}
 
@@ -365,7 +372,11 @@ func ProcessVideos(
 	// Generate summary
 	switch len(results) {
 	case 0:
-		rep.Warning("No files were successfully encoded")
+		log.Warn("no files were successfully encoded",
+			"event_type", "encode_none_succeeded",
+			"error_hint", "every input failed or was skipped",
+			"impact", "no output produced",
+		)
 	case 1:
 		rep.OperationComplete(fmt.Sprintf("Successfully encoded %s", results[0].Filename))
 	default:
@@ -419,10 +430,10 @@ func logSuggestion(cfg *config.Config) string {
 	return fmt.Sprintf("Check the log for more details: %s", cfg.LogFile)
 }
 
-func videoStreamBytes(path, label string, rep reporter.Reporter) uint64 {
+func videoStreamBytes(path, label string, log *slog.Logger) uint64 {
 	bytes, err := media.GetVideoStreamBytes(path)
 	if err != nil {
-		rep.Verbose(fmt.Sprintf("Could not calculate %s video stream size: %v", label, err))
+		log.Debug("video stream size unavailable", "stream", label, "error", err)
 		return 0
 	}
 	return bytes

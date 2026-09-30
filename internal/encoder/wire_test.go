@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -32,7 +33,11 @@ func TestWireRoundTrip(t *testing.T) {
 	rep.StageProgress(reel.StageProgress{Stage: "Chunking", Message: "Detecting shot cuts"})
 	rep.EncodingStarted(1234)
 	rep.EncodingProgress(reel.ProgressSnapshot{Percent: 42.5, FPS: 60, ETA: 90 * time.Second, CurrentFrame: 524, TotalFrames: 1234})
-	rep.Warning("test warning")
+	reelLog := slog.New(&wireLogHandler{w: w})
+	reelLog.With("phase", "encode").WithGroup("tq").Debug("TQ probe", "chunk", 12, "crf", "24.5", "score", 9.41)
+	reelLog.Warn("memory pressure; reducing encode workers",
+		"event_type", "encode_workers_reduced", "error_hint", "available 5%", "impact", "slower",
+		"workers_to", 3, "elapsed", 2*time.Second, "error", errors.New("pressure"))
 	// reporter.ValidationStep lives in reel's internal package (only the
 	// summary is aliased), so construct it through JSON -- which is exactly
 	// what the wire does.
@@ -65,7 +70,7 @@ func TestWireRoundTrip(t *testing.T) {
 		t.Fatalf("session: %v", err)
 	}
 	var logBuf bytes.Buffer
-	sess.Logger = slog.New(slog.NewJSONHandler(io.MultiWriter(io.Discard, &logBuf), nil))
+	sess.Logger = slog.New(slog.NewJSONHandler(io.MultiWriter(io.Discard, &logBuf), &slog.HandlerOptions{Level: slog.LevelDebug}))
 	daemonRep := newSpindleReporter(sess, sess.Logger, "s01_001")
 	daemonRep.now = func() time.Time { return time.Now().Add(time.Hour) } // defeat throttle
 
@@ -146,8 +151,16 @@ func TestWireRoundTrip(t *testing.T) {
 	if snap.TotalFrames != 0 || snap.ETASeconds != 0 {
 		t.Fatalf("completed encode retained live counters: %+v", snap)
 	}
-	if snap.Warning != "test warning" {
+	if snap.Warning != "memory pressure; reducing encode workers: available 5%" {
 		t.Fatalf("warning not applied: %+v", snap)
+	}
+	for _, want := range []string{
+		`"level":"DEBUG","msg":"TQ probe","episode_key":"s01_001","phase":"encode","tq.chunk":12,"tq.crf":"24.5","tq.score":9.41`,
+		`"level":"WARN","msg":"memory pressure; reducing encode workers","episode_key":"s01_001","event_type":"encode_workers_reduced","error_hint":"available 5%","impact":"slower","workers_to":3,"elapsed":"2s","error":"pressure"`,
+	} {
+		if !bytes.Contains(logBuf.Bytes(), []byte(want)) {
+			t.Fatalf("reel record not replayed with attribution %s:\n%s", want, logBuf.String())
+		}
 	}
 	if snap.Validation == nil || !snap.Validation.Passed {
 		t.Fatalf("validation not applied: %+v", snap)

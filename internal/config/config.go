@@ -197,7 +197,8 @@ func (c *Config) DaemonLogDir() string {
 
 // DaemonConsoleLogPath returns the file that captures a detached daemon's
 // stdout/stderr (panics and pre-logging failures only; the timestamped JSON
-// log is the authoritative stream). Truncated on each daemon start.
+// log is the authoritative stream). Each daemon start moves non-empty output
+// from the previous run to the same path with a .prev suffix.
 func (c *Config) DaemonConsoleLogPath() string {
 	return filepath.Join(c.Paths.StateDir, "daemon-console.log")
 }

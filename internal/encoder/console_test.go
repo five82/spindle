@@ -53,14 +53,13 @@ func TestQuietConsoleReporterPreservesDiagnostics(t *testing.T) {
 	var out bytes.Buffer
 	reporter := &consoleReporter{out: &out, quiet: true}
 
-	reporter.Warning("fallback used")
 	reporter.Error(reel.ReporterError{Title: "encode", Message: "failed", Suggestion: "retry"})
 	reporter.ValidationComplete(reel.ValidationSummary{
 		Steps: []reel.ReporterValidationStep{{Name: "duration", Details: "mismatch"}},
 	})
 
 	got := out.String()
-	for _, want := range []string{"fallback used", "encode: failed", "suggestion: retry", "duration (mismatch)"} {
+	for _, want := range []string{"encode: failed", "suggestion: retry", "duration (mismatch)"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("quiet diagnostic output does not contain %q: %q", want, got)
 		}

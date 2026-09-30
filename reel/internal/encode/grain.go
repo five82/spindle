@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -170,7 +171,16 @@ type GrainGateInput struct {
 	// BandCenterJOD is the target the band is centered on; stage 2 measures
 	// what the sample chunks cost there. Zero disables stage 2.
 	BandCenterJOD float64
-	Verbose       func(string)
+	// Logger receives per-sample gate measurements (DEBUG) and a stage 2
+	// refinement that could not run (WARN). Nil discards them.
+	Logger *slog.Logger
+}
+
+func (in GrainGateInput) log() *slog.Logger {
+	if in.Logger == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return in.Logger
 }
 
 // RecordedGrainTreatment returns the treatment this work directory has
@@ -261,8 +271,8 @@ func resolveGrainTreatment(ctx context.Context, mode string, cfg *EncodeConfig, 
 		}
 	} else {
 		verdict.Reused = true
-		if gate && in.Verbose != nil {
-			in.Verbose("Grain gate: reusing the recorded verdict and exact grain model")
+		if gate {
+			in.log().Debug("grain gate reusing the recorded verdict and exact grain model")
 		}
 	}
 
@@ -339,9 +349,8 @@ func runGrainGateWithMeasure(ctx context.Context, cfg *EncodeConfig, in GrainGat
 		}
 		stats.SampleChunks = append(stats.SampleChunks, ch.Idx)
 		stats.SampleBPP = append(stats.SampleBPP, bpp)
-		if in.Verbose != nil {
-			in.Verbose(fmt.Sprintf("Grain gate sample chunk=%04d frames=%d crf=%s bpp=%.4f (%.1f Mbps)", ch.Idx, ch.Frames(), quality.FormatCRF(grainGateCRF), bpp, mbpsFromBPP(bpp, width, height, in.Info)))
-		}
+		in.log().Debug("grain gate sample", "chunk", ch.Idx, "frames", ch.Frames(), "crf", quality.FormatCRF(grainGateCRF),
+			"bpp", bpp, "mbps", mbpsFromBPP(bpp, width, height, in.Info))
 	}
 	stats.GateSeconds = time.Since(start).Seconds()
 	stats.MedianBPP = median(stats.SampleBPP)
@@ -355,9 +364,11 @@ func runGrainGateWithMeasure(ctx context.Context, cfg *EncodeConfig, in GrainGat
 			// (untreated, since stage 2 only runs below the treat line)
 			// rather than failing the encode.
 			stats.Stage2Error = err.Error()
-			if in.Verbose != nil {
-				in.Verbose(fmt.Sprintf("Grain gate: target-quality re-measurement not run: %v", err))
-			}
+			in.log().Warn("grain gate target-quality re-measurement not run",
+				"event_type", "grain_stage2_unavailable",
+				"error_hint", err.Error(),
+				"impact", "fixed-CRF grain verdict stands for an ambiguous title",
+			)
 		} else {
 			applyGrainStage2(ctx, in, stats, samples, measure)
 			closeScorer()
@@ -440,15 +451,15 @@ func applyGrainStage2(ctx context.Context, in GrainGateInput, stats *perf.GrainT
 		stats.Stage2Probes += probes
 		if err != nil {
 			stats.Stage2Error = err.Error()
-			if in.Verbose != nil {
-				in.Verbose(fmt.Sprintf("Grain gate: target-quality re-measurement failed: %v", err))
-			}
+			in.log().Warn("grain gate target-quality re-measurement failed",
+				"event_type", "grain_stage2_failed",
+				"error_hint", err.Error(),
+				"impact", "fixed-CRF grain verdict stands for an ambiguous title",
+			)
 			return
 		}
 		delivered = append(delivered, bpp)
-		if in.Verbose != nil {
-			in.Verbose(fmt.Sprintf("Grain gate stage 2 chunk=%04d probes=%d delivered_bpp=%.4f", ch.Idx, probes, bpp))
-		}
+		in.log().Debug("grain gate stage 2 sample", "chunk", ch.Idx, "probes", probes, "delivered_bpp", bpp)
 	}
 	if len(delivered) == 0 {
 		stats.Stage2Error = "no sample chunks measured"
@@ -519,9 +530,7 @@ func measureTargetDeliveredBPPWithMeasure(ctx context.Context, gateCfg *EncodeCo
 			return 0, len(probes), scoreErr
 		}
 		probes = append(probes, stage2Probe{crf: crf, score: score, bpp: bpp})
-		if in.Verbose != nil {
-			in.Verbose(fmt.Sprintf("Grain gate stage 2 probe chunk=%04d crf=%s score=%.4f bpp=%.4f", ch.Idx, quality.FormatCRF(crf), score, bpp))
-		}
+		in.log().Debug("grain gate stage 2 probe", "chunk", ch.Idx, "crf", quality.FormatCRF(crf), "score", score, "bpp", bpp)
 		if abs32(score-target) <= tolerance {
 			return bpp, len(probes), nil
 		}

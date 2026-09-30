@@ -75,18 +75,16 @@ func TestTerminalReporterLifecycle(t *testing.T) {
 		r.ValidationComplete(ValidationSummary{Passed: true})
 		r.EncodingComplete(EncodingOutcome{OutputFile: "out.mkv", OriginalSize: 1000, EncodedSize: 500, VideoOriginalSize: 800, VideoEncodedSize: 400, VideoStream: "AV1", AudioStream: "Opus", TotalTime: time.Minute, AverageSpeed: 2, OutputPath: "/out.mkv"})
 		r.EncodingComplete(EncodingOutcome{OriginalSize: 100, EncodedSize: 50})
-		r.Warning("careful")
 		r.Error(ReporterError{Title: "failed", Message: "reason", Context: "file", Suggestion: "retry"})
 		r.Error(ReporterError{Title: "oops", Message: "plain"})
 		r.OperationComplete("done")
 		r.BatchStarted(BatchStartInfo{TotalFiles: 2, OutputDir: "/out", FileList: []string{"a", "b"}})
 		r.FileProgress(FileProgressContext{CurrentFile: 1, TotalFiles: 2})
 		r.BatchComplete(BatchSummary{TotalFiles: 2, SuccessfulCount: 1, ValidationPassedCount: 1, ValidationFailedCount: 1, TotalOriginalSize: 100, TotalEncodedSize: 50, TotalDuration: time.Minute, AverageSpeed: 2, FileResults: []FileResult{{Filename: "a", Reduction: 50}}})
-		r.Verbose("hidden")
 	})
-	requireLogContains(t, out, "HARDWARE", "Hostname:", "host", "VIDEO", "in.mkv", "SCANNING", "SAMPLING", "auto-crop disabled", "1920:800", "no crop needed", "ENCODING", "SVT version:", "SVT params:", "VALIDATION", "Validation failed", "All checks passed", "video:", "audio:", "RESULTS", "Video reduction:", "Saved to:", "careful", "done", "BATCH", "1. a", "2. b", "File 1 of 2", "BATCH SUMMARY", "1 of 2 succeeded", "a (50.0% reduction)")
+	requireLogContains(t, out, "HARDWARE", "Hostname:", "host", "VIDEO", "in.mkv", "SCANNING", "SAMPLING", "auto-crop disabled", "1920:800", "no crop needed", "ENCODING", "SVT version:", "SVT params:", "VALIDATION", "Validation failed", "All checks passed", "video:", "audio:", "RESULTS", "Video reduction:", "Saved to:", "done", "BATCH", "1. a", "2. b", "File 1 of 2", "BATCH SUMMARY", "1 of 2 succeeded", "a (50.0% reduction)")
 	requireLogContains(t, errOut, "ERROR failed", "reason", "Context: file", "Suggestion: retry", "ERROR oops")
-	if strings.Count(out, "SCANNING") != 1 || strings.Contains(out, "hidden") || strings.Count(out, "Video reduction:") != 1 {
+	if strings.Count(out, "SCANNING") != 1 || strings.Count(out, "Video reduction:") != 1 {
 		t.Errorf("unexpected terminal output:\n%s", out)
 	}
 }
@@ -99,9 +97,8 @@ func TestTerminalReporterVerboseProgress(t *testing.T) {
 		r.EncodingProgress(ProgressSnapshot{Percent: 20}) // Throttled.
 		r.lastVerboseProgress = time.Now().Add(-6 * time.Second)
 		r.EncodingProgress(ProgressSnapshot{Percent: 30, MaxWorkers: 4, ActiveWorkers: 3, TargetWorkers: 3})
-		r.Verbose("details")
 	})
-	requireLogContains(t, out, "Encoding started (10.0k frames)", "10% chunks 1/4 (10.0k/1.0m)", "workers 2→3/4", "30% chunks", "workers 3/4", "details")
+	requireLogContains(t, out, "Encoding started (10.0k frames)", "10% chunks 1/4 (10.0k/1.0m)", "workers 2→3/4", "30% chunks", "workers 3/4")
 	if strings.Contains(out, "20% chunks") {
 		t.Errorf("unthrottled progress: %s", out)
 	}

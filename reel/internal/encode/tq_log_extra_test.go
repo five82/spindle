@@ -45,10 +45,10 @@ func TestTargetAggregateReportsMixedMetricsAndOutliers(t *testing.T) {
 		{ChunkIdx: 2, Metric: string(quality.MetricCVVDP), Target: 9, FinalScore: 10, FinalCRF: 32, Probes: []quality.Probe{{CRF: 32, Score: 10}}, StopReason: quality.StopRateCapped},
 		{ChunkIdx: 3, Metric: string(quality.MetricSSIMU2), Target: 80, FinalScore: 81, FinalCRF: 25, Probes: []quality.Probe{{CRF: 25, Score: 81}}},
 	}
-	var messages []string
-	logTargetAggregate(logs, func(s string) { messages = append(messages, s) })
-	joined := strings.Join(messages, "\n")
-	for _, want := range []string{"cvvdp-scored chunks", "ssimulacra2-scored chunks", "chunks=2 probes=4", "multi-probe chunks", "0009:3 probes", "max-probe chunks: [0009]", "rate-capped chunks", "initial_sources={neighbor:1}"} {
+	logger, out := captureLogger()
+	logTargetAggregate(logs, logger)
+	joined := out.String()
+	for _, want := range []string{"metric=cvvdp", "metric=ssimulacra2", "event_type=target_quality_summary chunks=2 probes=4", "multi_probe_chunks=", "0009:3 probes", "max_probe_chunks=[0009]", "rate_capped_chunks=[0002]", "initial_sources={neighbor:1}"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing %q in %s", want, joined)
 		}
@@ -56,8 +56,11 @@ func TestTargetAggregateReportsMixedMetricsAndOutliers(t *testing.T) {
 	if len(logs) != 3 {
 		t.Fatal("logs mutated")
 	}
-	logTargetAggregate(logs, nil)
-	logTargetAggregate(nil, func(string) { t.Fatal("empty aggregate emitted") })
+	out.Reset()
+	logTargetAggregate(nil, logger)
+	if out.Len() != 0 {
+		t.Fatalf("empty aggregate emitted: %s", out.String())
+	}
 }
 
 func TestTargetLogFiles(t *testing.T) {

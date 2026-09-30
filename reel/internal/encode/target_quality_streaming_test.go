@@ -62,7 +62,7 @@ func TestTargetQualityChunkSearchWithSyntheticScorer(t *testing.T) {
 			if err := os.MkdirAll(filepath.Join(work, "probes"), 0700); err != nil {
 				t.Fatal(err)
 			}
-			limiter := newAdaptiveLimiter(1, 1, 1, 3, nil, nil)
+			limiter := newAdaptiveLimiter(1, 1, 1, 3, nil)
 			r := newTargetQualityRun(TargetQualityConfig{Metric: quality.MetricCVVDP, Target: 9.5, Tolerance: 0.1, CRFMin: 10, CRFMax: 50, MaxProbes: 1, InitialCRF: 30}, &EncodeConfig{CRF: 30, Preset: 12}, tc.source, work, inf, nil, 32, 32, limiter, 1, nil, nil)
 			scorer := &syntheticScorer{t: t, err: tc.scoreErr}
 			pool := make(chan quality.ChunkScorer, 1)

@@ -145,12 +145,13 @@ import (
     "context"
     "fmt"
     "log"
+    "log/slog"
 
     "github.com/five82/spindle/reel"
 )
 
 func main() {
-    encoder, err := reel.New()
+    encoder, err := reel.New(reel.WithLogger(slog.Default()))
     if err != nil {
         log.Fatal(err)
     }
@@ -165,9 +166,12 @@ func main() {
 }
 ```
 
-Use `reel.New(reel.WithCRF(26.25))` to select fixed-CRF mode explicitly. Pass an
-event handler instead of `nil` to receive progress and completion events; see
-the [API documentation](https://pkg.go.dev/github.com/five82/spindle/reel).
+Pass a `reel.Reporter` instead of `nil` to receive progress, validation, and
+completion events. Diagnostics and decisions (grain treatment, target-quality
+calibration and per-probe search records, worker changes, memory-pressure
+warnings) are structured `log/slog` records sent to the `WithLogger` logger;
+without one they are discarded. See the
+[API documentation](https://pkg.go.dev/github.com/five82/spindle/reel).
 
 ## Development
 

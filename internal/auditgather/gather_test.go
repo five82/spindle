@@ -271,3 +271,28 @@ func TestResolveMediaTypeUnknownWithoutMetadata(t *testing.T) {
 		t.Fatalf("media type = %q, want movie", got)
 	}
 }
+
+// Stage-context attribution reaches shared-client lines (LLM, OpenSubtitles,
+// TMDB, Loom) and Reel's replayed records, so they join the item's report
+// with the stage that issued them.
+func TestParseLogLineCarriesStageAttribution(t *testing.T) {
+	item := &httpapi.ItemResponse{ID: 24}
+	report := &LogAnalysis{}
+	for _, line := range []string{
+		`{"time":"2026-04-04T21:41:09Z","level":"WARN","msg":"retrying LLM request","item_id":24,"stage":"analysis","task_id":9,"attempt":1,"event_type":"llm_retry","error_hint":"attempt 1/3","impact":"delayed response"}`,
+		`{"time":"2026-04-04T21:42:09Z","level":"INFO","msg":"grain treatment decided","item_id":24,"stage":"encoding","task_id":8,"attempt":1,"episode_key":"main","decision_type":"grain_treatment","decision_result":"treated","decision_reason":"grainy"}`,
+	} {
+		parseLogLine(line, item, report, time.Time{})
+	}
+	if len(report.Warnings) != 1 || report.Warnings[0].Stage != "analysis" || report.Warnings[0].Extras["task_id"] != nil || report.Warnings[0].Extras["attempt"] != float64(1) {
+		t.Fatalf("warning attribution: %+v", report.Warnings)
+	}
+	if len(report.Decisions) != 1 || report.Decisions[0].Stage != "encoding" || report.Decisions[0].Extras["episode_key"] != "main" {
+		t.Fatalf("decision attribution: %+v", report.Decisions)
+	}
+	var b strings.Builder
+	writeLogEntries(&b, "Warnings", report.Warnings)
+	if !strings.Contains(b.String(), "(analysis) [llm_retry] retrying LLM request") {
+		t.Fatalf("digest warning row: %s", b.String())
+	}
+}

@@ -1,7 +1,9 @@
 package textutil
 
 import (
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -220,4 +222,18 @@ func strSliceEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestExcerptKeepsBothEndsOfLongOutput(t *testing.T) {
+	if got := Excerpt([]byte("  short failure\n")); got != "short failure" {
+		t.Fatalf("short output = %q", got)
+	}
+	long := "panic: nil map write\n" + strings.Repeat("progress 50%\n", 1000) + "fatal: exit"
+	got := Excerpt([]byte(long))
+	if !strings.HasPrefix(got, "panic: nil map write") || !strings.HasSuffix(got, "fatal: exit") || len(got) > 2*excerptEdge+64 {
+		t.Fatalf("excerpt lost an end or kept the middle: %d bytes", len(got))
+	}
+	if !strings.Contains(got, fmt.Sprintf("[%d bytes omitted]", len(long)-2*excerptEdge)) {
+		t.Fatal("omission marker missing")
+	}
 }

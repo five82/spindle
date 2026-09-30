@@ -30,10 +30,9 @@ I'm not a maintainer. Expect rough edges.
   nonfatal outcomes such as skipped subtitles, one keypress from details.
   Bounded diagnostic history is separate from current structured issues.
 - **Logs.** Daemon and per-item logs with highlighting, follow mode, and filters
-  for level, component, lane, request, stage, asset, task, and attempt. Each
-  event is one row with its decision outcome inline; `t` expands every
-  structured field. Failed
-  fetches retain their error and mark retained data stale rather than empty.
+  for level, stage, asset, task, and attempt. Each event is one row with its
+  decision outcome inline; `t` expands every structured field. Failed fetches
+  retain their error and mark retained data stale rather than empty.
 - **Search.** Regex log search with `n`/`N`. The queue's `/` filters rows by
   title.
 - **Themes.** Slate and Nightfox, cycled with `T`.

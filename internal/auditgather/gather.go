@@ -408,7 +408,7 @@ var knownLogKeys = map[string]bool{
 	"decision_type": true, "decision_result": true, "decision_reason": true,
 	"event_type": true, "error_hint": true,
 	"stage": true, "stage_duration": true,
-	"item_id": true,
+	"item_id": true, "task_id": true,
 }
 
 // parseLogLine extracts structured data from a single JSON log line.
@@ -454,6 +454,7 @@ func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis, 
 	msg := getString(entry, "msg")
 	ts := getString(entry, "time")
 	eventType := getString(entry, "event_type")
+	stage := getString(entry, "stage")
 
 	// Track debug level.
 	if strings.EqualFold(level, "DEBUG") {
@@ -469,6 +470,7 @@ func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis, 
 			DecisionResult: getString(entry, "decision_result"),
 			DecisionReason: getString(entry, "decision_reason"),
 			Message:        msg,
+			Stage:          stage,
 			Extras:         buildExtras(entry),
 		})
 	}
@@ -481,6 +483,7 @@ func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis, 
 			Message:   msg,
 			EventType: eventType,
 			ErrorHint: getString(entry, "error_hint"),
+			Stage:     stage,
 			Extras:    buildExtras(entry),
 		})
 	}
@@ -493,6 +496,7 @@ func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis, 
 			Message:   msg,
 			EventType: eventType,
 			ErrorHint: getString(entry, "error_hint"),
+			Stage:     stage,
 			Extras:    buildExtras(entry),
 		})
 	}
@@ -506,6 +510,7 @@ func parseLogLine(line string, item *httpapi.ItemResponse, report *LogAnalysis, 
 			Level:     level,
 			Message:   msg,
 			EventType: eventType,
+			Stage:     stage,
 			Extras:    buildExtras(entry),
 		})
 	}

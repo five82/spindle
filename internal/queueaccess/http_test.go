@@ -43,7 +43,7 @@ func TestQueueHTTPMethods(t *testing.T) {
 		var response string
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/logs":
-			want := "component=worker&daemon_only=1&item=9&lane=encode&level=warn&limit=12&request=req-1&since=3&tail=1"
+			want := "daemon_only=1&item=9&level=warn&limit=12&since=3&stage=encoding&tail=1"
 			if r.URL.RawQuery != want {
 				t.Errorf("logs query = %q, want %q", r.URL.RawQuery, want)
 			}
@@ -83,7 +83,7 @@ func TestQueueHTTPMethods(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(response))}, nil
 	})}}
-	logs, next, err := access.Logs(LogsQuery{Since: 3, Limit: 12, Tail: true, ItemID: 9, Component: "worker", Lane: "encode", Request: "req-1", Level: "warn", DaemonOnly: true})
+	logs, next, err := access.Logs(LogsQuery{Since: 3, Limit: 12, Tail: true, ItemID: 9, Stage: "encoding", Level: "warn", DaemonOnly: true})
 	if err != nil || len(logs) != 1 || next != 4 {
 		t.Fatalf("Logs = %+v, %d, %v", logs, next, err)
 	}

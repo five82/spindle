@@ -1,210 +1,172 @@
 package reporter
 
 import (
-	"fmt"
-	"io"
-	"strings"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/five82/spindle/reel/internal/util"
 )
 
-// LogReporter writes encoding events to a log file.
+// LogReporter records reporter events as structured log records, so the
+// CLI's log file carries the same lifecycle facts (inputs, configuration,
+// progress, validation, results) as the diagnostics Reel logs directly.
 type LogReporter struct {
-	w                  io.Writer
+	log                *slog.Logger
 	mu                 sync.Mutex
 	lastProgressBucket int // Track progress in 5% buckets
 }
 
-// NewLogReporter creates a new log reporter that writes to the given writer.
-func NewLogReporter(w io.Writer) *LogReporter {
-	return &LogReporter{
-		w:                  w,
-		lastProgressBucket: -1,
-	}
-}
-
-func (r *LogReporter) log(level, format string, args ...any) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	msg := fmt.Sprintf(format, args...)
-	_, _ = fmt.Fprintf(r.w, "%s [%s] %s\n", timestamp, level, msg)
+// NewLogReporter creates a reporter that logs events to logger.
+func NewLogReporter(logger *slog.Logger) *LogReporter {
+	return &LogReporter{log: logger, lastProgressBucket: -1}
 }
 
 func (r *LogReporter) Hardware(summary HardwareSummary) {
-	r.log("INFO", "=== HARDWARE ===")
-	r.log("INFO", "Hostname: %s", summary.Hostname)
+	r.log.Info("hardware", "hostname", summary.Hostname)
 }
 
 func (r *LogReporter) Initialization(summary InitializationSummary) {
-	r.log("INFO", "=== VIDEO ===")
-	r.log("INFO", "Input: %s", summary.InputFile)
-	r.log("INFO", "Output: %s", summary.OutputFile)
-	r.log("INFO", "Duration: %s", summary.Duration)
-	r.log("INFO", "Resolution: %s", summary.Resolution)
-	r.log("INFO", "Dynamic range: %s", summary.DynamicRange)
-	r.log("INFO", "Audio: %s", summary.AudioDescription)
+	r.log.Info("video input",
+		"input", summary.InputFile,
+		"output", summary.OutputFile,
+		"duration", summary.Duration,
+		"resolution", summary.Resolution,
+		"dynamic_range", summary.DynamicRange,
+		"audio", summary.AudioDescription,
+	)
 }
 
 func (r *LogReporter) StageProgress(update StageProgress) {
-	r.log("INFO", "[%s] %s", strings.ToUpper(update.Stage), update.Message)
+	r.log.Info("stage progress", "stage", update.Stage, "state", update.State, "message", update.Message)
 }
 
 func (r *LogReporter) CropResult(summary CropSummary) {
-	if summary.Disabled {
-		r.log("INFO", "Crop detection: disabled")
-	} else if summary.Required {
-		r.log("INFO", "Crop detection: %s (%s)", summary.Message, summary.Crop)
-	} else {
-		r.log("INFO", "Crop detection: %s (no crop needed)", summary.Message)
-	}
+	r.log.Info("crop detection",
+		"disabled", summary.Disabled,
+		"required", summary.Required,
+		"crop", summary.Crop,
+		"message", summary.Message,
+	)
 }
 
 func (r *LogReporter) EncodingConfig(summary EncodingConfigSummary) {
-	r.log("INFO", "=== ENCODING CONFIG ===")
-	r.log("INFO", "Encoder: %s", summary.Encoder)
-	if summary.EncoderVersion != "" {
-		r.log("INFO", "SVT version: %s", summary.EncoderVersion)
-	}
-	r.log("INFO", "Preset: %s", summary.Preset)
-	r.log("INFO", "Tune: %s", summary.Tune)
-	r.log("INFO", "Quality: %s", summary.Quality)
-	r.log("INFO", "Pixel format: %s", summary.PixelFormat)
-	r.log("INFO", "Matrix: %s", summary.MatrixCoefficients)
-	r.log("INFO", "Audio codec: %s", summary.AudioCodec)
-	r.log("INFO", "Audio: %s", summary.AudioDescription)
-
-	if summary.SVTAV1Params != "" {
-		r.log("INFO", "SVT params: %s", summary.SVTAV1Params)
-	}
+	r.log.Info("encoding config",
+		"encoder", summary.Encoder,
+		"encoder_version", summary.EncoderVersion,
+		"preset", summary.Preset,
+		"tune", summary.Tune,
+		"quality", summary.Quality,
+		"pixel_format", summary.PixelFormat,
+		"matrix_coefficients", summary.MatrixCoefficients,
+		"audio_codec", summary.AudioCodec,
+		"audio", summary.AudioDescription,
+		"svtav1_params", summary.SVTAV1Params,
+	)
 }
 
 func (r *LogReporter) EncodingStarted(totalFrames uint64) {
 	r.mu.Lock()
 	r.lastProgressBucket = -1
 	r.mu.Unlock()
-	r.log("INFO", "=== ENCODING STARTED === (total frames: %d)", totalFrames)
+	r.log.Info("encoding started", "total_frames", totalFrames)
 }
 
 func (r *LogReporter) EncodingProgress(progress ProgressSnapshot) {
 	// Log progress at 5% intervals
 	bucket := int(progress.Percent / 5)
 	r.mu.Lock()
-	if bucket > r.lastProgressBucket && bucket <= 20 {
-		r.lastProgressBucket = bucket
+	if bucket <= r.lastProgressBucket || bucket > 20 {
 		r.mu.Unlock()
-		workerText := ""
-		if progress.MaxWorkers > 0 {
-			workerText = fmt.Sprintf(", workers %d/%d active/target, max %d", progress.ActiveWorkers, progress.TargetWorkers, progress.MaxWorkers)
-		}
-		memoryText := ""
-		if stats, ok := util.ReadMemoryStats(); ok && stats.MemTotal > 0 {
-			used := stats.MemTotal - stats.MemAvailable
-			memoryText = fmt.Sprintf(", mem %s/%s avail %s", util.FormatBytes(used), util.FormatBytes(stats.MemTotal), util.FormatBytes(stats.MemAvailable))
-			if stats.SwapTotal > 0 {
-				memoryText += fmt.Sprintf(", swap %s/%s", util.FormatBytes(stats.SwapUsed()), util.FormatBytes(stats.SwapTotal))
-			}
-		}
-		r.log("INFO", "Progress: %.0f%% (speed %.1fx avg / %.1fx recent, fps %.1f, eta %s%s%s)",
-			progress.Percent, progress.Speed, progress.RecentSpeed, progress.FPS,
-			util.FormatDurationFromSecs(int64(progress.ETA.Seconds())), workerText, memoryText)
-	} else {
-		r.mu.Unlock()
+		return
 	}
+	r.lastProgressBucket = bucket
+	r.mu.Unlock()
+	attrs := []any{
+		"percent", progress.Percent,
+		"speed", progress.Speed,
+		"recent_speed", progress.RecentSpeed,
+		"fps", progress.FPS,
+		"eta", util.FormatDurationFromSecs(int64(progress.ETA.Seconds())),
+		"chunks_complete", progress.ChunksComplete,
+		"chunks_total", progress.ChunksTotal,
+	}
+	if progress.MaxWorkers > 0 {
+		attrs = append(attrs, "workers_active", progress.ActiveWorkers, "workers_target", progress.TargetWorkers, "workers_max", progress.MaxWorkers)
+	}
+	if stats, ok := util.ReadMemoryStats(); ok && stats.MemTotal > 0 {
+		attrs = append(attrs, "mem_used", util.FormatBytes(stats.MemTotal-stats.MemAvailable),
+			"mem_total", util.FormatBytes(stats.MemTotal), "mem_available", util.FormatBytes(stats.MemAvailable))
+		if stats.SwapTotal > 0 {
+			attrs = append(attrs, "swap_used", util.FormatBytes(stats.SwapUsed()), "swap_total", util.FormatBytes(stats.SwapTotal))
+		}
+	}
+	r.log.Info("encoding progress", attrs...)
 }
 
 func (r *LogReporter) ValidationComplete(summary ValidationSummary) {
-	r.log("INFO", "=== VALIDATION ===")
-	if summary.Passed {
-		r.log("INFO", "Result: PASSED")
-	} else {
-		r.log("WARN", "Result: FAILED")
-	}
-
 	for _, step := range summary.Steps {
-		status := "ok"
-		if !step.Passed {
-			status = "FAILED"
-		}
-		r.log("INFO", "  - %s: %s (%s)", step.Name, status, step.Details)
+		r.log.Info("validation step", "step", step.Name, "passed", step.Passed, "details", step.Details)
 	}
+	r.log.Info("validation result", "passed", summary.Passed, "steps", len(summary.Steps))
 }
 
 func (r *LogReporter) EncodingComplete(summary EncodingOutcome) {
-	reduction := util.CalculateSizeReduction(summary.OriginalSize, summary.EncodedSize)
-
-	r.log("INFO", "=== RESULTS ===")
-	r.log("INFO", "Output: %s", summary.OutputFile)
-	r.log("INFO", "Size: %s -> %s (%.1f%% reduction)",
-		util.FormatBytesReadable(summary.OriginalSize),
-		util.FormatBytesReadable(summary.EncodedSize),
-		reduction)
-	if summary.VideoOriginalSize > 0 && summary.VideoEncodedSize > 0 {
-		videoReduction := util.CalculateSizeReduction(summary.VideoOriginalSize, summary.VideoEncodedSize)
-		r.log("INFO", "Video size: %s -> %s (%.1f%% reduction)",
-			util.FormatBytesReadable(summary.VideoOriginalSize),
-			util.FormatBytesReadable(summary.VideoEncodedSize),
-			videoReduction)
+	attrs := []any{
+		"output", summary.OutputFile,
+		"original_size", util.FormatBytesReadable(summary.OriginalSize),
+		"encoded_size", util.FormatBytesReadable(summary.EncodedSize),
+		"size_reduction_percent", util.CalculateSizeReduction(summary.OriginalSize, summary.EncodedSize),
 	}
-	r.log("INFO", "Video: %s", summary.VideoStream)
-	r.log("INFO", "Audio: %s", summary.AudioStream)
-	r.log("INFO", "Time: %s (avg speed %.1fx)",
-		util.FormatDurationFromSecs(int64(summary.TotalTime.Seconds())),
-		summary.AverageSpeed)
-	r.log("INFO", "Saved to: %s", summary.OutputPath)
-}
-
-func (r *LogReporter) Warning(message string) {
-	r.log("WARN", "%s", message)
+	if summary.VideoOriginalSize > 0 && summary.VideoEncodedSize > 0 {
+		attrs = append(attrs, "video_original_size", util.FormatBytesReadable(summary.VideoOriginalSize),
+			"video_encoded_size", util.FormatBytesReadable(summary.VideoEncodedSize),
+			"video_size_reduction_percent", util.CalculateSizeReduction(summary.VideoOriginalSize, summary.VideoEncodedSize))
+	}
+	attrs = append(attrs,
+		"video", summary.VideoStream,
+		"audio", summary.AudioStream,
+		"wall_time", summary.TotalTime.Round(time.Second).String(),
+		"average_speed", summary.AverageSpeed,
+		"saved_to", summary.OutputPath,
+	)
+	r.log.Info("encoding complete", attrs...)
 }
 
 func (r *LogReporter) Error(err ReporterError) {
-	r.log("ERROR", "%s: %s", err.Title, err.Message)
-	if err.Context != "" {
-		r.log("ERROR", "  Context: %s", err.Context)
-	}
-	if err.Suggestion != "" {
-		r.log("ERROR", "  Suggestion: %s", err.Suggestion)
-	}
+	r.log.Error(err.Title,
+		"event_type", "reel_error",
+		"error_hint", err.Suggestion,
+		"error", err.Message,
+		"context", err.Context,
+	)
 }
 
 func (r *LogReporter) OperationComplete(message string) {
-	r.log("INFO", "=== COMPLETE === %s", message)
+	r.log.Info("operation complete", "message", message)
 }
 
 func (r *LogReporter) BatchStarted(info BatchStartInfo) {
-	r.log("INFO", "=== BATCH STARTED ===")
-	r.log("INFO", "Processing %d files -> %s", info.TotalFiles, info.OutputDir)
-	for i, name := range info.FileList {
-		r.log("INFO", "  %d. %s", i+1, name)
-	}
+	r.log.Info("batch started", "files", info.TotalFiles, "output_dir", info.OutputDir, "file_list", info.FileList)
 }
 
 func (r *LogReporter) FileProgress(context FileProgressContext) {
-	r.log("INFO", "--- File %d of %d ---", context.CurrentFile, context.TotalFiles)
+	r.log.Info("batch file", "current_file", context.CurrentFile, "total_files", context.TotalFiles)
 }
 
 func (r *LogReporter) BatchComplete(summary BatchSummary) {
-	reduction := util.CalculateSizeReduction(summary.TotalOriginalSize, summary.TotalEncodedSize)
-
-	r.log("INFO", "=== BATCH COMPLETE ===")
-	r.log("INFO", "%d of %d succeeded", summary.SuccessfulCount, summary.TotalFiles)
-	r.log("INFO", "Validation: %d passed, %d failed", summary.ValidationPassedCount, summary.ValidationFailedCount)
-	r.log("INFO", "Size: %s -> %s (%.1f%% reduction)",
-		util.FormatBytesReadable(summary.TotalOriginalSize),
-		util.FormatBytesReadable(summary.TotalEncodedSize),
-		reduction)
-	r.log("INFO", "Time: %s (avg speed %.1fx)",
-		util.FormatDurationFromSecs(int64(summary.TotalDuration.Seconds())),
-		summary.AverageSpeed)
-
 	for _, result := range summary.FileResults {
-		r.log("INFO", "  - %s (%.1f%% reduction)", result.Filename, result.Reduction)
+		r.log.Info("batch file result", "file", result.Filename, "size_reduction_percent", result.Reduction)
 	}
-}
-
-func (r *LogReporter) Verbose(message string) {
-	r.log("DEBUG", "%s", message)
+	r.log.Info("batch complete",
+		"succeeded", summary.SuccessfulCount,
+		"files", summary.TotalFiles,
+		"validation_passed", summary.ValidationPassedCount,
+		"validation_failed", summary.ValidationFailedCount,
+		"original_size", util.FormatBytesReadable(summary.TotalOriginalSize),
+		"encoded_size", util.FormatBytesReadable(summary.TotalEncodedSize),
+		"size_reduction_percent", util.CalculateSizeReduction(summary.TotalOriginalSize, summary.TotalEncodedSize),
+		"wall_time", util.FormatDurationFromSecs(int64(summary.TotalDuration.Seconds())),
+		"average_speed", summary.AverageSpeed,
+	)
 }

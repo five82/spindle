@@ -19,17 +19,24 @@ rather than a stable public API. It contains:
   leak earlier runs' lines. Flooding `*_progress` event types are downsampled
   (first/last/evenly-strided, ~20 per type); `logs.events_omitted` counts
   dropped ticks — it is normal on long encodes, not data loss. Decisions are NOT
-  in `logs` — they live in `analysis.decision_groups`.
+  in `logs` — they live in `analysis.decision_groups`. Every entry and decision
+  logged inside a stage run carries `stage` (and `attempt` in extras); this
+  includes shared-client lines (`llm_request_*`, `llm_retry`, `opensubtitles_*`,
+  `tmdb_retry`, `loom_scan*`, transcription), so an LLM or OpenSubtitles retry
+  is attributable to the stage that issued it. DEBUG lines are never parsed;
+  `logs.is_debug` only says the files contain them.
 - **`transitions`**: Native, queue-backed per-item event history, ordered by
   increasing `id` across daemon restarts. Each entry has `time`, `type`,
   `stage`, and `itemId`; terminal events have numeric `durationSeconds`, and
   `encoding_substage` entries may carry `episodeKey`, `substage`, `message`, and
   `percent`. Each run emits `stage_start` and one terminal event:
   `stage_complete`, `stage_failed`, `stage_canceled`, `stage_stopped`, or
-  `stage_degraded`. Consult the full JSON for restart/retry sequences, failures,
-  and substage progress; these entries are not in `logs.events` or the digest's
-  Events section. The queue DB is transient: removed/cleared items lose their
-  transitions.
+  `stage_degraded`. Startup recovery records `stage_interrupted` (with the
+  task's last `episodeKey`, `message`, `percent`, and the run's
+  `durationSeconds`) for a run the daemon died under. Consult the full JSON for
+  restart/retry sequences, failures, and substage progress; these entries are
+  not in `logs.events` or the digest's Events section. The queue DB is
+  transient: removed/cleared items lose their transitions.
 - **`rip_cache`**: Cache metadata (disc title, cached_at, title_count,
   total_bytes). Serialized `rip_spec_data` and `metadata_json` blobs are omitted
   (already in parsed `envelope`). `disabled: true` means the cache is turned off
@@ -67,7 +74,7 @@ pre-computed summaries:
 | --------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `decision_groups`     | Decisions exist                    | Groups by (type, result, reason) with count, in log order. `entries` always carries every grouped decision with its timestamp — this is the only record of individual decisions and their spacing.                                                                                                                                                                                                                                                                                            |
 | `notable_decisions`   | Notable decisions exist            | Curated subset of decisions most useful for reporting (TMDB/title/crop/validation/source normalization/audio/subtitle/routing/episode match), avoiding noisy full decision scans.                                                                                                                                                                                                                                                                                                             |
-| `stage_timings`       | Native stage transitions exist     | One row per stage with start, successful completion, duration, start count, and completion count. Derived from `transitions`; `stage_failed`/`stage_canceled`/`stage_stopped`/`stage_degraded` are NOT counted as successful completions. Read raw transitions for the outcome of each run.                                                                                                                                                                                                   |
+| `stage_timings`       | Native stage transitions exist     | One row per stage with start, successful completion, duration, start count, completion count, and `interruptions` (`stage_interrupted` runs). Derived from `transitions`; `stage_failed`/`stage_canceled`/`stage_stopped`/`stage_degraded` are NOT counted as successful completions. Read raw transitions for the outcome of each run.                                                                                                                                                       |
 | `source_summary`      | Source/output traits known         | Disc source, UHD-likely flag, input/output resolution, input codecs, output codec, HDR/dynamic range.                                                                                                                                                                                                                                                                                                                                                                                         |
 | `title_selection`     | Movie titles exist                 | Feature-length candidates, selected title, selection decision/reason, and similar-runtime candidate count. Prefer this over hand-parsing `envelope.titles`.                                                                                                                                                                                                                                                                                                                                   |
 | `output_media`        | Valid probes exist                 | Compact stream summaries (video/audio/subtitle titles, languages, and dispositions) derived from ffprobe. Prefer this for normal stream checks; use raw `media[]` only for missing details. Label and disposition correctness is judged by `final_validation`, not here.                                                                                                                                                                                                                      |
@@ -137,5 +144,5 @@ The `stage_gate` object in the audit output contains:
   `event_type=tmdb_no_match`: `error_hint` distinguishes "TMDB returned no
   results for the query" (query pollution — check `query_title` against the disc
   label) from "no result met confidence threshold" (candidates existed but
-  scored too low — check the `tmdb_search` candidate scores at DEBUG), and
+  scored too low — check the raw DEBUG `TMDB candidate scored` lines), and
   `result_count` confirms which.

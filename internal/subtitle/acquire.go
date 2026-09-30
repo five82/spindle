@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/opensubtitles"
 	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
@@ -101,7 +102,7 @@ func (h *Handler) listSubtitleCandidates(ctx context.Context, sess *stage.Sessio
 		fileIDs[i] = candidate.FileID
 	}
 	sess.Logger.Info("subtitle candidate attempt set selected",
-		"decision_type", "subtitle_candidate_ranking",
+		"decision_type", logs.DecisionSubtitleCandidateRanking,
 		"decision_result", "selected",
 		"decision_reason", "source affinity orders release/file matches before generic or conflicting candidates",
 		"episode_key", key,

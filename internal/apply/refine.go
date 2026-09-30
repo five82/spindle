@@ -13,6 +13,7 @@ import (
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/media/audio"
 	"github.com/five82/spindle/internal/media/ffprobe"
+	"github.com/five82/spindle/internal/textutil"
 )
 
 type audioRefinementResult struct {
@@ -172,7 +173,7 @@ func remuxAudioTracks(ctx context.Context, logger *slog.Logger, path string, kep
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		_ = os.Remove(tmpPath)
-		return fmt.Errorf("ffmpeg remux: %w: %s", err, output)
+		return fmt.Errorf("ffmpeg remux: %w: %s", err, textutil.Excerpt(output))
 	}
 
 	// Replace original with remuxed file.

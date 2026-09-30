@@ -88,7 +88,7 @@ func TestStartFailures(t *testing.T) {
 	}
 }
 
-func TestStartDetectsEarlyChildExitAndTruncatesConsoleLog(t *testing.T) {
+func TestStartDetectsEarlyChildExitAndPreservesPreviousConsoleLog(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "console.log")
 	if err := os.WriteFile(logPath, []byte("old daemon output"), 0o644); err != nil {
@@ -106,7 +106,11 @@ func TestStartDetectsEarlyChildExitAndTruncatesConsoleLog(t *testing.T) {
 	}
 	data, err := os.ReadFile(logPath)
 	if err != nil || strings.Contains(string(data), "old daemon output") {
-		t.Fatalf("console log was not truncated: %q %v", data, err)
+		t.Fatalf("console log was not started fresh: %q %v", data, err)
+	}
+	prev, err := os.ReadFile(logPath + ".prev")
+	if err != nil || string(prev) != "old daemon output" {
+		t.Fatalf("previous console output not preserved: %q %v", prev, err)
 	}
 }
 

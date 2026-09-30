@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/queue"
 	"github.com/five82/spindle/internal/ripspec"
 )
@@ -415,7 +416,7 @@ func (s *Session) progress(percent *float64, message string, opts ...ProgressOpt
 			s.Task.Activities[index] = a
 		}
 		if transition && a.State == "waiting" && s.Logger != nil {
-			s.Logger.Info("operation waiting", "decision_type", "operation_wait", "decision_result", "waiting", "decision_reason", a.Message)
+			s.Logger.Info("operation waiting", "decision_type", logs.DecisionOperationWait, "decision_result", "waiting", "decision_reason", a.Message)
 		}
 		if a.State == "waiting" && a.Operation == "input" {
 			s.Task.EncodingDetailsJSON = ""

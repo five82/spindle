@@ -34,7 +34,7 @@ func TestDispatchAndFinalizeWithClosedStore(t *testing.T) {
 func TestMetricsFailuresNeverFailPipeline(t *testing.T) {
 	m := New(nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	m.SetMetricsPath(t.TempDir()) // opening a directory for append fails
-	m.writeMetricsRecord(&queue.Item{ID: 7, DiscTitle: "movie", RipSpecData: "not a rip spec"}, nil)
+	m.writeMetricsRecord(&queue.Item{ID: 7, DiscTitle: "movie", RipSpecData: "not a rip spec"}, nil, "", nil)
 	m.warnMetrics(7, errors.New("storage unavailable"))
 	if waits := m.takeWaits(7); waits != nil {
 		t.Fatalf("unexpected wait accounting: %v", waits)

@@ -108,9 +108,7 @@ type LogsQuery struct {
 	Limit      int
 	Tail       bool // seed from the tail on the initial window (Since == 0)
 	ItemID     int64
-	Component  string
-	Lane       string
-	Request    string
+	Stage      string
 	Level      string
 	DaemonOnly bool
 }
@@ -136,14 +134,8 @@ func (a *HTTPAccess) Logs(q LogsQuery) ([]LogEntry, uint64, error) {
 	if q.ItemID != 0 {
 		params.Set("item", strconv.FormatInt(q.ItemID, 10))
 	}
-	if q.Component != "" {
-		params.Set("component", q.Component)
-	}
-	if q.Lane != "" {
-		params.Set("lane", q.Lane)
-	}
-	if q.Request != "" {
-		params.Set("request", q.Request)
+	if q.Stage != "" {
+		params.Set("stage", q.Stage)
 	}
 	if q.Level != "" {
 		params.Set("level", q.Level)

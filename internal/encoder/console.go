@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -16,11 +17,23 @@ import (
 // of the JSON wire (no worker subprocess -- a crash takes down only the CLI
 // invocation that asked for it).
 func RunConsole(ctx context.Context, input, outputDir string, out io.Writer, quiet bool) (*reel.Result, error) {
-	enc, err := reel.New(reel.WithQualityMode("target"))
+	// Reel's decisions (INFO) and warnings print as key=value lines; quiet
+	// keeps only warnings.
+	level := slog.LevelInfo
+	if quiet {
+		level = slog.LevelWarn
+	}
+	logger := slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: level, ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+		if a.Key == slog.TimeKey {
+			return slog.Attr{}
+		}
+		return a
+	}}))
+	enc, err := reel.New(reel.WithQualityMode("target"), reel.WithLogger(logger))
 	if err != nil {
 		return nil, fmt.Errorf("create reel encoder: %w", err)
 	}
-	return enc.EncodeWithReporter(ctx, input, outputDir, &consoleReporter{out: out, quiet: quiet})
+	return enc.Encode(ctx, input, outputDir, &consoleReporter{out: out, quiet: quiet})
 }
 
 // consoleReporter prints reporter callbacks as plain lines. Output is
@@ -101,10 +114,6 @@ func (r *consoleReporter) ValidationComplete(s reel.ValidationSummary) {
 		}
 	}
 	r.printf("Validation: FAILED: %s\n", strings.Join(failed, "; "))
-}
-
-func (r *consoleReporter) Warning(message string) {
-	r.printf("Warning:    %s\n", message)
 }
 
 func (r *consoleReporter) Error(e reel.ReporterError) {

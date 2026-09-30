@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/five82/spindle/internal/logs"
+	"github.com/five82/spindle/internal/textutil"
 )
 
 // fallbackMountPaths are checked when lsblk reports no mount point.
@@ -142,7 +143,7 @@ func autoMount(ctx context.Context, device string) (string, error) {
 	//nolint:gosec // device path is validated by caller
 	cmd := exec.CommandContext(ctx, "mount", device)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("mount: %s: %w", strings.TrimSpace(string(out)), err)
+		return "", fmt.Errorf("mount: %s: %w", textutil.Excerpt(out), err)
 	}
 
 	// Read back mount point from /proc/mounts.

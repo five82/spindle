@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -58,7 +59,9 @@ type TargetQualityConfig struct {
 	// target-quality.json so a run's scores can be read next to the treatment
 	// (and the honest denoise ceiling) they were measured under.
 	GrainTreatment *perf.GrainTreatmentStats
-	Verbose        func(string)
+	// Logger receives per-probe and per-chunk search records (DEBUG), the
+	// calibration lock and run summary (INFO). Nil discards them.
+	Logger *slog.Logger
 	// scorerFactory lets tests exercise the scheduler and encoder without GPU handlers.
 	scorerFactory func(quality.MetricKind, uint32, uint32, *video.Info, string) (quality.ChunkScorer, error)
 }
@@ -205,7 +208,7 @@ func EncodeTargetQuality(
 	// docs/PERFORMANCE_TESTING.md.
 	primeConcurrency := resolutionWorkerFloor(maxWorkers, width, height)
 	rampCeiling := resolutionRampCeiling(maxWorkers, width, height)
-	limiter := newAdaptiveLimiter(maxWorkers, initialWorkers, rampCeiling, totalFrames, cfg.StatusCallback, cfg.WarningCallback)
+	limiter := newAdaptiveLimiter(maxWorkers, initialWorkers, rampCeiling, totalFrames, cfg.Logger)
 	cfg.LevelOfParallelism = resolveLevelOfParallelism(cfg.LevelOfParallelism, rampCeiling)
 
 	r := newTargetQualityRun(tq, cfg, inputPath, workDir, inf, cropRect, width, height, limiter, primeConcurrency, progressCb, doneSet)
@@ -265,7 +268,7 @@ func EncodeTargetQuality(
 	close(resultChan)
 	collectorWg.Wait()
 	writeAggregateTargetLog(workDir, r.logs, tq, r.calibration)
-	logTargetAggregate(r.logs, tq.Verbose)
+	logTargetAggregate(r.logs, r.tq.Logger)
 	return maxWorkers, targetQualityStats(r.logs, r.calibration), r.getError()
 }
 
@@ -284,6 +287,9 @@ func newTargetQualityRun(
 	progressCb ProgressCallback,
 	doneSet map[int]bool,
 ) *targetQualityRun {
+	if tq.Logger == nil {
+		tq.Logger = slog.New(slog.DiscardHandler)
+	}
 	r := &targetQualityRun{
 		tq:               tq,
 		cfg:              cfg,
@@ -379,9 +385,7 @@ func (r *targetQualityRun) closeWarmupPool() {
 			return
 		}
 		closeScorerPool(r.warmupPool)
-		if r.tq.Verbose != nil {
-			r.tq.Verbose("TQ warmup CVVDP scorers closed (VRAM released)")
-		}
+		r.tq.Logger.Debug("TQ warmup CVVDP scorers closed (VRAM released)")
 	})
 }
 
@@ -656,9 +660,15 @@ func (r *targetQualityRun) chunkPlan(ctx context.Context) (chunkSearchPlan, erro
 func (r *targetQualityRun) noteCalibrationLocked(offset float32) {
 	r.calibrationLocked.Do(func() {
 		r.prior.SetTarget(r.tq.Target + offset)
-		if r.tq.Verbose != nil {
-			r.tq.Verbose(fmt.Sprintf("TQ ssimu2 calibration locked: offset %+.2f -> target %.1f +/- %.1f (%d warmup probes)", offset, r.tq.Target+offset, r.tq.Tolerance, r.calibration.SampleCount()))
-		}
+		r.tq.Logger.Info("TQ ssimu2 calibration locked",
+			"decision_type", "ssimu2_calibration",
+			"decision_result", fmt.Sprintf("offset %+.2f", offset),
+			"decision_reason", fmt.Sprintf("%d CVVDP warmup probes mapped to SSIMULACRA2", r.calibration.SampleCount()),
+			"offset", offset,
+			"target", r.tq.Target+offset,
+			"tolerance", r.tq.Tolerance,
+			"warmup_probes", r.calibration.SampleCount(),
+		)
 	})
 }
 
@@ -743,24 +753,24 @@ func (r *targetQualityRun) encodeChunk(ctx context.Context, ch chunk.Chunk, plan
 		}
 		state.AddProbe(searchCtx, probe)
 		log.Probes = append(log.Probes, probe)
-		if r.tq.Verbose != nil {
-			var fps float64
-			if probe.MetricSeconds > 0 {
-				fps = float64(probe.Frames) / probe.MetricSeconds
-			}
-			initial := ""
-			if state.Round == 1 {
-				initial = fmt.Sprintf(" initial_source=%s", initialCRFSource)
-			}
-			rate := fmt.Sprintf(" peak_mbps=%.1f", probe.PeakBps/1e6)
-			if quality.OverRate(searchCtx, probe) {
-				// Rejected by the level cap: the score is ignored and the
-				// search moves up. Without this the log shows a search
-				// walking away from a near-target score for no reason.
-				rate += " over_rate=true"
-			}
-			r.tq.Verbose(fmt.Sprintf("TQ probe chunk=%04d round=%d crf=%s%s score=%.4f delta=%+.4f size=%d%s frames=%d encode=%.1fs metric=%.1fs metric_fps=%.1f", ch.Idx, state.Round, quality.FormatCRF(crf), initial, probe.Score, probe.Score-searchCtx.Target, probe.Size, rate, probe.Frames, probe.EncodeSeconds, probe.MetricSeconds, fps))
+		var fps float64
+		if probe.MetricSeconds > 0 {
+			fps = float64(probe.Frames) / probe.MetricSeconds
 		}
+		attrs := []any{"chunk", ch.Idx, "round", state.Round, "crf", quality.FormatCRF(crf),
+			"score", probe.Score, "delta", probe.Score - searchCtx.Target, "size", probe.Size,
+			"peak_mbps", probe.PeakBps / 1e6, "frames", probe.Frames, "encode_seconds", probe.EncodeSeconds,
+			"metric_seconds", probe.MetricSeconds, "metric_fps", fps}
+		if state.Round == 1 {
+			attrs = append(attrs, "initial_source", initialCRFSource)
+		}
+		if quality.OverRate(searchCtx, probe) {
+			// Rejected by the level cap: the score is ignored and the
+			// search moves up. Without this the log shows a search
+			// walking away from a near-target score for no reason.
+			attrs = append(attrs, "over_rate", true)
+		}
+		r.tq.Logger.Debug("TQ probe", attrs...)
 		if state.StopReason != quality.StopNone {
 			break
 		}
@@ -802,9 +812,8 @@ func (r *targetQualityRun) encodeChunk(ctx context.Context, ch chunk.Chunk, plan
 	log.StopReason = state.StopReason
 	log.CompletedAt = time.Now()
 	_ = writeChunkTargetLog(r.workDir, log)
-	if r.tq.Verbose != nil {
-		r.tq.Verbose(fmt.Sprintf("TQ final chunk=%04d crf=%s score=%.4f size=%d probes=%d stop=%s", ch.Idx, quality.FormatCRF(best.CRF), best.Score, log.FinalSize, len(log.Probes), log.StopReason))
-	}
+	r.tq.Logger.Debug("TQ final", "chunk", ch.Idx, "crf", quality.FormatCRF(best.CRF), "score", best.Score,
+		"size", log.FinalSize, "probes", len(log.Probes), "stop", log.StopReason)
 	return targetQualityResult{EncodeResult: worker.EncodeResult{ChunkIdx: ch.Idx, Frames: ch.Frames(), Size: uint64(stat.Size())}, Log: log}
 }
 
@@ -946,7 +955,7 @@ func (r *targetQualityRun) newRefCache(ch chunk.Chunk) *chunkRefCache {
 	if r.cfg.Denoise == "" {
 		return nil
 	}
-	return newChunkRefCache(r.workDir, ch, video.FrameSize(r.inf, r.cropRect), r.cfg.WarningCallback)
+	return newChunkRefCache(r.workDir, ch, video.FrameSize(r.inf, r.cropRect), r.tq.Logger)
 }
 
 func copyFile(srcPath, dstPath string) error {

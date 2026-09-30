@@ -1,7 +1,9 @@
 package encode
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,20 +29,21 @@ func TestRefCacheFallsBackAfterFilesystemFailures(t *testing.T) {
 			} else if err := os.Mkdir(tc.path, 0700); err != nil {
 				t.Fatal(err)
 			}
-			var warnings []string
-			cache := &chunkRefCache{path: tc.path, frameSize: 4, frames: 1, warn: func(s string) { warnings = append(warnings, s) }}
+			var logs bytes.Buffer
+			cache := &chunkRefCache{path: tc.path, frameSize: 4, frames: 1, log: slog.New(slog.NewTextHandler(&logs, nil))}
+			warnings := func() int { return strings.Count(logs.String(), "event_type=refcache_fallback") }
 			src := failingFrameReader{errors.New("source failure")}
 			reader, done := cache.fill(src)
 			defer done(false)
 			if err := reader.ReadFrame(0, make([]byte, 4)); !errors.Is(err, src.err) {
 				t.Fatalf("source error lost: %v", err)
 			}
-			if !cache.disabled || len(warnings) != 1 || !strings.Contains(warnings[0], "falling back") {
-				t.Fatalf("fallback disabled=%v warnings=%v", cache.disabled, warnings)
+			if !cache.disabled || warnings() != 1 {
+				t.Fatalf("fallback disabled=%v warnings=%s", cache.disabled, logs.String())
 			}
 			cache.fail("again")
-			if len(warnings) != 1 {
-				t.Fatalf("duplicate warning: %v", warnings)
+			if warnings() != 1 {
+				t.Fatalf("duplicate warning: %s", logs.String())
 			}
 		})
 	}

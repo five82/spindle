@@ -54,14 +54,11 @@ type logState struct {
 	lastItemID   int64  // Track which item the cursor belongs to
 
 	// Filters (apply to both daemon and item logs via /api/logs)
-	filterLevel     string
-	filterComponent string
-	filterLane      string
-	filterRequest   string
-	filterStage     string
-	filterAsset     string
-	filterTask      string
-	filterAttempt   string
+	filterLevel   string
+	filterStage   string
+	filterAsset   string
+	filterTask    string
+	filterAttempt string
 
 	// Search
 	searchActive   bool
@@ -217,9 +214,7 @@ func (m *Model) renderLogStatus(styles Styles) string {
 	// Filters, including the default level, so the window is never unexplained.
 	var filterParts []string
 	for _, f := range []struct{ name, value string }{
-		{"level", m.logState.filterLevel}, {"comp", m.logState.filterComponent},
-		{"lane", m.logState.filterLane}, {"req", m.logState.filterRequest},
-		{"stage", m.logState.filterStage}, {"asset", m.logState.filterAsset},
+		{"level", m.logState.filterLevel}, {"stage", m.logState.filterStage}, {"asset", m.logState.filterAsset},
 		{"task", m.logState.filterTask}, {"attempt", m.logState.filterAttempt},
 	} {
 		if f.value != "" {
@@ -314,9 +309,6 @@ func (m *Model) styleLogEvent(evt spindle.LogEvent, styles Styles, highlightErro
 	result.WriteString(" ")
 	result.WriteString(m.getLevelStyle(level, styles).Bold(true).Render(level))
 
-	// Note: the [component] tag is part of formatLogEvent's plain text (for
-	// search) but is not shown here, since the stage is already surfaced via
-	// the subject below.
 	// Inside the inspector every event belongs to the inspected item.
 	itemID := evt.ItemID
 	if m.inspecting {
@@ -439,7 +431,7 @@ func (m *Model) getLevelStyle(level string, styles Styles) lipgloss.Style {
 // logFiltersActive reports whether any filter narrows the log beyond the
 // default INFO level.
 func (m *Model) logFiltersActive() bool {
-	return (m.logState.filterLevel != "" && !strings.EqualFold(m.logState.filterLevel, "info")) || m.logState.filterComponent != "" || m.logState.filterLane != "" || m.logState.filterRequest != "" || m.logState.filterStage != "" || m.logState.filterAsset != "" || m.logState.filterTask != "" || m.logState.filterAttempt != ""
+	return (m.logState.filterLevel != "" && !strings.EqualFold(m.logState.filterLevel, "info")) || m.logState.filterStage != "" || m.logState.filterAsset != "" || m.logState.filterTask != "" || m.logState.filterAttempt != ""
 }
 
 // handleLogsKey processes keyboard input for logs view.
@@ -713,8 +705,7 @@ func (m *Model) fetchItemLogs(item *spindle.QueueItem) tea.Cmd {
 func (m *Model) fetchLogs(source logSource, itemID int64, cursor uint64) tea.Cmd {
 	s := m.logState
 	query := spindle.LogQuery{Since: cursor, Limit: logFetchLimit, Tail: cursor == 0, ItemID: itemID, DaemonOnly: source == logSourceDaemon,
-		Level: s.filterLevel, Component: s.filterComponent, Lane: s.filterLane, Request: s.filterRequest,
-		Stage: s.filterStage, Asset: s.filterAsset, TaskID: s.filterTask, Attempt: s.filterAttempt}
+		Level: s.filterLevel, Stage: s.filterStage, Asset: s.filterAsset, TaskID: s.filterTask, Attempt: s.filterAttempt}
 	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), logFetchTimeout)
@@ -806,9 +797,6 @@ func formatLogEvent(evt spindle.LogEvent) string {
 	ts := logEventTimestamp(evt)
 	level := strings.ToUpper(strings.TrimSpace(evt.Level))
 	parts := []string{ts, level}
-	if component := strings.TrimSpace(evt.Component); component != "" {
-		parts = append(parts, fmt.Sprintf("[%s]", component))
-	}
 	subject := composeLogSubject(evt.ItemID, evt.Stage)
 	header := strings.Join(parts, " ")
 	if subject != "" {
@@ -860,38 +848,17 @@ func trimLogBuffer[T any](lines []T, limit int) []T {
 func (m *Model) initLogFilterInputs() {
 	// Level input
 	levelInput := textinput.New()
-	levelInput.Placeholder = "e.g. error, warn, info, debug"
+	levelInput.Placeholder = "e.g. error, warn, info"
 	levelInput.CharLimit = 20
 	levelInput.SetWidth(30)
 
-	// Component input
-	compInput := textinput.New()
-	compInput.Placeholder = "e.g. api, workflow, encoder"
-	compInput.CharLimit = 50
-	compInput.SetWidth(30)
-
-	// Lane input
-	laneInput := textinput.New()
-	laneInput.Placeholder = "e.g. ripping, encoding"
-	laneInput.CharLimit = 50
-	laneInput.SetWidth(30)
-
-	// Request input
-	reqInput := textinput.New()
-	reqInput.Placeholder = "e.g. abc123"
-	reqInput.CharLimit = 50
-	reqInput.SetWidth(30)
-
 	m.logFilterInputs[0] = levelInput
-	m.logFilterInputs[1] = compInput
-	m.logFilterInputs[2] = laneInput
-	m.logFilterInputs[3] = reqInput
-	for i, placeholder := range []string{"stage type", "asset key (e.g. main)", "task ID from Events", "attempt number"} {
+	for i, placeholder := range []string{"stage (e.g. encoding, subtitling)", "asset key (e.g. main)", "task ID from Events", "attempt number"} {
 		input := textinput.New()
 		input.Placeholder = placeholder
 		input.CharLimit = 80
 		input.SetWidth(30)
-		m.logFilterInputs[i+4] = input
+		m.logFilterInputs[i+1] = input
 	}
 }
 
@@ -899,18 +866,12 @@ func (m *Model) initLogFilterInputs() {
 func (m *Model) openLogFilters() {
 	// Pre-fill with current filter values
 	m.logFilterInputs[0].SetValue(m.logState.filterLevel)
-	m.logFilterInputs[1].SetValue(m.logState.filterComponent)
-	m.logFilterInputs[2].SetValue(m.logState.filterLane)
-	m.logFilterInputs[3].SetValue(m.logState.filterRequest)
 	for i, value := range []string{m.logState.filterStage, m.logState.filterAsset, m.logState.filterTask, m.logState.filterAttempt} {
-		m.logFilterInputs[i+4].SetValue(value)
-		m.logFilterInputs[i+4].Blur()
+		m.logFilterInputs[i+1].SetValue(value)
+		m.logFilterInputs[i+1].Blur()
 	}
 	m.logFilterFocusIdx = 0
 	m.logFilterInputs[0].Focus()
-	m.logFilterInputs[1].Blur()
-	m.logFilterInputs[2].Blur()
-	m.logFilterInputs[3].Blur()
 	m.showLogFilters = true
 }
 
@@ -962,13 +923,10 @@ func (m Model) handleLogFiltersKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // applyLogFilters applies the filter values from the modal.
 func (m *Model) applyLogFilters() {
 	m.logState.filterLevel = strings.TrimSpace(m.logFilterInputs[0].Value())
-	m.logState.filterComponent = strings.TrimSpace(m.logFilterInputs[1].Value())
-	m.logState.filterLane = strings.TrimSpace(m.logFilterInputs[2].Value())
-	m.logState.filterRequest = strings.TrimSpace(m.logFilterInputs[3].Value())
-	m.logState.filterStage = strings.TrimSpace(m.logFilterInputs[4].Value())
-	m.logState.filterAsset = strings.TrimSpace(m.logFilterInputs[5].Value())
-	m.logState.filterTask = strings.TrimSpace(m.logFilterInputs[6].Value())
-	m.logState.filterAttempt = strings.TrimSpace(m.logFilterInputs[7].Value())
+	m.logState.filterStage = strings.TrimSpace(m.logFilterInputs[1].Value())
+	m.logState.filterAsset = strings.TrimSpace(m.logFilterInputs[2].Value())
+	m.logState.filterTask = strings.TrimSpace(m.logFilterInputs[3].Value())
+	m.logState.filterAttempt = strings.TrimSpace(m.logFilterInputs[4].Value())
 	m.logState.loaded, m.logState.fetchError = false, nil
 	m.logState.generation++
 	m.logState.contentVersion++
@@ -998,11 +956,7 @@ func (m Model) renderLogFilters() string {
 		label string
 		index int
 	}{
-		{"Level:     ", 0},
-		{"Component: ", 1},
-		{"Lane:      ", 2},
-		{"Request:   ", 3},
-		{"Stage:     ", 4}, {"Asset:     ", 5}, {"Task:      ", 6}, {"Attempt:   ", 7},
+		{"Level:   ", 0}, {"Stage:   ", 1}, {"Asset:   ", 2}, {"Task:    ", 3}, {"Attempt: ", 4},
 	}
 	for _, f := range fields {
 		label := f.label

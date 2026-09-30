@@ -17,6 +17,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/five82/spindle/internal/config"
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/queueaccess"
 )
 
@@ -169,7 +170,7 @@ func buildLogger() *slog.Logger {
 	if flagQuiet && level < slog.LevelWarn {
 		level = slog.LevelWarn
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	return slog.New(logs.NewContextHandler(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 }
 
 // resolveTarget resolves a cache entry number or direct file path to a file path.

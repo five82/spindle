@@ -83,11 +83,11 @@ where anomalies exist.
   non-drive workers, duplicate stage runs, `startup_queue_state`, skipped
   already-ripped titles, and encodes resuming from completed chunks are the
   designed `spindle stop` behavior (see the drain signature in Phase 2)
-- Reel's "discarded stale resume state" warning right after a reel upgrade or a
+- Reel's `event_type=resume_state_discarded` warning right after an upgrade or a
   re-ripped source — the designed auto-reset; a finding only when nothing
   changed to explain it. For a newly queued disc, check prior runs of the same
-  fingerprint for disk/write failures; fresh items now discard inherited
-  encode state when they have no recorded completed rip
+  fingerprint for disk/write failures; fresh items now discard inherited encode
+  state when they have no recorded completed rip
 - Subtitle `qc_observations` that are below review thresholds and have
   `validation_result=passed`
 - An adopted subtitle ending before long credits, or a `reference_tail_gap_s` at
@@ -109,10 +109,10 @@ where anomalies exist.
   ceiling measured, is worth reporting
 - A movie's encoding task holding the `encode` claim with no encoded output
   while its rip runs — the deferred plan is expected; see Stage Gating above
-- A resolved `disk_space_wait` followed by `disk_space_available` when the
-  item later succeeds — report the pause as context, not a processing defect.
-  An active `disk_space` warning needs an operator-facing free-space action;
-  an actual later ENOSPC needs its own root-cause investigation
+- A resolved `disk_space_wait` followed by `disk_space_available` when the item
+  later succeeds — report the pause as context, not a processing defect. An
+  active `disk_space` warning needs an operator-facing free-space action; an
+  actual later ENOSPC needs its own root-cause investigation
 - An identification-failed item having no rip, encode, or staging artifacts —
   that is the fatal no-TMDB-match rule working, not missing work
 
@@ -230,8 +230,8 @@ After running `spindle queue audit`, check only the phases flagged as `true` in
 - [ ] Reported any `keydb_download_error` stale-catalog fallback as a WARNING
 - [ ] Analyzed logs/decisions for anomalies beyond simple error counts, drilling
       into the full JSON wherever the digest flagged an omission or something
-      looked off; for a fresh-item resume warning, checked prior same-fingerprint
-      runs outside the current item's clamped log window
+      looked off; for a fresh-item resume warning, checked prior
+      same-fingerprint runs outside the current item's clamped log window
 - [ ] Read full JSON `transitions` for stage starts/terminal outcomes and
       encoding substages; used `analysis.stage_timings` for the timing table,
       not nonexistent `logs.stages`
@@ -251,14 +251,16 @@ After running `spindle queue audit`, check only the phases flagged as `true` in
 ### Post-Episode-Identification (phase_episode_id)
 
 - [ ] Checked `envelope.attributes.content_id` method, canonical TMDB catalog,
-      usable OpenSubtitles references, completion, and matched/unresolved/review counts
+      usable OpenSubtitles references, completion, and matched/unresolved/review
+      counts
 - [ ] Traced `reference_search` selection/omission and file IDs; checked title
       trust, retry cleanup, and full-reference/full-transcript handoff without
-      reading cue text; did not mistake dialogue agreement for label verification
+      reading cue text; did not mistake dialogue agreement for label
+      verification
 - [ ] Reviewed every manifest entry's `match_probability` against 0.90;
       distinguished rejected candidates and `none` from accepted identities
-- [ ] Traced unresolved outcomes to catalog/reference/evidence/classifier reasons without
-      inspecting transcript text or assuming extras
+- [ ] Traced unresolved outcomes to catalog/reference/evidence/classifier
+      reasons without inspecting transcript text or assuming extras
 - [ ] Checked runtime, overlap, sequence, and canonical-numbering safeguards;
       did not infer completeness from high probability
 - [ ] Verified current per-episode review flags, concurrent encoding assets, and

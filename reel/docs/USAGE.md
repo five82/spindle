@@ -62,8 +62,16 @@ reel encode -v -i input.mkv -o output/
 
 - `-l, --log-dir <DIR>`: Override the log directory (defaults to
   `~/.local/state/reel/logs`)
-- `-v, --verbose`: Verbose output with detailed status
+- `-v, --verbose`: Verbose output with detailed status; also records DEBUG
+  measurements (per-probe `TQ probe`/`TQ final` records, grain gate samples,
+  phase timings) in the log file
 - `--no-log`: Disable log file creation
+
+The log file is structured `key=value` text: one record per event, with
+decisions carrying `decision_type`/`decision_result`/`decision_reason` and
+warnings carrying `event_type`/`error_hint`/`impact`. Warnings also print on the
+terminal.
+
 - `--keep-workdir`: Keep the `.reel-*` work directory after successful encodes
   for probe/log analysis
 
@@ -204,4 +212,7 @@ reel encode -v -i input.mkv -o output/
 
 # Check log files
 ls ~/.local/state/reel/logs/
+
+# Per-chunk target-quality outcomes from a verbose run
+grep 'msg="TQ final"' ~/.local/state/reel/logs/reel_encode_run_*.log
 ```

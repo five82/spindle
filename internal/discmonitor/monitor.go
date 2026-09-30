@@ -227,7 +227,11 @@ func (m *Monitor) enqueueBackground(event *DiscEvent) {
 	defer cancel()
 
 	if _, err := m.enqueuePipeline(ctx, event); err != nil {
-		m.logger.Error("background enqueue failed", "error", err)
+		m.logger.Error("background enqueue failed",
+			"event_type", "disc_enqueue_failed",
+			"error_hint", "detected disc was not queued; re-run disc detection",
+			"error", err,
+		)
 	}
 }
 

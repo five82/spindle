@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/queue"
 )
 
@@ -93,7 +94,11 @@ func ExecuteWorkflowStage(ctx context.Context, item *queue.Item, opts WorkflowOp
 			err = errors.Join(err, &PersistenceError{Op: "persist stage outcome", Err: eventErr})
 		}
 	}()
-	runLogger := logger.With("item_id", item.ID, "task_id", taskID, "attempt", attempt)
+	// Handler lines carry the attribution through the session logger; shared
+	// clients with daemon-wide loggers inherit it through ctx.
+	attribution := []any{"item_id", item.ID, "stage", stageName, "task_id", taskID, "attempt", attempt}
+	ctx = logs.ContextWith(ctx, attribution...)
+	runLogger := logger.With(attribution...)
 	sess, err := NewSession(ctx, opts.Store, item, opts.Task)
 	if err == nil {
 		sess.Logger = runLogger

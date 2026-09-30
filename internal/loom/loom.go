@@ -45,7 +45,7 @@ func (c *Client) Scan(ctx context.Context) error {
 		return nil
 	}
 	start := time.Now()
-	c.logger.Info("Loom library scan started", "event_type", "loom_scan_start")
+	c.logger.InfoContext(ctx, "Loom library scan started", "event_type", "loom_scan_start")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url+"/api/v1/scan", nil)
 	if err != nil {
 		return fmt.Errorf("loom scan: create request: %w", err)
@@ -60,7 +60,7 @@ func (c *Client) Scan(ctx context.Context) error {
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return fmt.Errorf("loom scan: status %d", resp.StatusCode)
 	}
-	c.logger.Info("Loom library scan triggered",
+	c.logger.InfoContext(ctx, "Loom library scan triggered",
 		"event_type", "loom_scan",
 		"status", resp.StatusCode,
 		"duration_ms", time.Since(start).Milliseconds(),

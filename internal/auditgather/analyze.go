@@ -257,6 +257,8 @@ func computeStageTimings(events []queue.Event) []StageTiming {
 			if st.StartedAt == "" {
 				st.StartedAt = e.Time
 			}
+		case "stage_interrupted":
+			st.Interruptions++
 		case "stage_complete":
 			st.Completions++
 			st.CompletedAt = e.Time
@@ -972,6 +974,20 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 			if activity.Operation == "disk_space" && activity.State == "waiting" {
 				anomalies = append(anomalies, Anomaly{
 					Severity: "warning", Category: "disk_space", Message: activity.Message,
+				})
+			}
+		}
+	}
+
+	// A run with no terminal outcome means the daemon died under it: a drain
+	// records stage_canceled instead, so this is never a normal restart.
+	if a != nil {
+		for _, st := range a.StageTimings {
+			if st.Interruptions > 0 {
+				anomalies = append(anomalies, Anomaly{
+					Severity: "warning",
+					Category: "stage_interrupted",
+					Message:  fmt.Sprintf("%s interrupted %d time(s) without a terminal outcome (daemon crash or kill); the run restarted from pending — check daemon-console.log.prev for a panic", st.Stage, st.Interruptions),
 				})
 			}
 		}

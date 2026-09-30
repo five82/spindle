@@ -20,7 +20,6 @@ func sampleLogEvent() spindle.LogEvent {
 		Timestamp: "2026-07-05T12:34:56Z",
 		Level:     "warn",
 		Message:   "disc read retry",
-		Component: "ripper",
 		Stage:     "ripping",
 		ItemID:    42,
 		Fields: map[string]string{
@@ -51,11 +50,11 @@ func TestLogEventTimestampUsesParsedLocalTime(t *testing.T) {
 	}
 }
 
-func TestFormatLogEventIncludesComponentAndFields(t *testing.T) {
+func TestFormatLogEventIncludesSubjectAndFields(t *testing.T) {
 	evt := sampleLogEvent()
 	text := formatLogEvent(evt)
 
-	for _, want := range []string{"WARN", "[ripper]", "ID #42 (ripping)", "disc read retry", "Attempt=2", "Drive=/dev/sr0"} {
+	for _, want := range []string{"WARN", "ID #42 (ripping)", "disc read retry", "Attempt=2", "Drive=/dev/sr0"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("formatLogEvent() = %q, missing %q", text, want)
 		}
@@ -64,9 +63,7 @@ func TestFormatLogEventIncludesComponentAndFields(t *testing.T) {
 
 // TestStyleLogEventMatchesPlainTextContent verifies that the styled line
 // built directly from the structured event carries the same visual content
-// (level, subject, message, fields) as the regex era, minus the component
-// tag which the log viewer intentionally does not display (the stage is
-// already surfaced via the subject).
+// (level, subject, message, fields) as the plain-text form.
 func TestStyleLogEventMatchesPlainTextContent(t *testing.T) {
 	theme := GetTheme("Nightfox")
 	styles := theme.Styles()
@@ -88,9 +85,6 @@ func TestStyleLogEventMatchesPlainTextContent(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(styled, "[ripper]") {
-		t.Fatalf("styleLogEvent() = %q, should not render the [component] tag (stage already shown)", styled)
-	}
 }
 
 func TestStyleLogEventUppercasesLevel(t *testing.T) {

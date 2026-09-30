@@ -64,7 +64,7 @@ func TestTaskTelemetryIsAttemptOwnedAndResetOnRecovery(t *testing.T) {
 	if err = store.UpdateTaskProgress(enc); err != nil {
 		t.Fatal(err)
 	}
-	if err = store.ResetRunningTasks(); err != nil {
+	if _, err = store.ResetRunningTasks(); err != nil {
 		t.Fatal(err)
 	}
 	got, err = store.TasksForItem(item.ID)

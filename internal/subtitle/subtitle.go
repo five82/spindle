@@ -292,7 +292,6 @@ func (h *Handler) ensureSyncReference(ctx context.Context, sess *stage.Session, 
 		AudioIndex: selected.Index,
 		Language:   selected.Language,
 		OutputDir:  outDir,
-		ItemID:     sess.Item.ID,
 		EpisodeKey: job.Key,
 		Purpose:    "subtitle_sync_reference",
 	}, func(phase transcription.Phase, _ time.Duration) {
@@ -338,7 +337,7 @@ func transcriptArtifact(sess *stage.Session, key string) *transcription.Transcri
 		duration = cues[len(cues)-1].End
 	}
 	sess.Logger.Info("reusing transcript artifact for subtitle generation",
-		"decision_type", "subtitle_transcript_source",
+		"decision_type", logs.DecisionSubtitleTranscriptSource,
 		"decision_result", "artifact_reused",
 		"decision_reason", "canonical transcript already produced earlier in the pipeline",
 		"episode_key", key,
@@ -380,9 +379,7 @@ func applySubtitleReviewIssues(logger *slog.Logger, sess *stage.Session, key str
 		requiresReview := reviewIssueSet[issue]
 		if !requiresReview {
 			logger.Debug("SRT validation observation",
-				"decision_type", logs.DecisionSRTValidation,
-				"decision_result", issue,
-				"decision_reason", "automated quality check recorded without review routing",
+				"check", issue,
 				"episode_key", key,
 				"requires_review", false,
 			)
@@ -411,12 +408,14 @@ func persistReviewReason(logger *slog.Logger, sess *stage.Session, key, envReaso
 	}); mergeErr != nil {
 		logger.Error("subtitle review persistence failed",
 			"event_type", "subtitle_failure_persist_failed",
+			"error_hint", "episode review reason not saved to the rip spec",
 			"error", mergeErr,
 		)
 	}
 	if mergeErr := sess.MergeAddReviewReason(queueReason); mergeErr != nil {
 		logger.Error("subtitle review persistence failed",
 			"event_type", "subtitle_failure_persist_failed",
+			"error_hint", "item review reason not saved to the queue",
 			"error", mergeErr,
 		)
 	}
@@ -444,6 +443,7 @@ func recordSubtitleFailure(logger *slog.Logger, sess *stage.Session, key, errMsg
 	}); mergeErr != nil {
 		logger.Error("subtitle failure persistence failed",
 			"event_type", "subtitle_failure_persist_failed",
+			"error_hint", "failed subtitle asset not saved to the rip spec",
 			"error", mergeErr,
 		)
 	}

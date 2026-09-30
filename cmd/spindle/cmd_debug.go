@@ -288,7 +288,8 @@ func newDebugCommentaryCmd() *cobra.Command {
 					OutputDir:  filepath.Join(workDir, "audio-0"),
 				})
 				if pErr != nil {
-					logger.Warn("primary transcription failed", "error", pErr)
+					logger.Warn("primary transcription failed", "event_type", "debug_transcription_failed",
+						"error_hint", pErr.Error(), "impact", "similarity not computed for this file", "error", pErr)
 					fmt.Printf("Similarity: error (primary transcription failed)\n")
 					continue
 				}
@@ -300,7 +301,8 @@ func newDebugCommentaryCmd() *cobra.Command {
 					OutputDir:  filepath.Join(workDir, fmt.Sprintf("audio-%d", candidateAudioIdx)),
 				})
 				if cErr != nil {
-					logger.Warn("candidate transcription failed", "error", cErr)
+					logger.Warn("candidate transcription failed", "event_type", "debug_transcription_failed",
+						"error_hint", cErr.Error(), "impact", "similarity not computed for this file", "error", cErr)
 					fmt.Printf("Similarity: error (candidate transcription failed)\n")
 					continue
 				}
