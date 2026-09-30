@@ -100,16 +100,14 @@ func resourceOrder(pipeline []spindle.PipelineStage, resources map[string]spindl
 }
 
 // resourceLabel renders a resource name for the NOW band.
-// Mechanical rules only: strip the "encode_" prefix, uppercase short names.
+// Mechanical rules only: strip the "encode_" prefix, uppercase short names
+// (acronyms such as GPU), title-case the rest.
 func resourceLabel(name string) string {
 	name = strings.TrimPrefix(name, "encode_")
 	if len(name) <= 3 {
 		return strings.ToUpper(name)
 	}
-	if name == "drive" {
-		return "Drive"
-	}
-	return name
+	return titleCase(name)
 }
 
 // itemDisplayStage returns the stage name that best describes the item now:

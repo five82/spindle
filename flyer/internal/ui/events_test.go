@@ -24,10 +24,43 @@ func TestItemEventsRenderKeepsLifecycleOutcomes(t *testing.T) {
 	}
 	m.width = 100
 	shown := strings.Join(strings.Fields(stripANSI(m.renderItemEvents())), " ")
-	if strings.Contains(shown, "Encoding started") || strings.Contains(stripANSI(m.renderItemEvents()), "\n\n") ||
-		!strings.Contains(shown, "Ripping started") || !strings.Contains(shown, "Encoding Chunking") ||
-		!strings.Contains(shown, "Encoding completed") {
+	if strings.Contains(shown, "Encoding Started") || strings.Contains(stripANSI(m.renderItemEvents()), "\n\n") ||
+		!strings.Contains(shown, "Ripping Started") || !strings.Contains(shown, "Encoding Chunking Encoding Completed") ||
+		!strings.Contains(shown, "Ripping Completed") {
 		t.Fatalf("events = %q", shown)
+	}
+}
+
+// Snake-case substages read as sentences, a bare marker restating the
+// previous row folds away, and a run of one stage dims its repeats.
+func TestItemEventsNormalizeAndGroupRows(t *testing.T) {
+	m := New(Options{PrefsPath: t.TempDir() + "/prefs.toml"})
+	m.width = 100
+	m.itemEvents.loaded = true
+	m.itemEvents.events = []spindle.ItemEvent{
+		{Type: "activity_ended", Stage: "encoding", EpisodeKey: "s01_002", Substage: "Crop detection", DurationSeconds: 3.5},
+		{Type: "encoding_substage", Stage: "encoding", EpisodeKey: "s01_002", Substage: "crop_detection"},
+		{Type: "encoding_substage", Stage: "encoding", EpisodeKey: "s01_002", Substage: "validation"},
+		{Type: "stage_complete", Stage: "analysis"},
+	}
+	lines := strings.Split(stripANSI(m.renderItemEvents()), "\n")
+	want := []string{
+		" Encoding     Crop detection (s01_002) 3.5s",
+		" Encoding     Validation (s01_002)",
+		" Analyzing    Completed",
+	}
+	if len(lines) != len(want) {
+		t.Fatalf("rows = %q, want %q", lines, want)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Errorf("row %d = %q, want %q", i, lines[i], want[i])
+		}
+	}
+	styles := m.theme.Styles()
+	raw := strings.Split(m.renderItemEvents(), "\n")
+	if !strings.Contains(raw[0], styles.AccentText.Render("Encoding    ")) || !strings.Contains(raw[1], styles.FaintText.Render("Encoding    ")) {
+		t.Fatalf("stage run must lead in accent and dim repeats: %q", raw[:2])
 	}
 }
 
@@ -78,7 +111,7 @@ func TestItemEventsTabFollowsNewest(t *testing.T) {
 		events = append(events, spindle.ItemEvent{ID: int64(i + 1), ItemID: 42, Type: "encoding_substage", Stage: "encoding", Substage: fmt.Sprintf("step-%02d", i)})
 	}
 	m.handleItemEventBatch(itemEventBatchMsg{itemID: 42, batch: spindle.ItemEventBatch{Next: 30, Events: events}})
-	if view := m.inspectorViewport.View(); !m.inspectorViewport.AtBottom() || !strings.Contains(view, "step-29") {
+	if view := m.inspectorViewport.View(); !m.inspectorViewport.AtBottom() || !strings.Contains(view, "Step-29") {
 		t.Fatalf("events tab must open on the newest line: %q", stripANSI(view))
 	}
 	m.inspectorViewport.GotoTop()
@@ -131,7 +164,7 @@ func TestItemEventsTabPagesAndIgnoresStaleReplies(t *testing.T) {
 	if m.itemEvents.cursor != 1 || len(m.itemEvents.events) != 1 {
 		t.Fatalf("first page: %+v", m.itemEvents)
 	}
-	if shown := stripANSI(m.renderItemEvents()); !strings.Contains(shown, "worker reserved (may wait for input)") {
+	if shown := stripANSI(m.renderItemEvents()); !strings.Contains(shown, "Worker reserved (may wait for input)") {
 		t.Fatalf("idle encoding shown as work: %q", shown)
 	}
 	m.handleItemEventBatch(msg) // duplicate response must not append twice

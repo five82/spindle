@@ -37,7 +37,7 @@ func renderSizeResult(w fieldWriter, item spindle.QueueItem) {
 		}
 	}
 	if published > 0 {
-		value := fmt.Sprintf("%d files published", published)
+		value := pluralize(published, "file") + " published"
 		if measured == published {
 			value += "; " + formatBytes(delivered) + " delivered"
 		} else {
@@ -108,8 +108,16 @@ func renderContentID(w fieldWriter, item spindle.QueueItem) {
 	if c == nil || strings.TrimSpace(c.Method) == "" {
 		return
 	}
-	// Counts lead; the daemon's method identifier is provenance, so it trails.
-	w.field("Matching", fmt.Sprintf("%d matched; %d unresolved; %d for review (via %s)", c.MatchedEpisodes, c.UnresolvedEpisodes, c.ReviewEpisodes, c.Method), w.styles.Text)
+	// Counts lead (zero unresolved/review counts are noise); the daemon's
+	// method identifier is provenance, so it trails.
+	matching := fmt.Sprintf("%d matched", c.MatchedEpisodes)
+	if c.UnresolvedEpisodes > 0 {
+		matching += fmt.Sprintf("; %d unresolved", c.UnresolvedEpisodes)
+	}
+	if c.ReviewEpisodes > 0 {
+		matching += fmt.Sprintf("; %d for review", c.ReviewEpisodes)
+	}
+	w.field("Matching", matching+" (via "+c.Method+")", w.styles.Text)
 	w.field("Catalog", fmt.Sprintf("%s; %d candidate episodes", c.ReferenceSource, c.ReferenceEpisodes), w.styles.Text)
 	if c.Completed && !c.SequenceContiguous {
 		w.field("Sequence", "Episode sequence not contiguous", w.styles.WarningText)
@@ -126,7 +134,7 @@ func renderEncodeStats(w fieldWriter, item spindle.QueueItem) {
 		}
 	}
 	if count > 0 {
-		w.field("Encode", fmt.Sprintf("%d files; %s file wall time (excludes queue waits)", count, formatDuration(time.Duration(seconds*float64(time.Second)))), w.styles.Text)
+		w.field("Encode", fmt.Sprintf("%s; %s file wall time (excludes queue waits)", pluralize(count, "file"), formatDuration(time.Duration(seconds*float64(time.Second)))), w.styles.Text)
 	}
 }
 

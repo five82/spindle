@@ -218,7 +218,9 @@ func (m *Model) updateInspectorViewport() {
 		content = m.renderDetailContent(*item, inner)
 	}
 	if m.snapshot.LastError != nil {
-		content = "Stale queue snapshot; last successful fetch " + m.snapshot.LastUpdated.Format(time.RFC3339) + "\n" + content
+		// An inspected item implies at least one successful fetch.
+		stale := "Stale snapshot: last successful fetch " + humanizeDuration(m.clock().Sub(m.snapshot.LastUpdated))
+		content = m.theme.Styles().WarningText.Render(stale) + "\n" + content
 	}
 	m.inspectorViewport.SetContent(content)
 	if follow {

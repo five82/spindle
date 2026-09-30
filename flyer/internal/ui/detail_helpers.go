@@ -49,6 +49,14 @@ func humanizeDuration(d time.Duration) string {
 	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
+// pluralize renders a count with its noun, e.g. "1 file" or "3 files".
+func pluralize(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
 // humanizeDurationLong formats duration as "Xh Ym".
 func humanizeDurationLong(d time.Duration) string {
 	if d <= 0 {

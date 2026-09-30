@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/five82/spindle/flyer/internal/config"
 	"github.com/five82/spindle/flyer/internal/spindle"
@@ -21,10 +22,10 @@ func TestConnectingHeaderStates(t *testing.T) {
 		t.Fatalf("initial header = %q", got)
 	}
 	m.snapshot.LastError = errors.New("connection refused")
-	m.lastUpdated = time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+	m.snapshot.LastUpdated = time.Date(2026, 2, 3, 4, 5, 6, 0, time.Local)
 	m.config = &config.Config{StateDir: filepath.Join(home, strings.Repeat("long", 20))}
 	got := stripANSI(m.renderHeader())
-	for _, want := range []string{"OFFLINE", "Retrying", "04:05:06", "logs ", "..."} {
+	for _, want := range []string{"OFFLINE", "Retrying", "last ok 04:05:06", "logs ", "..."} {
 		if !strings.Contains(got, want) {
 			t.Errorf("header %q missing %q", got, want)
 		}
@@ -59,16 +60,16 @@ func TestHeaderTimeAndHealthFormats(t *testing.T) {
 		age  time.Duration
 		want string
 	}{
-		{30 * time.Second, ""}, {5 * time.Minute, "(5m)"},
-		{3 * time.Hour, "(3h)"}, {25 * time.Hour, ":"},
+		{30 * time.Second, ""}, {5 * time.Minute, "(5m ago)"},
+		{3 * time.Hour, "(3h ago)"}, {25 * time.Hour, "(1d ago)"},
 	} {
-		m.lastUpdated = time.Now().Add(-tc.age)
+		m.snapshot.LastUpdated = time.Now().Add(-tc.age)
 		got := m.formatTimestamp()
-		if !strings.Contains(got, tc.want) {
+		if tc.want == "" && got != "" || !strings.Contains(got, tc.want) {
 			t.Errorf("age %v: timestamp = %q, want %q", tc.age, got, tc.want)
 		}
-		if tc.age > 24*time.Hour && (strings.Contains(got, "(") || len(got) != 8) {
-			t.Errorf("old timestamp = %q", got)
+		if tc.want != "" && !strings.HasPrefix(got, "updated ") {
+			t.Errorf("stale timestamp = %q, want updated prefix", got)
 		}
 	}
 	styles := m.theme.Styles()
@@ -157,6 +158,18 @@ func TestHeaderTruncationAndPriority(t *testing.T) {
 	} {
 		if got := truncateMiddle(tc.input, tc.max); got != tc.want {
 			t.Errorf("truncateMiddle(%q, %d) = %q, want %q", tc.input, tc.max, got, tc.want)
+		}
+	}
+	// Truncation counts display cells and never splits a character.
+	for _, tc := range []struct {
+		got, want string
+	}{
+		{truncate("Amélie (2001)", 8), "Améli..."},
+		{truncate("Pokémon", 7), "Pokémon"},
+		{truncateMiddle("/staging/Amélie-disc_t00.mkv", 16), "/stag..._t00.mkv"},
+	} {
+		if tc.got != tc.want || !utf8.ValidString(tc.got) {
+			t.Errorf("truncated = %q, want %q", tc.got, tc.want)
 		}
 	}
 	if maxLen(true, 80, 40) != 40 || maxLen(false, 80, 40) != 80 {

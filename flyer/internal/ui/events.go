@@ -117,6 +117,7 @@ func (m *Model) renderItemEvents() string {
 
 	now := m.clock()
 	width := panelInnerWidth(m.width)
+	var prevRow, prevStage string
 	for i, event := range events {
 		if hidden[i] {
 			continue
@@ -147,13 +148,29 @@ func (m *Model) renderItemEvents() string {
 				label += " " + state
 			}
 		}
+		// Journal names mix snake_case and lowercase; render them as sentences.
+		label = strings.ReplaceAll(label, "_", " ")
+		if label != "" {
+			label = strings.ToUpper(label[:1]) + label[1:]
+		}
+		// A bare row restating the previous one (a substage marker right
+		// after its timed activity) adds nothing.
+		row := event.Stage + "|" + strings.ToLower(label) + "|" + event.EpisodeKey
+		msg := strings.TrimSpace(event.Message)
+		if strings.EqualFold(strings.TrimSuffix(msg, " ended"), event.Substage) {
+			msg = ""
+		}
+		if row == prevRow && msg == "" && event.Percent <= 0 && event.DurationSeconds < 0.05 && event.Attempt <= 1 {
+			continue
+		}
+		prevRow = row
 		text := styles.Text.Render(label)
 		if event.EpisodeKey != "" {
 			text += " " + styles.MutedText.Render("("+event.EpisodeKey+")")
 		}
 		// Daemon messages often just restate the operation ("Video merge
 		// ended"); keep only messages that add something.
-		if msg := strings.TrimSpace(event.Message); msg != "" && !strings.EqualFold(strings.TrimSuffix(msg, " ended"), event.Substage) {
+		if msg != "" {
 			text += " " + styles.FaintText.Render("-") + " " + styles.Text.Render(msg)
 		}
 		if event.Percent > 0 {
@@ -165,7 +182,14 @@ func (m *Model) renderItemEvents() string {
 		if event.Attempt > 1 {
 			text += " " + styles.WarningText.Render(fmt.Sprintf("(run %d)", event.Attempt))
 		}
-		prefix := styles.FaintText.Render(ts) + " " + styles.AccentText.Render(fmt.Sprintf("%-12s", stageDisplay(event.Stage).label)) + " "
+		// A stage change stands out in accent; repeats within a run dim
+		// rather than vanish, so a row scrolled to the top keeps its stage.
+		stageStyle := styles.AccentText
+		if event.Stage == prevStage {
+			stageStyle = styles.FaintText
+		}
+		prevStage = event.Stage
+		prefix := styles.FaintText.Render(ts) + " " + stageStyle.Render(fmt.Sprintf("%-12s", stageDisplay(event.Stage).label)) + " "
 		indent := strings.Repeat(" ", lipgloss.Width(prefix))
 		for j, line := range wrapText(text, max(width-lipgloss.Width(prefix), 20)) {
 			if j == 0 {

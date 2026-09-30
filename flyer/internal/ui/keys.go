@@ -137,11 +137,11 @@ func DefaultKeyMap() keyMap {
 		// Queue actions
 		CycleFilter: key.NewBinding(
 			key.WithKeys("f", "F"),
-			key.WithHelp("f", "Cycle filter"),
+			key.WithHelp("f", "Cycle status filter"),
 		),
 		Filter: key.NewBinding(
 			key.WithKeys("/"),
-			key.WithHelp("/", "Filter by title"),
+			key.WithHelp("/", "Find by title"),
 		),
 		// "t" only: "T" cycles the theme (documented case exception).
 		// Episodes tab: file details; logs: structured fields.

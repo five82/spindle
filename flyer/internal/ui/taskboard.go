@@ -114,14 +114,15 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 	if len(activities) > 0 && status == "Waiting" && !diskWaiting {
 		status, style = "Running", styles.AccentText
 	}
-	// Fixed status, stage, and files columns keep durations aligned.
-	row := fmt.Sprintf("%-7s %-12s", status, info.label)
+	// The queue strip's glyph leads, then fixed status, stage, and files
+	// columns keep durations aligned.
+	row := fmt.Sprintf("%s %-7s %-12s", taskStateGlyph(strings.ToLower(status)), status, info.label)
 	if totals.Planned > 0 {
 		files := ""
 		if n, ok := stageThroughput(info.totals, item, totals); ok {
-			files = fmt.Sprintf("%d/%d done", n, totals.Planned)
+			files = fmt.Sprintf("%d/%d files", n, totals.Planned)
 		}
-		row += fmt.Sprintf(" %-*s", len(fmt.Sprintf("%d/%d done", totals.Planned, totals.Planned)), files)
+		row += fmt.Sprintf(" %-*s", len(fmt.Sprintf("%d/%d files", totals.Planned, totals.Planned)), files)
 	}
 	if task.State == "done" {
 		if d := task.Duration(); d > 0 {
@@ -183,7 +184,8 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 			measure := fmt.Sprintf("%.0f%% · %d/%d %s", percent, a.Completed, a.Total, a.Unit)
 			if video {
 				if eta := taskETA(task, now); eta != "" {
-					measure += " · " + eta + " remaining for this file's video"
+					// Non-breaking spaces keep the scoped ETA on one wrapped line.
+					measure += " · " + eta + "\u00a0left\u00a0(this\u00a0file)"
 				} else if e := task.Encoding; e != nil && !e.Calibrating && e.TotalFrames > e.CurrentFrame {
 					measure += " · ETA unavailable"
 				}

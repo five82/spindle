@@ -22,7 +22,9 @@ func (m *Model) renderEpisodeList(b *strings.Builder, item spindle.QueueItem, st
 	for _, ep := range episodes {
 		m.renderEpisodeRow(b, item, ep, keys[strings.ToLower(ep.Key)], styles)
 	}
-	fmt.Fprintln(b, styles.FaintText.Render("t: toggle file details; paths are recorded artifacts, not existence checks"))
+	if !m.isEpisodesCollapsed(item, nil, spindle.EpisodeTotals{}) {
+		fmt.Fprintln(b, styles.FaintText.Render("Paths are recorded artifacts, not existence checks"))
+	}
 }
 
 func (m *Model) isEpisodesCollapsed(item spindle.QueueItem, _ []spindle.EpisodeStatus, _ spindle.EpisodeTotals) bool {
@@ -46,7 +48,7 @@ func matchedEpisodeCount(item spindle.QueueItem, episodes []spindle.EpisodeStatu
 }
 
 func (m *Model) renderEpisodeSummary(b *strings.Builder, item spindle.QueueItem, episodes []spindle.EpisodeStatus, totals spindle.EpisodeTotals, styles Styles) {
-	label := fmt.Sprintf("%d source files; %d ripped; %d encoded; %d published", totals.Planned, totals.Ripped, totals.Encoded, totals.Final)
+	label := fmt.Sprintf("%s; %d ripped; %d encoded; %d published", pluralize(totals.Planned, "source file"), totals.Ripped, totals.Encoded, totals.Final)
 	if isEpisodicItem(item) {
 		label += fmt.Sprintf("; %d matched", matchedEpisodeCount(item, episodes))
 	}
@@ -120,6 +122,8 @@ func (m *Model) renderEpisodeRow(b *strings.Builder, item spindle.QueueItem, ep 
 	if !m.isEpisodesCollapsed(item, nil, spindle.EpisodeTotals{}) {
 		// One shared label column (widest label + 1) keeps every value aligned.
 		w := fieldWriter{b: b, styles: styles, width: panelInnerWidth(m.width), indent: 2, labelWidth: len("Reel quality") + 1}
+		// Staging paths carry a long hash; keep their ends on one row.
+		pathWidth := max(w.width-w.indent-w.labelWidth, 20)
 		w.field("Key", ep.Key, styles.FaintText)
 		w.field("Source", describeEpisodeTrackInfo(&ep), styles.Text)
 		if isEpisodicItem(item) {
@@ -156,9 +160,19 @@ func (m *Model) renderEpisodeRow(b *strings.Builder, item spindle.QueueItem, ep 
 			if s.Width > 0 {
 				w.field("Src video", fmt.Sprintf("%dx%d", s.Width, s.Height), styles.Text)
 			}
-			if s.Validation != nil {
+			if s.Validation != nil && len(s.Validation.Steps) > 0 {
+				// Passing checks collapse to a count; only failures get rows.
+				passed := 0
 				for _, check := range s.Validation.Steps {
-					w.field("Reel check", fmt.Sprintf("%s: passed=%t; %s", check.Name, check.Passed, check.Details), styles.MutedText)
+					if check.Passed {
+						passed++
+					}
+				}
+				w.field("Reel checks", fmt.Sprintf("%d/%d passed", passed, len(s.Validation.Steps)), styles.MutedText)
+				for _, check := range s.Validation.Steps {
+					if !check.Passed {
+						w.field("Failed", check.Name+": "+check.Details, styles.WarningText)
+					}
 				}
 			}
 			for _, line := range summarizeTargetQuality(s.TargetQuality) {
@@ -171,8 +185,8 @@ func (m *Model) renderEpisodeRow(b *strings.Builder, item spindle.QueueItem, ep 
 			w.field("Delivered", formatBytes(ep.FinalSizeBytes)+" to "+ep.FinalRoute, styles.Text)
 		}
 		w.field("Destination", ep.FinalPath, styles.Text)
-		w.field("Rip file", ep.RippedPath, styles.FaintText)
-		w.field("Encode file", ep.EncodedPath, styles.FaintText)
+		w.field("Rip file", truncateMiddle(ep.RippedPath, pathWidth), styles.FaintText)
+		w.field("Encode file", truncateMiddle(ep.EncodedPath, pathWidth), styles.FaintText)
 	}
 }
 

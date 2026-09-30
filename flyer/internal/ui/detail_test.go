@@ -39,7 +39,7 @@ func TestOverviewStableSkeletonAndConcurrentWork(t *testing.T) {
 		}}
 	got := overviewFor(t, item)
 	sectionOrder(t, got, "Pipeline", "Media", "Output", "episode list", "created")
-	for _, want := range []string{"Running Ripping", "1/2 done", "0/2 done", "Reading title 03", "47/100 frames", "Needs Encoding + Subtitling"} {
+	for _, want := range []string{"Running Ripping", "1/2 files", "0/2 files", "Reading title 03", "47/100 frames", "Needs Encoding + Subtitling"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q: %s", want, got)
 		}
@@ -144,7 +144,7 @@ func TestCountsNeverUseManifestPosition(t *testing.T) {
 	for _, key := range []string{"a", "b", "c"} {
 		item := spindle.QueueItem{Episodes: []spindle.EpisodeStatus{{Key: "a"}, {Key: "b", RippedPath: "rip"}, {Key: "c"}}, Tasks: []spindle.Task{{Type: "encoding", State: "running", ActiveAssetKey: key, Progress: spindle.TaskProgress{Percent: 49}}, {Type: "ripping", State: "running", ActiveAssetKey: key}}}
 		got := strings.Join(strings.Fields(overviewFor(t, item)), " ")
-		if !strings.Contains(got, "Encoding 0/3 done") || !strings.Contains(got, "Ripping 1/3 done") {
+		if !strings.Contains(got, "Encoding 0/3 files") || !strings.Contains(got, "Ripping 1/3 files") {
 			t.Fatal(got)
 		}
 	}
@@ -160,7 +160,7 @@ func TestMilestonePercentNeverGetsBar(t *testing.T) {
 func TestSubtitleCompletedCountsIncludeSkipsNotMux(t *testing.T) {
 	for _, g := range []*spindle.SubtitleGenerationStatus{{OpenSubtitles: 7}, {OpenSubtitles: 4, Skipped: 3}, {Skipped: 7}} {
 		got := overviewFor(t, spindle.QueueItem{Episodes: make([]spindle.EpisodeStatus, 7), SubtitleGeneration: g, Tasks: []spindle.Task{{Type: "subtitling", State: "done"}, {Type: "apply", State: "pending"}}})
-		if !strings.Contains(got, "7/7 done") || strings.Contains(got, "7 applied") {
+		if !strings.Contains(got, "7/7 files") || strings.Contains(got, "7 applied") {
 			t.Fatal(got)
 		}
 	}
@@ -174,5 +174,21 @@ func TestWrapText(t *testing.T) {
 		if got := strings.Join(wrapText(tc.in, tc.width), "|"); got != tc.want {
 			t.Fatalf("%q != %q", got, tc.want)
 		}
+	}
+}
+
+// Counts agree in number, and zero matching outcomes stay silent.
+func TestOverviewPluralsAndMatchingCounts(t *testing.T) {
+	item := spindle.QueueItem{
+		ContentID: &spindle.ContentID{Method: "jev", MatchedEpisodes: 3},
+		Episodes:  []spindle.EpisodeStatus{{Key: "a", EncodeStats: &spindle.EncodeStats{EncodeSeconds: 60}}},
+	}
+	got := overviewFor(t, item)
+	if !strings.Contains(got, "Encode   1 file;") || !strings.Contains(got, "3 matched (via jev)") || strings.Contains(got, "unresolved") {
+		t.Fatal(got)
+	}
+	item.ContentID.ReviewEpisodes = 1
+	if got := overviewFor(t, item); !strings.Contains(got, "3 matched; 1 for review (via jev)") {
+		t.Fatal(got)
 	}
 }

@@ -104,7 +104,7 @@ func TestFetchFailuresStayScopedUntilRecovery(t *testing.T) {
 	m.inspectorTab = tabEvents
 	m.itemEvents = itemEventState{itemID: 1, loaded: true, events: []spindle.ItemEvent{{ID: 1, Type: "stage_start", Stage: "encoding"}}}
 	m, _ = updateApp(t, m, itemEventErrorMsg{itemID: 1, err: errors.New("offline")})
-	if got := stripANSI(m.renderItemEvents()); !strings.Contains(got, "Events fetch failed") || !strings.Contains(got, "worker reserved") {
+	if got := stripANSI(m.renderItemEvents()); !strings.Contains(got, "Events fetch failed") || !strings.Contains(got, "Worker reserved") {
 		t.Fatal(got)
 	}
 	m.handleItemEventBatch(itemEventBatchMsg{itemID: 2})

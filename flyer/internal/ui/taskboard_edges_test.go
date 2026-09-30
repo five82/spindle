@@ -129,7 +129,7 @@ func TestVideoProgressGroupsEncoderDetail(t *testing.T) {
 	m.renderTaskBoard(&b, item, m.theme.Styles(), 116)
 	got := stripANSI(b.String())
 	for _, want := range []string{
-		"25% · 250/1000 frames · ~2m remaining for this file's video",
+		"25% · 250/1000 frames · ~2m\u00a0left\u00a0(this\u00a0file)",
 		"10/20 chunks accepted · 2 probing / 0 scoring / 0 finishing · 3 in flight\n",
 		"40.0 fps average · 1.50x recent · workers 4/4 (limit 8)\n",
 	} {
@@ -139,7 +139,7 @@ func TestVideoProgressGroupsEncoderDetail(t *testing.T) {
 	}
 	// Status, stage, and files columns align so durations share a column.
 	lines := strings.Split(got, "\n")
-	if !strings.HasPrefix(lines[0], "  Done    Ripping      0/2 done 1m 0s") || !strings.HasPrefix(lines[1], "  Running Encoding     0/2 done") {
+	if !strings.HasPrefix(lines[0], "  ✓ Done    Ripping      0/2 files 1m 0s") || !strings.HasPrefix(lines[1], "  ◉ Running Encoding     0/2 files") {
 		t.Fatalf("misaligned rows:\n%s", got)
 	}
 }
@@ -162,7 +162,7 @@ func TestVideoProgressMeasureWraps(t *testing.T) {
 			t.Fatalf("line overflows: %q", line)
 		}
 	}
-	if !strings.Contains(strings.Join(strings.Fields(got), " "), "~8m remaining for this file's video") {
+	if !strings.Contains(got, "~8m\u00a0left\u00a0(this\u00a0file)") {
 		t.Fatalf("ETA lost when wrapping:\n%s", got)
 	}
 }

@@ -92,8 +92,7 @@ type Model struct {
 	ready       bool
 
 	// Data state
-	snapshot    state.Snapshot
-	lastUpdated time.Time
+	snapshot state.Snapshot
 
 	// Queue state
 	selectedRow int
@@ -233,7 +232,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case snapshotMsg:
 		m.snapshot = state.Snapshot(msg)
-		m.lastUpdated = time.Now()
 		m.updateQueueTable()
 		m.clampProblemsRow()
 		m.updateInspectorViewport()

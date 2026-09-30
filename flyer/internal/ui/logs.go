@@ -70,6 +70,7 @@ type logState struct {
 	searchInput    textinput.Model
 	searchMatches  []int // Event indices that match
 	searchMatchIdx int   // Current match index
+	searchErr      string
 
 	// showFields expands each event's structured fields below it; the
 	// default is one row per event. eventLines maps an event index to its
@@ -208,31 +209,25 @@ func (m *Model) renderLogStatus(styles Styles) string {
 	// Search input mode
 	if m.logState.searchActive {
 		parts = append(parts, styles.AccentText.Render("search: "+m.logState.searchInput.Value()))
+		if m.logState.searchErr != "" {
+			parts = append(parts, styles.DangerText.Render("invalid pattern: "+m.logState.searchErr))
+		}
 	}
 
-	// Filters
-	if m.logFiltersActive() {
-		var filterParts []string
-		if m.logState.filterLevel != "" {
-			filterParts = append(filterParts, "level="+m.logState.filterLevel)
+	// Filters, including the default level, so the window is never unexplained.
+	var filterParts []string
+	for _, f := range []struct{ name, value string }{
+		{"level", m.logState.filterLevel}, {"comp", m.logState.filterComponent},
+		{"lane", m.logState.filterLane}, {"req", m.logState.filterRequest},
+		{"stage", m.logState.filterStage}, {"asset", m.logState.filterAsset},
+		{"task", m.logState.filterTask}, {"attempt", m.logState.filterAttempt},
+	} {
+		if f.value != "" {
+			filterParts = append(filterParts, f.name+"="+f.value)
 		}
-		if m.logState.filterComponent != "" {
-			filterParts = append(filterParts, "comp="+m.logState.filterComponent)
-		}
-		if m.logState.filterLane != "" {
-			filterParts = append(filterParts, "lane="+m.logState.filterLane)
-		}
-		if m.logState.filterRequest != "" {
-			filterParts = append(filterParts, "req="+m.logState.filterRequest)
-		}
-		for _, f := range []struct{ name, value string }{{"stage", m.logState.filterStage}, {"asset", m.logState.filterAsset}, {"task", m.logState.filterTask}, {"attempt", m.logState.filterAttempt}} {
-			if f.value != "" {
-				filterParts = append(filterParts, f.name+"="+f.value)
-			}
-		}
-		if len(filterParts) > 0 {
-			parts = append(parts, styles.MutedText.Render(strings.Join(filterParts, " ")))
-		}
+	}
+	if len(filterParts) > 0 {
+		parts = append(parts, styles.MutedText.Render(strings.Join(filterParts, " ")))
 	}
 
 	return fit(strings.Join(parts, sep))
@@ -259,36 +254,20 @@ func (m *Model) renderLogContent() string {
 	var b strings.Builder
 	m.logState.eventLines = m.logState.eventLines[:0]
 	line := 0
-	// Each row carries a 7-cell "%4d │ " gutter.
-	width := panelInnerWidth(m.width) - 7
+	width := panelInnerWidth(m.width)
 
 	for i, evt := range m.logState.rawLines {
-		lineNum := i + 1
 		m.logState.eventLines = append(m.logState.eventLines, line)
 
-		// Determine if this line is a search match
-		isActiveMatch := i == activeMatchLine
-		isPassiveMatch := matchSet[i] && !isActiveMatch
-
-		// Build line content: line number + styled text
 		var lineContent string
 		switch {
-		case isActiveMatch:
-			// Active match: full line (including the line-number prefix)
-			// highlighted with the warning background.
-			prefixStyle := lipgloss.NewStyle().
-				Background(lipgloss.Color(m.theme.Warning)).
-				Foreground(lipgloss.Color(m.theme.Background))
-			lineContent = prefixStyle.Render(fmt.Sprintf("%4d │ ", lineNum)) +
-				m.colorizeLineForSearch(ansi.Truncate(formatLogEvent(evt), width, "…"), m.theme.Warning)
-		case isPassiveMatch:
-			// Passive match: accent foreground
-			lineContent = styles.AccentText.Render(fmt.Sprintf("%4d │ ", lineNum)) +
-				m.colorizeLineWithHighlight(ansi.Truncate(formatLogEvent(evt), width, "…"), styles)
+		case i == activeMatchLine:
+			// Active match: the whole row on the warning background.
+			lineContent = m.colorizeLineForSearch(ansi.Truncate(formatLogEvent(evt), width, "…"), m.theme.Warning)
+		case matchSet[i]:
+			lineContent = m.colorizeLineWithHighlight(ansi.Truncate(formatLogEvent(evt), width, "…"), styles)
 		default:
-			// Normal line: styled directly from the structured event fields
-			lineContent = styles.FaintText.Render(fmt.Sprintf("%4d │ ", lineNum)) +
-				m.styleLogEvent(evt, styles, false, m.logState.showFields, width)
+			lineContent = m.styleLogEvent(evt, styles, false, m.logState.showFields, width)
 		}
 		line += strings.Count(lineContent, "\n") + 1
 
@@ -338,7 +317,12 @@ func (m *Model) styleLogEvent(evt spindle.LogEvent, styles Styles, highlightErro
 	// Note: the [component] tag is part of formatLogEvent's plain text (for
 	// search) but is not shown here, since the stage is already surfaced via
 	// the subject below.
-	if subject := composeLogSubject(evt.ItemID, evt.Stage); subject != "" {
+	// Inside the inspector every event belongs to the inspected item.
+	itemID := evt.ItemID
+	if m.inspecting {
+		itemID = 0
+	}
+	if subject := composeLogSubject(itemID, evt.Stage); subject != "" {
 		result.WriteString(" ")
 		result.WriteString(styles.AccentText.Render(subject))
 	}
@@ -452,9 +436,10 @@ func (m *Model) getLevelStyle(level string, styles Styles) lipgloss.Style {
 	}
 }
 
-// logFiltersActive returns true if any log filters are active.
+// logFiltersActive reports whether any filter narrows the log beyond the
+// default INFO level.
 func (m *Model) logFiltersActive() bool {
-	return m.logState.filterLevel != "" || m.logState.filterComponent != "" || m.logState.filterLane != "" || m.logState.filterRequest != "" || m.logState.filterStage != "" || m.logState.filterAsset != "" || m.logState.filterTask != "" || m.logState.filterAttempt != ""
+	return (m.logState.filterLevel != "" && !strings.EqualFold(m.logState.filterLevel, "info")) || m.logState.filterComponent != "" || m.logState.filterLane != "" || m.logState.filterRequest != "" || m.logState.filterStage != "" || m.logState.filterAsset != "" || m.logState.filterTask != "" || m.logState.filterAttempt != ""
 }
 
 // handleLogsKey processes keyboard input for logs view.
@@ -567,9 +552,11 @@ func (m *Model) handleLogSearchInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 		re, err := regexp.Compile("(?i)" + query)
 		if err != nil {
-			// Invalid regex - stay in search mode
+			// Stay in search mode and say why Enter did nothing.
+			m.logState.searchErr = err.Error()
 			return m, nil
 		}
+		m.logState.searchErr = ""
 
 		m.logState.searchRegex = re
 		m.logState.searchQuery = query
@@ -590,6 +577,7 @@ func (m *Model) handleLogSearchInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Escape):
 		// Cancel search input
+		m.logState.searchErr = ""
 		m.logState.searchActive = false
 		m.logState.searchInput.Blur()
 		m.logState.searchInput.SetValue("")
@@ -598,6 +586,7 @@ func (m *Model) handleLogSearchInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// Let the text input handle the key
 	var cmd tea.Cmd
+	m.logState.searchErr = ""
 	m.logState.searchInput, cmd = m.logState.searchInput.Update(msg)
 	return m, cmd
 }
@@ -798,13 +787,18 @@ func (m *Model) handleLogBatch(msg logBatchMsg) {
 	}
 }
 
-// logEventTimestamp formats an event's timestamp for display, preferring the
-// parsed local time and falling back to the raw timestamp string.
+// logEventTimestamp formats an event's local time, dropping the date for
+// today's events (as the Events tab does), and falls back to the raw string.
 func logEventTimestamp(evt spindle.LogEvent) string {
-	if parsed := evt.ParsedTime(); !parsed.IsZero() {
-		return parsed.In(time.Local).Format("2006-01-02 15:04:05")
+	parsed := evt.ParsedTime()
+	if parsed.IsZero() {
+		return evt.Timestamp
 	}
-	return evt.Timestamp
+	local, now := parsed.In(time.Local), time.Now()
+	if local.Year() == now.Year() && local.YearDay() == now.YearDay() {
+		return local.Format("15:04:05")
+	}
+	return local.Format("Jan 02 15:04:05")
 }
 
 // formatLogEvent formats a single log event.
@@ -949,7 +943,10 @@ func (m Model) handleLogFiltersKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case msg.String() == "ctrl+c":
-		// Clear all filters (modal-specific, doesn't quit)
+		return m, tea.Quit
+
+	case msg.String() == "ctrl+x":
+		// Clear all filters
 		for i := range m.logFilterInputs {
 			m.logFilterInputs[i].SetValue("")
 		}
@@ -996,12 +993,6 @@ func (m Model) renderLogFilters() string {
 	b.WriteString(styles.FaintText.Render(strings.Repeat("─", 40)))
 	b.WriteString("\n\n")
 
-	// Hint
-	b.WriteString(styles.MutedText.Render("Filters apply to both daemon and item logs."))
-	b.WriteString("\n")
-	b.WriteString(styles.MutedText.Render("Leave blank to disable filter."))
-	b.WriteString("\n\n")
-
 	// Filter fields
 	fields := []struct {
 		label string
@@ -1026,7 +1017,8 @@ func (m Model) renderLogFilters() string {
 	}
 
 	// Buttons hint
-	b.WriteString(styles.FaintText.Render("Enter: Apply  •  Esc: Cancel  •  Ctrl+C: Clear"))
+	b.WriteString("\n")
+	b.WriteString(styles.FaintText.Render("Enter apply · Esc cancel · Ctrl+X clear"))
 
 	// Build the modal box; placement over the dimmed backdrop happens in
 	// View().

@@ -150,12 +150,17 @@ func TestLogFiltersApplyAndCancel(t *testing.T) {
 	if m.logFilterFocusIdx != 0 {
 		t.Fatal("up should reverse filter focus")
 	}
-	model, _ = m.handleLogFiltersKey(appKey("ctrl+c"))
+	model, _ = m.handleLogFiltersKey(appKey("ctrl+x"))
 	m = model.(Model)
 	for _, input := range m.logFilterInputs {
 		if input.Value() != "" {
-			t.Fatal("ctrl+c should clear filters")
+			t.Fatal("ctrl+x should clear filters")
 		}
+	}
+	if _, cmd := m.handleLogFiltersKey(appKey("ctrl+c")); cmd == nil {
+		t.Fatal("ctrl+c should quit from the filter modal like everywhere else")
+	} else if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("ctrl+c should return tea.Quit")
 	}
 }
 
@@ -203,5 +208,80 @@ func TestLogSearchScrollsToExpandedEvent(t *testing.T) {
 	m.scrollToSearchMatch()
 	if view := stripANSI(m.logViewport.View()); !strings.Contains(view, "event-15") {
 		t.Fatalf("match not visible after scroll:\n%s", view)
+	}
+}
+
+// Enter on a malformed pattern says why nothing happened; typing clears it.
+func TestLogSearchReportsInvalidPattern(t *testing.T) {
+	m := newLogInteractionModel(t)
+	next := func(k string) {
+		t.Helper()
+		model, _ := m.handleLogsKey(appKey(k))
+		switch v := model.(type) {
+		case Model:
+			m = v
+		case *Model:
+			m = *v
+		}
+	}
+	for _, k := range []string{"/", "(", "enter"} {
+		next(k)
+	}
+	if !m.logState.searchActive || !strings.Contains(stripANSI(m.renderLogStatus(m.theme.Styles())), "invalid pattern") {
+		t.Fatalf("status = %q", stripANSI(m.renderLogStatus(m.theme.Styles())))
+	}
+	next(")")
+	if strings.Contains(stripANSI(m.renderLogStatus(m.theme.Styles())), "invalid pattern") {
+		t.Fatal("editing the pattern should clear the error")
+	}
+}
+
+// The default INFO level is not a filter worth flagging in the title, but
+// the status line still explains the window.
+func TestLogTitleFlagsOnlyNonDefaultFilters(t *testing.T) {
+	m := newLogInteractionModel(t)
+	if got := m.getLogTitle(); got != "Daemon Log" {
+		t.Fatalf("default title = %q", got)
+	}
+	if got := stripANSI(m.renderLogStatus(m.theme.Styles())); !strings.Contains(got, "level=info") {
+		t.Fatalf("status = %q", got)
+	}
+	for _, level := range []string{"", "INFO"} {
+		m.logState.filterLevel = level
+		if got := m.getLogTitle(); got != "Daemon Log" {
+			t.Fatalf("level %q title = %q", level, got)
+		}
+	}
+	m.logState.filterLevel = "warn"
+	if got := m.getLogTitle(); got != "Daemon Log (filtered)" {
+		t.Fatalf("warn title = %q", got)
+	}
+	m.logState.filterLevel, m.logState.filterStage = "info", "encoding"
+	if got := m.getLogTitle(); got != "Daemon Log (filtered)" {
+		t.Fatalf("stage title = %q", got)
+	}
+}
+
+// Log rows carry no buffer-position gutter, and the inspector drops the
+// item ID every row would otherwise repeat.
+func TestLogRowsOmitGutterAndInspectedItemID(t *testing.T) {
+	m := newLogInteractionModel(t)
+	m.logState.rawLines = []spindle.LogEvent{{Sequence: 1, ItemID: 7, Stage: "encoding", Message: "encoding progress", Level: "info"}}
+	if got := stripANSI(m.renderLogContent()); strings.Contains(got, "│") || strings.Contains(got, "   1 ") || !strings.Contains(got, "ID #7 (encoding)") {
+		t.Fatalf("daemon row = %q", got)
+	}
+	m.inspecting = true
+	if got := stripANSI(m.renderLogContent()); strings.Contains(got, "ID #7") || !strings.Contains(got, "INFO encoding – encoding progress") {
+		t.Fatalf("inspector row = %q", got)
+	}
+}
+
+// The filter modal's key hint fits on one row.
+func TestLogFiltersModalHintFits(t *testing.T) {
+	m := newLogInteractionModel(t)
+	m.openLogFilters()
+	got := stripANSI(m.renderLogFilters())
+	if !strings.Contains(got, "Enter apply · Esc cancel · Ctrl+X clear") {
+		t.Fatalf("modal = %s", got)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
@@ -86,7 +87,7 @@ func (m Model) renderHeader() string {
 
 	// Timestamp
 	if timeStr := m.formatTimestamp(); timeStr != "" {
-		parts = append(parts, headerPart{styles.MutedText.Render(timeStr), 4})
+		parts = append(parts, headerPart{styles.WarningText.Render(timeStr), 4})
 	}
 
 	// Health warnings
@@ -164,17 +165,15 @@ func (m Model) renderConnectingHeader(styles Styles) string {
 	sep := styles.Band.Render("  ")
 
 	if m.snapshot.LastError != nil {
-		last := "soon"
-		if !m.lastUpdated.IsZero() {
-			last = m.lastUpdated.Format("15:04:05")
-		}
 		errorMsg := classifyConnectionError(m.snapshot.LastError)
 
 		parts := []string{
 			styles.Logo.Render("flyer"),
 			styles.DangerText.Bold(true).Render("SPINDLE " + errorMsg),
 			styles.WarningText.Bold(true).Render(m.spinnerGlyph() + " Retrying..."),
-			styles.MutedText.Render(last),
+		}
+		if last := m.snapshot.LastUpdated; !last.IsZero() {
+			parts = append(parts, styles.MutedText.Render("last ok "+last.Format("15:04:05")))
 		}
 
 		// Add log path hint if config is available
@@ -270,30 +269,18 @@ func (m Model) countProblemCounts() (failed, review int) {
 	return
 }
 
-// formatTimestamp formats the last update time with relative indicator.
-// Uses compact format (HH:MM) when data is fresh, adds relative time when stale.
+// formatTimestamp names the last successful fetch only once it is stale;
+// fresh data needs no clock.
 func (m Model) formatTimestamp() string {
-	if m.lastUpdated.IsZero() {
+	updated := m.snapshot.LastUpdated
+	if updated.IsZero() {
 		return ""
 	}
-
-	timeSince := time.Since(m.lastUpdated)
-
-	// Fresh data: just show HH:MM
-	if timeSince < time.Minute {
-		return m.lastUpdated.Format("15:04")
+	age := m.clock().Sub(updated)
+	if age < time.Minute {
+		return ""
 	}
-
-	// Stale data: show relative time
-	if timeSince < time.Hour {
-		return fmt.Sprintf("%s (%dm)", m.lastUpdated.Format("15:04"), int(timeSince.Minutes()))
-	}
-	if timeSince < 24*time.Hour {
-		return fmt.Sprintf("%s (%dh)", m.lastUpdated.Format("15:04"), int(timeSince.Hours()))
-	}
-
-	// Very stale: full timestamp
-	return m.lastUpdated.Format("15:04:05")
+	return "updated " + updated.Format("15:04") + " (" + humanizeDuration(age) + ")"
 }
 
 // formatHealthWarning formats health warnings if any.
@@ -400,8 +387,8 @@ func (m Model) renderCommandBar() string {
 
 	default: // ViewQueue
 		commands = []cmd{
-			{"/", "Filter", 2},
-			{"f", m.filterLabel(), 2}, // Shows current filter state
+			{"/", "Find", 2},
+			{"f", "Status", 2}, // The panel title names the active status filter
 			{"j/k", "Navigate", 3},
 			{"Enter", "Inspect", 2},
 			{"i", "Item logs", 3},
@@ -447,33 +434,33 @@ func maxLen(compact bool, normalLen, compactLen int) int {
 	return normalLen
 }
 
-// truncate truncates a string to max length with ellipsis.
+// truncate cuts a string to max display cells with an ellipsis, never
+// splitting a multi-byte or wide character.
 func truncate(s string, max int) string {
 	if max <= 0 {
 		return ""
 	}
-	if len(s) <= max {
-		return s
-	}
 	if max <= 3 {
-		return s[:max]
+		return ansi.Truncate(s, max, "")
 	}
-	return s[:max-3] + "..."
+	return ansi.Truncate(s, max, "...")
 }
 
-// truncateMiddle truncates a string in the middle, preserving start and end.
+// truncateMiddle cuts a string to max display cells in the middle,
+// preserving start and end.
 func truncateMiddle(s string, max int) string {
 	if max <= 0 {
 		return ""
 	}
-	if len(s) <= max {
+	width := ansi.StringWidth(s)
+	if width <= max {
 		return s
 	}
 	if max <= 5 {
-		return s[:max]
+		return ansi.Truncate(s, max, "")
 	}
 	// Keep more of the end (file name) than the start
 	endLen := (max - 3) * 2 / 3
 	startLen := max - 3 - endLen
-	return s[:startLen] + "..." + s[len(s)-endLen:]
+	return ansi.Truncate(s, startLen, "") + "..." + ansi.TruncateLeft(s, width-endLen, "")
 }

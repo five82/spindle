@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/five82/spindle/flyer/internal/spindle"
 )
 
@@ -17,10 +19,22 @@ func (m Model) renderNowBand() string {
 	return padBand(m.nowBandContent(styles), m.width, styles.Band)
 }
 
-// nowBandContent composes the NOW band segments.
+// nowBandContent composes the NOW band, shedding detail until it fits:
+// holder titles first, then the ETA, then the progress measure. The
+// resource, item, and activity always remain.
 func (m Model) nowBandContent(styles Styles) string {
-	compact := m.width < compactWidthThreshold
+	var line string
+	for detail := 0; detail <= 3; detail++ {
+		line = m.nowBandAt(styles, detail)
+		if lipgloss.Width(line) <= m.width {
+			break
+		}
+	}
+	return line
+}
 
+// nowBandAt renders the band at a detail level (0 = everything).
+func (m Model) nowBandAt(styles Styles, detail int) string {
 	label := styles.FaintText.Bold(true).Render("NOW ")
 	sep := styles.Band.Render(" ") + styles.RuleText.Render("|") + styles.Band.Render(" ")
 
@@ -46,6 +60,11 @@ func (m Model) nowBandContent(styles Styles) string {
 		for _, h := range res.Holders {
 			info := stageDisplay(h.Task)
 			activity := roleStyle(info.role, styles).Render(strings.ToLower(info.label))
+			// "Encode: ... encoding" says it twice; the resource already
+			// names the work unless the holder is only reserving it.
+			if strings.HasPrefix(strings.ToLower(info.label), strings.ToLower(strings.TrimSuffix(rlabel, "e"))) {
+				activity = ""
+			}
 			if h.Task == "encoding" {
 				for _, item := range m.snapshot.Queue {
 					if item.ID != h.ItemID {
@@ -59,15 +78,17 @@ func (m Model) nowBandContent(styles Styles) string {
 					break
 				}
 			}
-			id := fmt.Sprintf("#%d ", h.ItemID)
-			if title := m.holderTitle(h.ItemID); title != "" && !compact {
-				id += truncate(title, 28) + " "
+			seg := styles.MutedText.Render(rlabel+": ") + styles.Text.Render(fmt.Sprintf("#%d", h.ItemID))
+			if title := m.holderTitle(h.ItemID); title != "" && detail < 1 {
+				seg += styles.Text.Render(" " + truncate(title, 28))
 			}
-			seg := styles.MutedText.Render(rlabel+": ") + styles.Text.Render(id) + activity
-			if !compact {
-				for _, extra := range m.holderExtras(h) {
-					seg += styles.FaintText.Render(" ·") + styles.AccentText.Render(" "+extra)
-				}
+			if activity != "" {
+				seg += " " + activity
+			}
+			extras := m.holderExtras(h)
+			extras = extras[:max(min(len(extras), 3-max(detail, 1)), 0)]
+			for _, extra := range extras {
+				seg += styles.FaintText.Render(" ·") + styles.AccentText.Render(" "+extra)
 			}
 			parts = append(parts, seg)
 		}

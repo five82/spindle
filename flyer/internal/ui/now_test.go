@@ -55,7 +55,8 @@ func TestNowBandDistinguishesReservedEncode(t *testing.T) {
 		t.Fatalf("idle encoder in NOW band: %q", got)
 	}
 	m.snapshot.Queue[0].Tasks[1].ActiveAssetKey = "movie"
-	if got := stripANSI(m.nowBandContent(m.theme.BandStyles())); !strings.Contains(got, "#42 encoding") {
+	// The Encode resource already names the work; only a reservation is called out.
+	if got := stripANSI(m.nowBandContent(m.theme.BandStyles())); got != "NOW Encode: #42" {
 		t.Fatalf("active encoder in NOW band: %q", got)
 	}
 }
@@ -97,7 +98,22 @@ func TestNowBandNamesHolderTitleAndETA(t *testing.T) {
 		},
 	}
 	got := stripANSI(m.nowBandContent(m.theme.BandStyles()))
-	if !strings.Contains(got, "#1 Breaking Bad (2008) encoding · s01_001 8% · ~22m left") || strings.Count(got, "encoding") != 1 {
+	if got != "NOW Encode: #1 Breaking Bad (2008) · s01_001 8% · ~22m left" {
 		t.Fatalf("NOW band = %q", got)
+	}
+
+	// Narrow terminals shed the title, then the ETA, before the measure.
+	for _, tc := range []struct {
+		width int
+		want  string
+	}{
+		{50, "NOW Encode: #1 · s01_001 8% · ~22m left"},
+		{35, "NOW Encode: #1 · s01_001 8%"},
+		{20, "NOW Encode: #1"},
+	} {
+		m.width = tc.width
+		if got := stripANSI(m.nowBandContent(m.theme.BandStyles())); got != tc.want {
+			t.Errorf("width %d: NOW band = %q, want %q", tc.width, got, tc.want)
+		}
 	}
 }

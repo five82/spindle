@@ -39,9 +39,15 @@ func TestLogEventTimestampFallsBackToRawWhenUnparsable(t *testing.T) {
 
 func TestLogEventTimestampUsesParsedLocalTime(t *testing.T) {
 	evt := sampleLogEvent()
-	want := evt.ParsedTime().In(time.Local).Format("2006-01-02 15:04:05")
+	want := evt.ParsedTime().In(time.Local).Format("Jan 02 15:04:05")
 	if got := logEventTimestamp(evt); got != want {
 		t.Fatalf("logEventTimestamp() = %q, want %q", got, want)
+	}
+	// Today's events drop the date.
+	now := time.Now()
+	evt.Timestamp = now.Format(time.RFC3339)
+	if got, want := logEventTimestamp(evt), now.Format("15:04:05"); got != want {
+		t.Fatalf("today's logEventTimestamp() = %q, want %q", got, want)
 	}
 }
 

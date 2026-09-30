@@ -228,3 +228,23 @@ func TestHelpModalFitsMinimumTerminal(t *testing.T) {
 		t.Errorf("context section must be listed first:\n%s", box)
 	}
 }
+
+// The queue footer names actions, not the active filter (the panel title
+// does), and the inspector calls out a stale snapshot by age.
+func TestQueueFooterAndInspectorStaleBanner(t *testing.T) {
+	m := newAppTestModel(t)
+	m.width, m.height = 140, 24
+	if got := stripANSI(m.renderCommandBar()); !strings.Contains(got, "/:Find") || !strings.Contains(got, "f:Status") || strings.Contains(got, "f:All") {
+		t.Fatalf("footer = %q", got)
+	}
+	now := time.Now()
+	m.now = func() time.Time { return now }
+	m.snapshot.LastError = errors.New("offline")
+	m.snapshot.LastUpdated = now.Add(-3 * time.Minute)
+	m.inspecting, m.inspectedID = true, 2
+	m.initInspectorViewport()
+	m.updateInspectorViewport()
+	if got := stripANSI(m.inspectorViewport.View()); !strings.HasPrefix(got, "Stale snapshot: last successful fetch 3m ago") {
+		t.Fatalf("inspector = %q", got)
+	}
+}

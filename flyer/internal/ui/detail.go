@@ -64,7 +64,8 @@ func (m *Model) renderDetailContent(item spindle.QueueItem, width int) string {
 	}
 	styles := m.theme.Styles()
 	var b strings.Builder
-	w := fieldWriter{b: &b, styles: styles, width: width}
+	// Field rows share the task board's two-cell indent under section titles.
+	w := fieldWriter{b: &b, styles: styles, width: width, indent: 2}
 
 	m.renderAttention(w, item, styles)
 
@@ -273,7 +274,7 @@ func (m *Model) renderAttention(w fieldWriter, item spindle.QueueItem, styles St
 // and how it will be encoded. Identical shape whether running or done.
 func (m *Model) renderMedia(w fieldWriter, item spindle.QueueItem, styles Styles) {
 	var b strings.Builder
-	inner := fieldWriter{b: &b, styles: w.styles, width: w.width}
+	inner := fieldWriter{b: &b, styles: w.styles, width: w.width, indent: w.indent}
 
 	// Disc number lives in the item band; the input file only on Video.
 	inner.field("Source", sourceSummary(item.Source), styles.Text)
@@ -322,7 +323,7 @@ func metadataFieldLabel(key string) string {
 // encoding, then results, stats, validation, and subtitles once available.
 func (m *Model) renderOutput(w fieldWriter, item spindle.QueueItem, styles Styles) {
 	var b strings.Builder
-	inner := fieldWriter{b: &b, styles: w.styles, width: w.width}
+	inner := fieldWriter{b: &b, styles: w.styles, width: w.width, indent: w.indent}
 
 	renderEstimatedSize(inner, item)
 	renderSizeResult(inner, item)
