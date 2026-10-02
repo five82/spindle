@@ -31,7 +31,7 @@ func TestRenderDigestOptionalEvidence(t *testing.T) {
 		{Time: "2026-08-12T02:03:00Z", Type: "stage_complete", Stage: "ripping", TaskID: 2, Attempt: 2, DurationSeconds: 180},
 	}
 	r.Analysis.DecisionGroups = []DecisionGroup{{DecisionType: "selected", DecisionResult: "yes", Count: 1, Entries: []LogDecision{{TS: "2026-08-11T22:00:00-04:00", Extras: map[string]any{"title": 1}}}}}
-	r.RipCache = &RipCacheReport{Path: "/cache", Found: true, Metadata: &ripCacheMetadata{DiscTitle: "Example", CachedAt: time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC), TitleCount: 2, TotalBytes: 1024}}
+	r.RipCache = &RipCacheReport{Path: "/cache", Found: true, Metadata: &ripCacheMetadata{DiscTitle: "Example", CachedAt: time.Date(2026, 8, 11, 8, 0, 0, 0, time.FixedZone("EDT", -4*3600)), TitleCount: 2, TotalBytes: 1024}}
 	r.Analysis.TitleSelection = &TitleSelectionSummary{SelectedID: 2, SelectedDurationSeconds: 3600, DecisionResult: "chosen", DecisionReason: "playlist", FeatureCandidateCount: 2, SimilarRuntimeCount: 1, Candidates: []TitleCandidate{{ID: 2, DurationSeconds: 3600, Chapters: 12, Playlist: "00800.mpls", SegmentCount: 3, Selected: true}}}
 	r.Envelope.Episodes[0].EpisodeEnd = 4
 	r.Envelope.Attributes.ContentID = &ripspec.ContentIDSummary{Method: "whisperx_jev_reference_choice", ReferenceSource: "opensubtitles", ReferenceEpisodes: 3, MatchedEpisodes: 2, ReviewEpisodes: 1, Completed: true}

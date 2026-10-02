@@ -282,7 +282,8 @@ func computeSourceSummary(r *Report) *SourceSummary {
 	ss := &SourceSummary{DiscSource: r.StageGate.DiscSource}
 	if r.Encoding != nil {
 		snap := r.Encoding.Snapshot
-		ss.OutputResolution = strings.TrimSpace(snap.Resolution)
+		// Resolution is the encode input; the delivered probe below overrides.
+		ss.OutputResolution = strings.TrimSpace(snap.OutputResolution)
 		ss.DynamicRange = strings.TrimSpace(snap.DynamicRange)
 		ss.HDR = strings.EqualFold(ss.DynamicRange, "HDR")
 	}
@@ -292,7 +293,7 @@ func computeSourceSummary(r *Report) *SourceSummary {
 				continue
 			}
 			ss.OutputCodec = s.CodecName
-			if ss.OutputResolution == "" && s.Width > 0 && s.Height > 0 {
+			if s.Width > 0 && s.Height > 0 {
 				ss.OutputResolution = fmt.Sprintf("%dx%d", s.Width, s.Height)
 			}
 			if mediaStreamHDR(s) {

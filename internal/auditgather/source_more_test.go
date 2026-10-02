@@ -20,10 +20,18 @@ func TestSourceSummaryInfersVideoFromProbeAndFileDecision(t *testing.T) {
 	if got == nil || got.InputResolution != "1920x1080" || len(got.InputCodecs) != 2 || got.InputCodecs[0] != "h264" {
 		t.Fatalf("fallback: %+v", got)
 	}
-	r.Encoding = &EncodingReport{Snapshot: encodingstate.Snapshot{Resolution: "1280x720", DynamicRange: "HDR"}}
+	// A cropped encode: the snapshot's Resolution is the input, never the output,
+	// and the delivered probe outranks the (last-episode) snapshot.
+	r.Media[0].Probe.Streams[1].Width, r.Media[0].Probe.Streams[1].Height = 1440, 1080
+	r.Encoding = &EncodingReport{Snapshot: encodingstate.Snapshot{Resolution: "1920x1080", OutputResolution: "1436x1080", DynamicRange: "HDR"}}
 	got = computeSourceSummary(r)
-	if got == nil || got.OutputResolution != "1280x720" || got.DynamicRange != "HDR" {
-		t.Fatalf("snapshot: %+v", got)
+	if got == nil || got.OutputResolution != "1440x1080" || got.DynamicRange != "HDR" {
+		t.Fatalf("cropped probe: %+v", got)
+	}
+	r.Media = nil
+	got = computeSourceSummary(r)
+	if got == nil || got.OutputResolution != "1436x1080" {
+		t.Fatalf("snapshot output fallback: %+v", got)
 	}
 	if got := computeSourceSummary(&Report{}); got != nil {
 		t.Fatalf("empty: %+v", got)

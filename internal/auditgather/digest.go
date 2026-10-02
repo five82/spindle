@@ -380,7 +380,7 @@ func writeDigestRipCache(b *strings.Builder, r *Report) {
 	case rc.Metadata != nil:
 		m := rc.Metadata
 		fmt.Fprintf(b, "found: %q cached %s | %d titles | %s | %s\n",
-			m.DiscTitle, m.CachedAt.Format("2006-01-02 15:04"), m.TitleCount, fmtBytes(m.TotalBytes), rc.Path)
+			m.DiscTitle, m.CachedAt.UTC().Format("2006-01-02 15:04"), m.TitleCount, fmtBytes(m.TotalBytes), rc.Path)
 	default:
 		fmt.Fprintf(b, "found at %s (no metadata)\n", rc.Path)
 	}
