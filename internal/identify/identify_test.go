@@ -1112,6 +1112,41 @@ func TestSelectTVEpisodeTitles(t *testing.T) {
 			},
 		},
 		{
+			// Real disc: the single play-all shares segment 64 with every
+			// episode, which once satisfied the split-double exception and
+			// ripped one 3.8 hour title instead of five episodes.
+			name:           "TNG season 2 disc 1 single play-all of five episodes is excluded",
+			minTitleLength: 120,
+			titles: []ripspec.Title{
+				{ID: 0, Duration: 159, SegmentCount: 2, SegmentMap: "80,5", Playlist: "00011.mpls"},
+				{ID: 1, Duration: 476, SegmentCount: 2, SegmentMap: "9,55", Playlist: "00015.mpls"},
+				{ID: 2, Duration: 1023, SegmentCount: 2, SegmentMap: "30,65", Playlist: "00016.mpls"},
+				{ID: 3, Duration: 1052, SegmentCount: 2, SegmentMap: "7,65", Playlist: "00018.mpls"},
+				{ID: 4, Duration: 159, SegmentCount: 2, SegmentMap: "81,5", Playlist: "00019.mpls"},
+				{ID: 5, Duration: 173, SegmentCount: 2, SegmentMap: "40,6", Playlist: "00013.mpls"},
+				{ID: 6, Duration: 2724, SegmentCount: 2, SegmentMap: "4,64", Playlist: "00005.mpls"},
+				{ID: 7, Duration: 2731, SegmentCount: 2, SegmentMap: "3,64", Playlist: "00004.mpls"},
+				{ID: 8, Duration: 2739, SegmentCount: 2, SegmentMap: "2,64", Playlist: "00003.mpls"},
+				{ID: 9, Duration: 2744, SegmentCount: 2, SegmentMap: "1,64", Playlist: "00002.mpls"},
+				{ID: 10, Duration: 2731, SegmentCount: 2, SegmentMap: "0,64", Playlist: "00001.mpls"},
+				{ID: 11, Duration: 13667, SegmentCount: 6, SegmentMap: "0,1,2,3,4,64", Playlist: "00000.mpls"},
+				{ID: 12, Duration: 300, SegmentCount: 1, SegmentMap: "68", Playlist: "00068.m2ts"},
+			},
+			wantIDs:       []int{6, 7, 8, 9, 10},
+			wantAmbiguous: false,
+			wantExtras:    8,
+			wantReasonByID: map[int]string{
+				6:  "episode_candidate",
+				7:  "episode_candidate",
+				8:  "episode_candidate",
+				9:  "episode_candidate",
+				10: "episode_candidate",
+				11: "combined_play_all_extra",
+				0:  "gross_runtime_outlier",
+				12: "gross_runtime_outlier",
+			},
+		},
+		{
 			name:           "TNG season 1 disc 6 play-all playlist does not replace final episodes",
 			minTitleLength: 120,
 			titles: []ripspec.Title{

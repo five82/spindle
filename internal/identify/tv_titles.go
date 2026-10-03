@@ -222,9 +222,11 @@ func durationWeightedMedian(candidates []tvTitleCandidate) int {
 // combination of other candidates. The normal disposition is play-all
 // exclusion: the composite is a hidden concatenation of real episodes. The
 // exception is a split double episode (e.g. a seamless-branch pilot): when
-// the disc has exactly one composite, its components share segments, and no
-// independent same-length alternate exists, the combined title is the real
-// program and the halves are partial cuts.
+// the disc has exactly one composite, it has exactly two components that
+// share segments, and no independent same-length alternate exists, the
+// combined title is the real program and the halves are partial cuts. Three
+// or more components cannot be halves of a double, even when every episode
+// shares a common tail segment.
 func resolveComposites(alive []tvTitleCandidate, result *tvTitleSelectionResult) ([]tvTitleCandidate, int) {
 	composites := detectComposites(alive)
 	if len(composites) == 0 {
@@ -233,7 +235,7 @@ func resolveComposites(alive []tvTitleCandidate, result *tvTitleSelectionResult)
 
 	if len(composites) == 1 {
 		composite := composites[0]
-		if tvComponentsOverlap(composite.components) && !hasSameLengthAlternate(alive, composite) {
+		if len(composite.components) == 2 && tvComponentsOverlap(composite.components) && !hasSameLengthAlternate(alive, composite) {
 			decision := &result.Decisions[composite.candidate.decisionIndex]
 			decision.Selected = true
 			decision.Reason = "combined_double_episode_candidate"

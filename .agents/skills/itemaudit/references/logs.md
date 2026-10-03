@@ -251,6 +251,13 @@ daemon log file has rotated away or is missing.
      `expected_runtime_mismatch`/`over_expected_episode_count`, and
      `min_title_length` on `below_min_title_length` (all INFO) — compare the
      excluded title's `duration` against these to judge the exclusion
+   - Blu-ray composites: a title whose segment map is a combination of other
+     candidates is normally `combined_play_all_extra`. Only a disc's single
+     composite with exactly two segment-sharing components and no same-length
+     alternate becomes `combined_double_episode_candidate` (halves logged as
+     `combined_title_component`). A selected combined title with three or more
+     components, or one far beyond every `expected_runtimes_seconds` target,
+     is a **CRITICAL** mis-selection: real episodes were dropped
    - Asset keys are PERMANENT placeholder identifiers (stable-key model):
      `episodeid` never renames `s01_001`-style keys. Episode identity lives in
      `envelope.episodes[]` fields (`season`, `episode`, `episode_end`) -- join
