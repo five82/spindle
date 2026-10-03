@@ -174,7 +174,7 @@ const maxOpsPerRun = 8
 // writeDigestStageRuns renders the queue journal, which is independent of log
 // rotation: one line per stage run (keyed by task and attempt) with its
 // terminal outcome, then the run's waits, where its time went by activity,
-// any activity still open when the run ended, and encoding substage changes.
+// and any activity still open when the run ended.
 func writeDigestStageRuns(b *strings.Builder, r *Report) {
 	if len(r.Transitions) == 0 {
 		return
@@ -191,7 +191,6 @@ func writeDigestStageRuns(b *strings.Builder, r *Report) {
 		waits      []string
 		ops        []*opTotal
 		open       map[string]queue.Event
-		substages  []string
 	}
 	var runs []*stageRun
 	byKey := map[string]*stageRun{}
@@ -209,8 +208,6 @@ func writeDigestStageRuns(b *strings.Builder, r *Report) {
 			run.start = e.Time
 		case strings.HasPrefix(e.Type, "stage_"):
 			run.terminal = &e
-		case e.Type == "encoding_substage":
-			run.substages = append(run.substages, fmt.Sprintf("%s %s @ %s", e.EpisodeKey, e.Substage, shortTS(e.Time)))
 		case e.Type == "activity_running" || e.Type == "activity_waiting":
 			run.open[activity] = e
 		case strings.HasPrefix(e.Type, "activity_"):
@@ -276,9 +273,6 @@ func writeDigestStageRuns(b *strings.Builder, r *Report) {
 			for _, o := range open {
 				fmt.Fprintf(b, "  OPEN at run end: %s\n", o)
 			}
-		}
-		for _, sub := range run.substages {
-			fmt.Fprintf(b, "  substage: %s\n", sub)
 		}
 	}
 }

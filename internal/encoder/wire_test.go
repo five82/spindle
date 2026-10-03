@@ -124,9 +124,6 @@ func TestWireRoundTrip(t *testing.T) {
 	if !found {
 		t.Fatalf("missing chunking transition: %+v", events)
 	}
-	if bytes.Contains(logBuf.Bytes(), []byte("encoding_substage")) {
-		t.Fatalf("substage emitted through log: %s", logBuf.String())
-	}
 	if result == nil {
 		t.Fatal("result event not delivered")
 	}

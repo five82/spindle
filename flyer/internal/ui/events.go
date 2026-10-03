@@ -140,8 +140,6 @@ func (m *Model) renderItemEvents() string {
 			}
 		case event.Type == "stage_complete":
 			label = "completed"
-		case event.Type == "encoding_substage":
-			label = event.Substage
 		case strings.HasPrefix(event.Type, "activity_"):
 			label = event.Substage
 			if state := strings.TrimPrefix(event.Type, "activity_"); state != "ended" {
@@ -153,8 +151,7 @@ func (m *Model) renderItemEvents() string {
 		if label != "" {
 			label = strings.ToUpper(label[:1]) + label[1:]
 		}
-		// A bare row restating the previous one (a substage marker right
-		// after its timed activity) adds nothing.
+		// A bare row restating the previous one adds nothing.
 		row := event.Stage + "|" + strings.ToLower(label) + "|" + event.EpisodeKey
 		msg := strings.TrimSpace(event.Message)
 		if strings.EqualFold(strings.TrimSuffix(msg, " ended"), event.Substage) {

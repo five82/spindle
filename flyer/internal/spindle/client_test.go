@@ -47,7 +47,7 @@ func TestClient_FetchesEndpointsAndEncodesQueries(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(LogBatch{Events: nil, Next: 99})
 		case "/api/queue/42/events":
 			gotEventsQuery = r.URL.Query()
-			_ = json.NewEncoder(w).Encode(ItemEventBatch{Events: []ItemEvent{{ID: 8, ItemID: 42, Stage: "encoding", Type: "encoding_substage", Substage: "chunking"}}, Next: 8})
+			_ = json.NewEncoder(w).Encode(ItemEventBatch{Events: []ItemEvent{{ID: 8, ItemID: 42, Stage: "encoding", Type: "activity_running", Substage: "chunking"}}, Next: 8})
 		default:
 			http.NotFound(w, r)
 		}

@@ -13,7 +13,7 @@ func TestAuditStageTimingsWithoutDaemonLogs(t *testing.T) {
 	cfg := &config.Config{Paths: config.PathsConfig{StateDir: t.TempDir()}}
 	transitions := []queue.Event{
 		{Type: "stage_start", Stage: queue.StageEncoding, Time: "2026-01-01T00:00:00Z"},
-		{Type: "encoding_substage", Stage: queue.StageEncoding, EpisodeKey: "main", Substage: "chunking"},
+		{Type: "activity_running", Stage: queue.StageEncoding, EpisodeKey: "main", Substage: "chunking"},
 		{Type: "stage_complete", Stage: queue.StageEncoding, Time: "2026-01-01T00:00:12Z", DurationSeconds: 12},
 	}
 	report, err := Gather(context.Background(), cfg, &httpapi.ItemResponse{ID: 1}, transitions...)

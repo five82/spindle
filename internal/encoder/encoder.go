@@ -248,7 +248,6 @@ func (h *Handler) encodeJobs(ctx context.Context, sess *stage.Session, encodedDi
 }
 
 func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encodedDir string, job stage.AssetJob) (encodeJobResult, error) {
-	item := sess.Item
 	logger := sess.Logger
 
 	// Remove stale output from a previous run. The staging directory is
@@ -276,12 +275,6 @@ func (h *Handler) encodeJob(ctx context.Context, sess *stage.Session, encodedDir
 	// Reset encoding snapshot and force-persist.
 	snap := h.initialEncodingSnapshot(ctx, logger, job)
 	sess.Progress(0, message, stage.WithEncodingDetails(snap.Marshal()))
-	if err := sess.Store.RecordEvent(queue.Event{
-		ItemID: item.ID, TaskID: sess.Task.ID, Attempt: sess.Task.Attempts, Type: "encoding_substage", Stage: queue.StageEncoding,
-		EpisodeKey: job.Key, Substage: snap.Substage,
-	}); err != nil {
-		return encodeJobResult{}, fmt.Errorf("persist initial encoding substage: %w", err)
-	}
 
 	reporter := newSpindleReporter(sess, logger, job.Key)
 	result, encErr := runWorkerProcess(ctx, logger, job.Input.Path, encodedDir, reporter)

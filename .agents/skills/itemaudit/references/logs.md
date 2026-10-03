@@ -95,9 +95,10 @@ daemon log file has rotated away or is missing.
    - Encode lifecycle evidence: `logs.events` carries `encode_init` (input
      resolution/dynamic range), `encoder_config` (preset/quality and full
      `svtav1_params` — check level/mbr cap here for playback-compat questions),
-     and `encode_result` (sizes, wall time, speed). Native `transitions` with
-     `type=encoding_substage` carry Reel phase changes
-     (chunking/encoding/merging/muxing), episode key, message, and percent.
+     and `encode_result` (sizes, wall time, speed). Reel phase changes
+     (chunking/grain gate/encoding/merging/muxing) are native `transitions`
+     activities (`activity_running`/`activity_ended`) with episode key,
+     message, and duration.
      `logs.events` entry `encoding_progress` carries `bitrate` and
      `chunks_complete/chunks_total`.
    - Item lifecycle: `event_type=item_complete` is the one-line completion

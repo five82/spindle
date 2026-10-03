@@ -36,9 +36,8 @@ rather than a stable public API. It contains:
   `stage_degraded`, with numeric `durationSeconds`. Startup recovery records
   `stage_interrupted` (with the task's last `episodeKey`, `message`, `percent`,
   and the run's `durationSeconds`) for a run the daemon died under.
-  `encoding_substage` entries carry `episodeKey` and `substage`. Task
-  activities are journaled as `activity_running`/`activity_waiting` when they
-  start and `activity_done`/`activity_ended` (with `durationSeconds`) when they
+  Task activities, including Reel's encoding phases, are journaled as
+  `activity_running`/`activity_waiting` when they start and `activity_done`/`activity_ended` (with `durationSeconds`) when they
   finish or are superseded; `substage` holds the activity's operation. The
   executor ends every activity still open when a run reaches its terminal
   outcome, so a live activity on a finished run is a defect. The digest's

@@ -19,7 +19,7 @@ func TestItemEventsAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []string{"stage_start", "encoding_substage"} {
+	for _, kind := range []string{"stage_start", "activity_running"} {
 		if err := store.RecordEvent(queue.Event{ItemID: item.ID, Type: kind, Stage: queue.StageEncoding, Substage: "chunking"}); err != nil {
 			t.Fatal(err)
 		}

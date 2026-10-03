@@ -750,13 +750,12 @@ func TestStageInterruptionIsCountedAndFlagged(t *testing.T) {
 
 // The digest renders every journaled run with its own outcome, so a failed,
 // canceled, or interrupted run is visible without reading the JSON; waits,
-// activity time, activities left open, and substages attach to their run.
+// activity time, and activities left open attach to their run.
 func TestRenderDigestStageRuns(t *testing.T) {
 	events := []queue.Event{
 		{Time: "2026-09-30T01:00:00Z", Type: "stage_start", Stage: "encoding", TaskID: 4, Attempt: 1},
 		{Time: "2026-09-30T01:00:01Z", Type: "activity_waiting", Stage: "encoding", TaskID: 4, Attempt: 1, Substage: "input", Message: "Waiting for completed rip"},
 		{Time: "2026-09-30T01:00:11Z", Type: "activity_ended", Stage: "encoding", TaskID: 4, Attempt: 1, Substage: "input", DurationSeconds: 10},
-		{Time: "2026-09-30T01:00:12Z", Type: "encoding_substage", Stage: "encoding", TaskID: 4, Attempt: 1, EpisodeKey: "s01_003", Substage: "chunking"},
 		{Time: "2026-09-30T01:00:12Z", Type: "activity_running", Stage: "encoding", TaskID: 4, Attempt: 1, Substage: "Chunking", EpisodeKey: "s01_003"},
 		{Time: "2026-09-30T01:05:00Z", Type: "stage_interrupted", Stage: "encoding", TaskID: 4, Attempt: 1, Message: "Encoding s01_003", Percent: 42, DurationSeconds: 300},
 		{Time: "2026-09-30T01:06:00Z", Type: "stage_start", Stage: "encoding", TaskID: 4, Attempt: 2},
@@ -773,7 +772,6 @@ func TestRenderDigestStageRuns(t *testing.T) {
 	for _, want := range []string{
 		"encoding task=4 attempt=1: 09-30 01:00:00 -> INTERRUPTED after 5m0s (last: \"Encoding s01_003\" 42%)",
 		"waited: input 10s \"Waiting for completed rip\"",
-		"substage: s01_003 chunking @ 09-30 01:00:12",
 		"encoding task=4 attempt=2: 09-30 01:06:00 -> FAILED 2m0s @ 09-30 01:08:00",
 		"time by activity: Chunking 1m0s",
 		"OPEN at run end: persist \"Finalizing\"",

@@ -139,7 +139,7 @@ reminder, not a second definition:
 - Log files: <logs.paths>
 - Lines scanned: <logs.lines_scanned>
 - INFO events/progress: <summarize notable logs.events; note logs.events_omitted if progress ticks were downsampled; expand long-running progress/timing anomalies only>
-- Native transitions: <from the digest's Stage runs: terminal outcome per run, repeated starts/retries, waits, activities left open, and per-episode encoding substages; distinguish cancellations/degraded runs from failures>
+- Native transitions: <from the digest's Stage runs: terminal outcome per run, repeated starts/retries, waits, activities left open (Reel encoding phases are activities); distinguish cancellations/degraded runs from failures>
 - WARN events: <count> (list if > 0)
 - ERROR events: <count> (list if > 0)
 - Key decisions: <from analysis.decision_groups — expand only anomalous decisions>
@@ -216,7 +216,7 @@ After running `spindle queue audit`, check only the phases flagged as `true` in
       looked off; for a fresh-item resume warning, checked prior
       same-fingerprint runs outside the current item's clamped log window
 - [ ] Read the digest's Stage runs for every run's terminal outcome, waits,
-      open activities, and encoding substages (JSON `transitions` for exact
+      and open activities (JSON `transitions` for exact
       sequences); used them for the timing table
 - [ ] If TV: reconciled scanned, selected, placeholder, manifest, ripped, and
       final episode counts; checked a credible disc-specific episode listing if

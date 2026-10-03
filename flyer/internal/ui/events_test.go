@@ -19,7 +19,7 @@ func TestItemEventsRenderKeepsLifecycleOutcomes(t *testing.T) {
 		{Type: "stage_start", Stage: "ripping"},
 		{Type: "stage_start", Stage: "encoding"},
 		{Type: "stage_complete", Stage: "ripping"},
-		{Type: "encoding_substage", Stage: "encoding", Substage: "Chunking"},
+		{Type: "activity_ended", Stage: "encoding", Substage: "Chunking"},
 		{Type: "stage_complete", Stage: "encoding"},
 	}
 	m.width = 100
@@ -31,7 +31,7 @@ func TestItemEventsRenderKeepsLifecycleOutcomes(t *testing.T) {
 	}
 }
 
-// Snake-case substages read as sentences, a bare marker restating the
+// Snake-case activities read as sentences, a bare row restating the
 // previous row folds away, and a run of one stage dims its repeats.
 func TestItemEventsNormalizeAndGroupRows(t *testing.T) {
 	m := New(Options{PrefsPath: t.TempDir() + "/prefs.toml"})
@@ -39,8 +39,8 @@ func TestItemEventsNormalizeAndGroupRows(t *testing.T) {
 	m.itemEvents.loaded = true
 	m.itemEvents.events = []spindle.ItemEvent{
 		{Type: "activity_ended", Stage: "encoding", EpisodeKey: "s01_002", Substage: "Crop detection", DurationSeconds: 3.5},
-		{Type: "encoding_substage", Stage: "encoding", EpisodeKey: "s01_002", Substage: "crop_detection"},
-		{Type: "encoding_substage", Stage: "encoding", EpisodeKey: "s01_002", Substage: "validation"},
+		{Type: "activity_ended", Stage: "encoding", EpisodeKey: "s01_002", Substage: "crop_detection"},
+		{Type: "activity_ended", Stage: "encoding", EpisodeKey: "s01_002", Substage: "validation"},
 		{Type: "stage_complete", Stage: "analysis"},
 	}
 	lines := strings.Split(stripANSI(m.renderItemEvents()), "\n")
@@ -108,14 +108,14 @@ func TestItemEventsTabFollowsNewest(t *testing.T) {
 	m = model.(Model)
 	var events []spindle.ItemEvent
 	for i := range 30 {
-		events = append(events, spindle.ItemEvent{ID: int64(i + 1), ItemID: 42, Type: "encoding_substage", Stage: "encoding", Substage: fmt.Sprintf("step-%02d", i)})
+		events = append(events, spindle.ItemEvent{ID: int64(i + 1), ItemID: 42, Type: "activity_ended", Stage: "encoding", Substage: fmt.Sprintf("step-%02d", i)})
 	}
 	m.handleItemEventBatch(itemEventBatchMsg{itemID: 42, batch: spindle.ItemEventBatch{Next: 30, Events: events}})
 	if view := m.inspectorViewport.View(); !m.inspectorViewport.AtBottom() || !strings.Contains(view, "Step-29") {
 		t.Fatalf("events tab must open on the newest line: %q", stripANSI(view))
 	}
 	m.inspectorViewport.GotoTop()
-	m.handleItemEventBatch(itemEventBatchMsg{itemID: 42, batch: spindle.ItemEventBatch{Next: 31, Events: []spindle.ItemEvent{{ID: 31, ItemID: 42, Type: "encoding_substage", Stage: "encoding", Substage: "step-30"}}}})
+	m.handleItemEventBatch(itemEventBatchMsg{itemID: 42, batch: spindle.ItemEventBatch{Next: 31, Events: []spindle.ItemEvent{{ID: 31, ItemID: 42, Type: "activity_ended", Stage: "encoding", Substage: "step-30"}}}})
 	if m.inspectorViewport.AtBottom() {
 		t.Fatal("scrolling up must stop following")
 	}
@@ -137,7 +137,7 @@ func TestItemEventsTabPagesAndIgnoresStaleReplies(t *testing.T) {
 		} else {
 			batch.Events = []spindle.ItemEvent{
 				{ID: 1, ItemID: 42, Type: "stage_start", Stage: "encoding"}, // overlapping poll
-				{ID: 2, ItemID: 42, Type: "encoding_substage", Stage: "encoding", EpisodeKey: "s01e01", Substage: "Chunking", Message: "Detecting shot cuts", Percent: 40},
+				{ID: 2, ItemID: 42, Type: "activity_running", Stage: "encoding", EpisodeKey: "s01e01", Substage: "Chunking", Message: "Detecting shot cuts", Percent: 40},
 			}
 		}
 		_ = json.NewEncoder(w).Encode(batch)
