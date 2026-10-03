@@ -176,8 +176,9 @@ daemon log file has rotated away or is missing.
      across the TMDB season, then compares five-minute middle excerpts in one
      Jev Choice per source. Full primary-audio WhisperX transcripts and word
      timestamps remain shared with downstream analysis/subtitle adoption.
-     Acquisition logs belong to episode identification as well as adoption;
-     reference reuse does not bypass display-subtitle verification.
+     Episode identification and adoption each log their own OpenSubtitles
+     searches; adoption never reuses the identification reference except
+     through its own source-aware ranking and the shared download cache.
    - Rip-cache restores and stores hardlink when cache and staging share a
      filesystem: near-instant `copy_progress` (a single jump to 100%) is
      expected, not a truncated copy.

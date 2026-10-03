@@ -13,7 +13,6 @@ import (
 
 	"github.com/five82/spindle/internal/logs"
 	"github.com/five82/spindle/internal/opensubtitles"
-	"github.com/five82/spindle/internal/ripspec"
 	"github.com/five82/spindle/internal/stage"
 )
 
@@ -21,17 +20,14 @@ import (
 // the OpenSubtitles quota before the job skips.
 const maxSubtitleCandidates = 3
 
-// subtitleCandidate is one downloadable (or already-downloaded) subtitle in
-// adoption preference order.
+// subtitleCandidate is one downloadable subtitle in adoption preference order.
 type subtitleCandidate struct {
-	FileID    int
-	LocalPath string // non-empty when the file is already on disk
-	Language  string
-	Origin    string // "contentid_reference" | "opensubtitles"
+	FileID   int
+	Language string
 }
 
 func (c subtitleCandidate) label() string {
-	return fmt.Sprintf("%s file_id=%d", c.Origin, c.FileID)
+	return fmt.Sprintf("opensubtitles file_id=%d", c.FileID)
 }
 
 // listSubtitleCandidates returns adoption candidates for the job in
@@ -46,7 +42,6 @@ func (h *Handler) listSubtitleCandidates(ctx context.Context, sess *stage.Sessio
 	}
 
 	season, episode := 0, 0
-	var candidates []subtitleCandidate
 	switch strings.ToLower(strings.TrimSpace(meta.MediaType)) {
 	case "movie":
 	case "tv":
@@ -58,78 +53,59 @@ func (h *Handler) listSubtitleCandidates(ctx context.Context, sess *stage.Sessio
 			return nil, "multi-episode rip has no single-episode subtitle source"
 		}
 		season, episode = ep.Season, ep.Episode
-		if ref, ok := h.contentIDReference(sess, ep); ok {
-			candidates = append(candidates, ref)
-		}
 	default:
 		return nil, "media type has no subtitle download policy"
 	}
 
-	results, err := h.osClient.Search(ctx, meta.ID, season, episode, h.searchLanguages())
+	logger := sess.Logger.With("episode_key", key)
+	candidates, err := h.searchCandidates(ctx, logger, meta.ID, season, episode, videoPath, meta.DiscSource)
 	if err != nil {
-		sess.Logger.Warn("OpenSubtitles candidate search failed",
+		logger.Warn("OpenSubtitles candidate search failed",
 			"event_type", "subtitle_candidate_search_failed",
 			"error_hint", "opensubtitles api error",
 			"impact", "search candidates unavailable for this episode",
 			"error", err,
-			"episode_key", key,
 		)
-		if len(candidates) == 0 {
-			return nil, "OpenSubtitles search failed"
-		}
-		return candidates, ""
-	}
-
-	seen := make(map[int]bool, len(candidates))
-	for _, c := range candidates {
-		seen[c.FileID] = true
-	}
-	profile := subtitleSourceProfile(ctx, sess.Logger, videoPath, meta.DiscSource)
-	for _, c := range rankSearchCandidatesForSource(results, season, episode, profile) {
-		if seen[c.FileID] {
-			continue
-		}
-		candidates = append(candidates, c)
-		if len(candidates) >= maxSubtitleCandidates {
-			break
-		}
+		return nil, "OpenSubtitles search failed"
 	}
 	if len(candidates) == 0 {
 		return nil, "OpenSubtitles returned no usable candidates"
+	}
+	return candidates, ""
+}
+
+// searchCandidates is the one adoption attempt set for a title: the
+// OpenSubtitles search ranked against the actual video, capped at
+// maxSubtitleCandidates. The daemon and `spindle subtitle` both use it so the
+// same title always tries the same files.
+func (h *Handler) searchCandidates(ctx context.Context, logger *slog.Logger, tmdbID, season, episode int, videoPath, discSource string) ([]subtitleCandidate, error) {
+	results, err := h.osClient.Search(ctx, tmdbID, season, episode, h.searchLanguages())
+	if err != nil {
+		return nil, err
+	}
+	profile := subtitleSourceProfile(ctx, logger, videoPath, discSource)
+	candidates := rankSearchCandidatesForSource(results, season, episode, profile)
+	if len(candidates) > maxSubtitleCandidates {
+		candidates = candidates[:maxSubtitleCandidates]
+	}
+	if len(candidates) == 0 {
+		return nil, nil
 	}
 	fileIDs := make([]int, len(candidates))
 	for i, candidate := range candidates {
 		fileIDs[i] = candidate.FileID
 	}
-	sess.Logger.Info("subtitle candidate attempt set selected",
+	logger.Info("subtitle candidate attempt set selected",
 		"decision_type", logs.DecisionSubtitleCandidateRanking,
 		"decision_result", "selected",
 		"decision_reason", "source affinity orders release/file matches before generic or conflicting candidates",
-		"episode_key", key,
 		"source_profile", profile.class,
-		"disc_source", meta.DiscSource,
+		"disc_source", discSource,
 		"input_resolution", profile.resolution(),
 		"candidate_file_ids", fmt.Sprint(fileIDs),
 		"attempt_count", len(candidates),
 	)
-	return candidates, ""
-}
-
-// contentIDReference reuses the reference subtitle episode identification
-// already downloaded into staging for this episode, when exactly one exists.
-func (h *Handler) contentIDReference(sess *stage.Session, ep *ripspec.Episode) (subtitleCandidate, bool) {
-	stagingRoot, err := sess.StagingRoot(h.cfg.Paths.StagingDir)
-	if err != nil {
-		return subtitleCandidate{}, false
-	}
-	pattern := filepath.Join(stagingRoot, "contentid", "references", fmt.Sprintf("s%02de%02d-*.srt", ep.Season, ep.Episode))
-	matches, err := filepath.Glob(pattern)
-	if err != nil || len(matches) != 1 {
-		return subtitleCandidate{}, false
-	}
-	name := strings.TrimSuffix(filepath.Base(matches[0]), ".srt")
-	fileID, _ := strconv.Atoi(name[strings.LastIndex(name, "-")+1:])
-	return subtitleCandidate{FileID: fileID, LocalPath: matches[0], Language: "en", Origin: "contentid_reference"}, true
+	return candidates, nil
 }
 
 // subtitleSource describes the release class expected for the actual video
@@ -239,7 +215,7 @@ func rankSearchCandidatesForSource(results []opensubtitles.SubtitleResult, seaso
 				}
 			}
 			all = append(all, ranked{
-				candidate:   subtitleCandidate{FileID: file.FileID, Language: attrs.Language, Origin: "opensubtitles"},
+				candidate:   subtitleCandidate{FileID: file.FileID, Language: attrs.Language},
 				affinity:    source.affinity(metadata),
 				partial:     partialSubtitleNamePattern.MatchString(metadata),
 				exactMarker: exactMarker,
@@ -345,11 +321,9 @@ func (h *Handler) searchLanguages() []string {
 }
 
 // fetchCandidate returns a local path for the candidate's SRT, downloading
-// through the shared quota-aware cache when it is not already on disk.
+// through the shared quota-aware cache (which episode identification's
+// references also populate) when it is not already on disk.
 func (h *Handler) fetchCandidate(ctx context.Context, candidate subtitleCandidate) (string, error) {
-	if candidate.LocalPath != "" {
-		return candidate.LocalPath, nil
-	}
 	cachePath := filepath.Join(h.cfg.OpenSubtitlesCacheDir(), fmt.Sprintf("%d.srt", candidate.FileID))
 	if _, err := os.Stat(cachePath); err == nil {
 		return cachePath, nil

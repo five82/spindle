@@ -237,7 +237,7 @@ After running `spindle queue audit`, check only the phases flagged as `true` in
       usable OpenSubtitles references, completion, and matched/unresolved/review
       counts
 - [ ] Traced `reference_search` selection/omission and file IDs; checked title
-      trust, retry cleanup, and full-reference/full-transcript handoff without
+      trust, retry identity reset, and full-transcript sharing without
       reading cue text; did not mistake dialogue agreement for label
       verification
 - [ ] Reviewed every manifest entry's `match_probability` against 0.90;

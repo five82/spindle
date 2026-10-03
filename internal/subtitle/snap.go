@@ -50,8 +50,11 @@ const (
 
 // snapCuesToWords shifts every confidently matched cue so its start coincides
 // with the aligned start of its first spoken word (the end moves with it,
-// preserving the author's duration), then restores ordering and non-overlap.
-// Returns (nil, 0) when nothing snapped.
+// preserving the author's duration), then trims the previous end when a shift
+// created an overlap (the next line's speech has started; the previous cue
+// yields). A snap that would reorder cues or leave either neighbor's start
+// within minSubtitleCueDuration of it is skipped, so no cue can be trimmed
+// below a readable duration. Returns (nil, 0) when nothing snapped.
 func snapCuesToWords(cues []srtutil.Cue, words []transcription.Word) ([]srtutil.Cue, int) {
 	if len(cues) == 0 || len(words) == 0 {
 		return nil, 0
@@ -69,7 +72,13 @@ func snapCuesToWords(cues []srtutil.Cue, words []transcription.Word) ([]srtutil.
 		if !ok {
 			continue
 		}
-		snapped[i].Start += delta
+		start := snapped[i].Start + delta
+		if start < 0 ||
+			(i > 0 && start < snapped[i-1].Start+minSubtitleCueDuration) ||
+			(i+1 < len(snapped) && start+minSubtitleCueDuration > snapped[i+1].Start) {
+			continue
+		}
+		snapped[i].Start = start
 		snapped[i].End += delta
 		count++
 	}
@@ -77,20 +86,8 @@ func snapCuesToWords(cues []srtutil.Cue, words []transcription.Word) ([]srtutil.
 		return nil, 0
 	}
 
-	// Snapped starts are acoustic onsets, so they win: force starts strictly
-	// increasing and trim the previous end when a shift created an overlap
-	// (the next line's speech has started; the previous cue yields).
-	for i := range snapped {
-		if snapped[i].Start < 0 {
-			snapped[i].Start = 0
-		}
-		if i > 0 && snapped[i].Start < snapped[i-1].Start+0.001 {
-			snapped[i].Start = snapped[i-1].Start + 0.001
-		}
-		if snapped[i].End <= snapped[i].Start {
-			snapped[i].End = snapped[i].Start + 0.001
-		}
-		if i > 0 && snapped[i-1].End > snapped[i].Start {
+	for i := 1; i < len(snapped); i++ {
+		if snapped[i-1].End > snapped[i].Start {
 			snapped[i-1].End = snapped[i].Start
 		}
 	}

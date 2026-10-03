@@ -292,11 +292,15 @@ this audit.
    `analysis.decision_groups`):
    - The pipeline downloads the identified title's OpenSubtitles candidates,
      cleans them, retimes against the rip's WhisperX transcript with ffsubsync,
-     and adopts the first candidate that passes the verification gate. TV may
-     try the current episode-ID reference first (`contentid_reference`), even if
-     fresh search fails; that reuse must not bypass cleanup, synchronization,
-     full-program similarity, coverage/tail, or timing gates. The short Jev
-     excerpt is never the display verification transcript. When no candidate
+     and adopts the first candidate that passes the verification gate. The
+     daemon and `spindle subtitle` build the same attempt set (search, rank by
+     source affinity against the actual video, cap at 3, one
+     `subtitle_candidate_ranking` decision listing `candidate_file_ids`).
+     Episode identification's reference is not promoted: it is tried only if
+     the ranking selects it (then served from the shared download cache), so a
+     DVD-release reference never outranks a Blu-ray-matched upload. A
+     `contentid_reference` candidate label is from an older binary. The short
+     Jev excerpt is never the display verification transcript. When no candidate
      verifies (or none exists, or the title is multi-episode), it records
      `source=none` and the title completes WITHOUT subtitles. Spindle never
      generates subtitles itself.
@@ -349,6 +353,16 @@ this audit.
      observations (for example `high_reading_speed`, `short_cue_duration`,
      `long_cue_duration`) as Issues Found unless they also appear in
      `review_issues`/`severe_issues` or caused review routing.
+   - Exception: an extreme `srt_validation` `max_cps` (hundreds or more) means
+     a near-zero-duration cue. The word-snap pass (`snapped_cues` in the
+     `subtitle_source` reason) skips any snap that would reorder cues or trim
+     a neighbor below the 5/6 s minimum, so on a current binary such a cue
+     must come from the source file itself; on an older binary it is the snap
+     reorder bug. Confirm with ffprobe subtitle packet `pts_time`/
+     `duration_time` (no payloads): a ~1 ms cue followed by one starting 1 ms
+     later is the reorder signature, and a muxed packet count below
+     `segments` means a zero-length cue was dropped. Report either as a
+     WARNING, since the affected lines never display.
 
 4. **Cross-episode subtitle consistency** (TV only):
    - Adopted episodes should share the same subtitle language and

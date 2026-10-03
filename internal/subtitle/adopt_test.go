@@ -43,8 +43,8 @@ func stubAdoptEnvironment(t *testing.T, videoSeconds string) {
 }
 
 // newAdoptSession builds a TV session with a completed ripped asset, a
-// transcript artifact containing referenceCues, and an on-disk contentid
-// reference file containing candidateSRT.
+// transcript artifact containing referenceCues, and candidateSRT cached as
+// OpenSubtitles file 77 (the one result candidateSearchClient returns).
 func newAdoptSession(t *testing.T, h *Handler, referenceCues []srtutil.Cue, candidateSRT []byte) (*stage.Session, stage.AssetJob) {
 	t.Helper()
 	sess := newSubtitleTestSession(t, &ripspec.Envelope{
@@ -68,13 +68,7 @@ func newAdoptSession(t *testing.T, h *Handler, referenceCues []srtutil.Cue, cand
 		t.Fatal(err)
 	}
 
-	refDir := filepath.Join(root, "contentid", "references")
-	if err := os.MkdirAll(refDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(refDir, "s01e01-77.srt"), candidateSRT, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	cacheCandidate(t, h, 77, candidateSRT)
 
 	ripped := ripspec.Asset{EpisodeKey: "s01e01", Path: filepath.Join(root, "ripped.mkv"), Status: ripspec.AssetStatusCompleted}
 	sess.Env.Assets.Ripped = []ripspec.Asset{ripped}
@@ -82,9 +76,9 @@ func newAdoptSession(t *testing.T, h *Handler, referenceCues []srtutil.Cue, cand
 	return sess, stage.AssetJob{Key: "s01e01", Input: ripped, ProgressTotal: 1}
 }
 
-func emptySearchClient(t *testing.T) *opensubtitles.Client {
+func candidateSearchClient(t *testing.T) *opensubtitles.Client {
 	t.Helper()
-	server := newCandidateSearchServer(t, `{"data":[]}`)
+	server := newCandidateSearchServer(t, `{"data":[{"id":"a","attributes":{"language":"en","files":[{"file_id":77}]}}]}`)
 	t.Cleanup(server.Close)
 	return opensubtitles.New(opensubtitles.Params{APIKey: "key", BaseURL: server.URL}, discardLogger())
 }
@@ -99,7 +93,7 @@ func TestProcessSubtitleJobAdoptsVerifiedDownload(t *testing.T) {
 
 	h := &Handler{
 		cfg:      &config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}, Subtitles: config.SubtitlesConfig{Enabled: true}},
-		osClient: emptySearchClient(t),
+		osClient: candidateSearchClient(t),
 	}
 	sess, job := newAdoptSession(t, h, reference, candidateSRT)
 
@@ -164,7 +158,7 @@ func TestProcessSubtitleJobSnapsAdoptedCuesToWordOnsets(t *testing.T) {
 
 	h := &Handler{
 		cfg:      &config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}, Subtitles: config.SubtitlesConfig{Enabled: true}},
-		osClient: emptySearchClient(t),
+		osClient: candidateSearchClient(t),
 	}
 	sess, job := newAdoptSession(t, h, reference, []byte(srtutil.Format(candidate)))
 	root, err := sess.Item.StagingRoot(h.cfg.Paths.StagingDir)
@@ -231,7 +225,7 @@ func TestProcessSubtitleJobSkipsWhenVerificationFails(t *testing.T) {
 
 	h := &Handler{
 		cfg:      &config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}, Subtitles: config.SubtitlesConfig{Enabled: true}},
-		osClient: emptySearchClient(t),
+		osClient: candidateSearchClient(t),
 	}
 	sess, job := newAdoptSession(t, h, reference, []byte(srtutil.Format(wrong)))
 
@@ -258,7 +252,7 @@ func TestProcessSubtitleJobRejectsShortSpanBeforeSync(t *testing.T) {
 
 	h := &Handler{
 		cfg:      &config.Config{Paths: config.PathsConfig{StagingDir: t.TempDir()}, Subtitles: config.SubtitlesConfig{Enabled: true}},
-		osClient: emptySearchClient(t),
+		osClient: candidateSearchClient(t),
 	}
 	sess, job := newAdoptSession(t, h, reference, []byte(srtutil.Format(short)))
 	var logBuf strings.Builder

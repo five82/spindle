@@ -81,16 +81,6 @@ func (h *Handler) classifyEpisodes(ctx context.Context, sess *stage.Session, sea
 		return err
 	}
 	env, logger := sess.Env, sess.Logger
-	// The subtitle stage consumes only this attempt's references, never stale
-	// selections from a failed or superseded identification pass.
-	dir, err := sess.StageDir(h.cfg.Paths.StagingDir, "contentid")
-	if err != nil {
-		return err
-	}
-	dir = filepath.Join(dir, "references")
-	if err := os.RemoveAll(dir); err != nil {
-		return fmt.Errorf("clear content ID references: %w", err)
-	}
 	summary := &ripspec.ContentIDSummary{Method: "whisperx_jev_reference_choice", ReferenceSource: "opensubtitles", ReviewThreshold: episodeProbabilityThreshold}
 	env.Attributes.ContentID = summary
 	criteria := map[string]string{"none": "No reference excerpt contains distinctive overlapping dialogue or scene events, or the source is insufficient to decide."}
@@ -121,7 +111,8 @@ func (h *Handler) classifyEpisodes(ctx context.Context, sess *stage.Session, sea
 	}
 	var references map[string]episodeReference
 	if catalogReason == "" {
-		references, err = h.fetchReferences(ctx, sess, season, dir)
+		var err error
+		references, err = h.fetchReferences(ctx, sess, season)
 		if err != nil {
 			return err
 		}

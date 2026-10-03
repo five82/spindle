@@ -63,31 +63,13 @@ func (h *Handler) AdoptForFile(ctx context.Context, req AdoptFileRequest) (*Adop
 	}
 	logger := logs.Default(req.Logger)
 
-	results, err := h.osClient.Search(ctx, req.TMDBID, req.Season, req.Episode, h.searchLanguages())
+	candidates, err := h.searchCandidates(ctx, logger, req.TMDBID, req.Season, req.Episode, req.VideoPath, "")
 	if err != nil {
 		return nil, fmt.Errorf("opensubtitles search: %w", err)
 	}
-	profile := subtitleSourceProfile(ctx, logger, req.VideoPath, "")
-	candidates := rankSearchCandidatesForSource(results, req.Season, req.Episode, profile)
 	if len(candidates) == 0 {
 		return nil, errors.New("OpenSubtitles returned no usable candidates")
 	}
-	if len(candidates) > maxSubtitleCandidates {
-		candidates = candidates[:maxSubtitleCandidates]
-	}
-	fileIDs := make([]int, len(candidates))
-	for i, candidate := range candidates {
-		fileIDs[i] = candidate.FileID
-	}
-	logger.Info("subtitle candidate attempt set selected",
-		"decision_type", logs.DecisionSubtitleCandidateRanking,
-		"decision_result", "selected",
-		"decision_reason", "source affinity orders release/file matches before generic or conflicting candidates",
-		"source_profile", profile.class,
-		"input_resolution", profile.resolution(),
-		"candidate_file_ids", fmt.Sprint(fileIDs),
-		"attempt_count", len(candidates),
-	)
 
 	transcript := req.Transcript
 	if transcript == nil {

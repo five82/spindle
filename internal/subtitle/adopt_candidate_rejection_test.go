@@ -3,23 +3,21 @@ package subtitle
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/five82/spindle/internal/config"
 	"github.com/five82/spindle/internal/srtutil"
 )
 
 func TestCandidateRejectsShortSpanAndFailedSync(t *testing.T) {
 	dir := t.TempDir()
-	candidatePath := filepath.Join(dir, "candidate.srt")
 	cues := dialogueCues(12, 10, 10)
-	if err := os.WriteFile(candidatePath, []byte(srtutil.Format(cues)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	h := &Handler{}
-	candidate := subtitleCandidate{FileID: 77, LocalPath: candidatePath}
+	h := &Handler{cfg: &config.Config{}}
+	cacheCandidate(t, h, 77, []byte(srtutil.Format(cues)))
+	candidatePath := filepath.Join(h.cfg.OpenSubtitlesCacheDir(), "77.srt")
+	candidate := subtitleCandidate{FileID: 77}
 	result, err := h.evaluateCandidate(context.Background(), candidate, adoptContext{VideoSeconds: 1000, WorkDir: dir})
 	if err != nil || !strings.Contains(result.RejectReason, "candidate spans") {
 		t.Fatalf("short span: %+v %v", result, err)

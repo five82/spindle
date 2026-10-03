@@ -144,3 +144,41 @@ func TestSnapCuesToWordsNoWords(t *testing.T) {
 		t.Fatalf("snap without words: count=%d", count)
 	}
 }
+
+func TestSnapCuesToWordsSkipsSnapThatCrossesPreviousCue(t *testing.T) {
+	// S01E23 signature: the second cue's words were spoken before the first
+	// cue's synced start, so snapping it would reorder the pair and the old
+	// ordering fixup collapsed the first cue to a 1ms flash.
+	lineA := "The harbor was quiet before the storm arrived"
+	lineB := "Nobody expected the captain to return that night"
+	words := wordsForCues([]srtutil.Cue{{Start: 9, End: 11, Text: lineB}})
+	cues := []srtutil.Cue{
+		{Start: 10, End: 12, Text: lineA},
+		{Start: 10.5, End: 13, Text: lineB},
+		{Start: 20, End: 22, Text: "An unrelated closing line for padding"},
+	}
+	if snapped, count := snapCuesToWords(cues, words); count != 0 || snapped != nil {
+		t.Fatalf("crossing snap applied: count=%d cues=%+v", count, snapped)
+	}
+}
+
+func TestSnapCuesToWordsSkipsSnapThatSqueezesNeighbor(t *testing.T) {
+	lineA := "The harbor was quiet before the storm arrived"
+	lineC := "The lighthouse keeper rang the bell three times"
+	unmatched := "Unmatched words nobody said aloud"
+	words := append(
+		wordsForCues([]srtutil.Cue{{Start: 10.5, End: 12.5, Text: lineA}}),
+		wordsForCues([]srtutil.Cue{{Start: 13.5, End: 15.5, Text: lineC}})...,
+	)
+	cues := []srtutil.Cue{
+		// Snapping later would start 0.3s before the next cue.
+		{Start: 9.5, End: 10.7, Text: lineA},
+		{Start: 10.8, End: 12.8, Text: unmatched},
+		// Snapping earlier would start 0.4s after the previous cue.
+		{Start: 13.1, End: 13.9, Text: unmatched},
+		{Start: 14, End: 16, Text: lineC},
+	}
+	if snapped, count := snapCuesToWords(cues, words); count != 0 || snapped != nil {
+		t.Fatalf("squeezing snap applied: count=%d cues=%+v", count, snapped)
+	}
+}

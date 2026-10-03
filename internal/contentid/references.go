@@ -24,10 +24,7 @@ type episodeReference struct {
 	fileID int
 }
 
-func (h *Handler) fetchReferences(ctx context.Context, sess *stage.Session, season *tmdb.Season, dir string) (map[string]episodeReference, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("create reference directory: %w", err)
-	}
+func (h *Handler) fetchReferences(ctx context.Context, sess *stage.Session, season *tmdb.Season) (map[string]episodeReference, error) {
 	refs := make(map[string]episodeReference)
 	for i, ep := range season.Episodes {
 		if err := ctx.Err(); err != nil {
@@ -53,12 +50,6 @@ func (h *Handler) fetchReferences(ctx context.Context, sess *stage.Session, seas
 				err = fmt.Errorf("reference has no middle-excerpt dialogue")
 			}
 			if err == nil {
-				// Preserve the complete reference for subtitle adoption, which
-				// still performs its own full-program cleanup/sync/verification.
-				path := filepath.Join(dir, fmt.Sprintf("s%02de%02d-%d.srt", sess.Env.Metadata.SeasonNumber, ep.EpisodeNumber, fileID))
-				if err := os.WriteFile(path, data, 0o644); err != nil {
-					return nil, fmt.Errorf("stage reference: %w", err)
-				}
 				refs[fmt.Sprintf("E%02d", ep.EpisodeNumber)] = episodeReference{text: text, fileID: fileID}
 				result, reason = "selected", "canonical title present, no competing episode title, single English full-subtitle file; non-HI then downloads then file ID"
 			}

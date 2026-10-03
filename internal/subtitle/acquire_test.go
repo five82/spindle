@@ -237,10 +237,19 @@ func TestListSubtitleCandidatesMovie(t *testing.T) {
 	}
 }
 
-func TestListSubtitleCandidatesTVPrefersContentIDReference(t *testing.T) {
+func TestDaemonAndCLIShareCandidateAttemptSet(t *testing.T) {
+	// S01E23 regression: the daemon tried episode identification's DVD-release
+	// reference ahead of the ranked search, so a Blu-ray rip adopted DVD-timed
+	// subtitles that `spindle subtitle` would never pick for the same file.
+	origInspect := inspectSubtitleMedia
+	t.Cleanup(func() { inspectSubtitleMedia = origInspect })
+	inspectSubtitleMedia = func(context.Context, string, string) (*ffprobe.Result, error) {
+		return &ffprobe.Result{Streams: []ffprobe.Stream{{CodecType: "video", Width: 1440, Height: 1080}}}, nil
+	}
 	server := newCandidateSearchServer(t, `{"data":[
-		{"id":"a","attributes":{"language":"en","download_count":900,"files":[{"file_id":77}]}},
-		{"id":"b","attributes":{"language":"en","download_count":500,"files":[{"file_id":88}]}}
+		{"id":"a","attributes":{"language":"en","release":"Show S01E23 Title.DVD.NonHI.en","download_count":9000,"files":[{"file_id":77,"file_name":"Show S01E23 Title.DVD"}]}},
+		{"id":"b","attributes":{"language":"en","release":"Show S01E23 1080p BluRay","download_count":50,"files":[{"file_id":88,"file_name":"Show.S01E23.1080p.BluRay.srt"}]}},
+		{"id":"c","attributes":{"language":"en","release":"Show S01E23 WEB","download_count":40,"files":[{"file_id":99,"file_name":"Show.S01E23.WEB.srt"}]}}
 	]}`)
 	defer server.Close()
 
@@ -250,35 +259,47 @@ func TestListSubtitleCandidatesTVPrefersContentIDReference(t *testing.T) {
 		osClient: opensubtitles.New(opensubtitles.Params{APIKey: "key", BaseURL: server.URL}, discardLogger()),
 	}
 	sess := newSubtitleTestSession(t, &ripspec.Envelope{
-		Metadata: ripspec.Metadata{MediaType: "tv", ID: 1396},
-		Episodes: []ripspec.Episode{{Key: "s02_001", Season: 2, Episode: 7}},
+		Metadata: ripspec.Metadata{MediaType: "tv", ID: 655, DiscSource: "bluray"},
+		Episodes: []ripspec.Episode{{Key: "s01_002", Season: 1, Episode: 23}},
 	})
+	// Episode identification's reference download sits in the shared cache
+	// (and, before this fix, a staged handoff copy); it must not be promoted
+	// ahead of the source-aware ranking.
+	cacheCandidate(t, h, 77, srtBytes("Reference dialogue."))
 	root, err := sess.Item.StagingRoot(stagingDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	refDir := filepath.Join(root, "contentid", "references")
-	if err := os.MkdirAll(refDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "contentid", "references"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	refPath := filepath.Join(refDir, "s02e07-77.srt")
-	if err := os.WriteFile(refPath, srtBytes("Reference dialogue."), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "contentid", "references", "s01e23-77.srt"), srtBytes("Reference dialogue."), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	candidates, reason := h.listSubtitleCandidates(context.Background(), sess, "s02_001", "")
-	if reason != "" {
+	var daemonLog strings.Builder
+	sess.Logger = slog.New(slog.NewTextHandler(&daemonLog, nil))
+	if _, reason := h.listSubtitleCandidates(context.Background(), sess, "s01_002", "/staging/encoded/title_t02.mkv"); reason != "" {
 		t.Fatalf("reason = %q", reason)
 	}
-	if len(candidates) != 2 {
-		t.Fatalf("candidates = %+v", candidates)
+
+	var cliLog strings.Builder
+	_, err = h.AdoptForFile(context.Background(), AdoptFileRequest{
+		VideoPath: "/library/Show - S01E23.mkv",
+		WorkDir:   t.TempDir(),
+		TMDBID:    655,
+		Season:    1,
+		Episode:   23,
+		Logger:    slog.New(slog.NewTextHandler(&cliLog, nil)),
+	})
+	if err == nil || !strings.Contains(err.Error(), "transcriber not configured") {
+		t.Fatalf("AdoptForFile stopped before candidate selection: %v", err)
 	}
-	if candidates[0].Origin != "contentid_reference" || candidates[0].FileID != 77 || candidates[0].LocalPath != refPath {
-		t.Fatalf("first candidate = %+v", candidates[0])
-	}
-	// The search result with the same file ID is deduplicated.
-	if candidates[1].FileID != 88 || candidates[1].Origin != "opensubtitles" {
-		t.Fatalf("second candidate = %+v", candidates[1])
+
+	const want = `candidate_file_ids="[88 99 77]"`
+	for name, log := range map[string]string{"daemon": daemonLog.String(), "cli": cliLog.String()} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("%s attempt set differs, want %s:\n%s", name, want, log)
+		}
 	}
 }
 

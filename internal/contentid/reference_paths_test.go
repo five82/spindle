@@ -46,15 +46,13 @@ func TestReferenceDownloadAndCacheReuse(t *testing.T) {
 	defer server.Close()
 	for range 2 {
 		h.osClient = opensubtitles.New(opensubtitles.Params{APIKey: "test", BaseURL: server.URL}, nil)
-		dir := filepath.Join(t.TempDir(), "references")
-		refs, err := h.fetchReferences(context.Background(), sess, season, dir)
+		refs, err := h.fetchReferences(context.Background(), sess, season)
 		if err != nil || refs["E01"].fileID != 77 || refs["E01"].text != "Full downloaded dialogue." {
 			t.Fatalf("references = %+v, %v", refs, err)
 		}
-		for _, path := range []string{filepath.Join(dir, "s01e01-77.srt"), filepath.Join(h.cfg.OpenSubtitlesCacheDir(), "77.srt")} {
-			if got, err := os.ReadFile(path); err != nil || string(got) != payload {
-				t.Fatalf("full reference %s = %q, %v", path, got, err)
-			}
+		path := filepath.Join(h.cfg.OpenSubtitlesCacheDir(), "77.srt")
+		if got, err := os.ReadFile(path); err != nil || string(got) != payload {
+			t.Fatalf("full reference %s = %q, %v", path, got, err)
 		}
 	}
 	if downloads != 1 || fetches != 1 || searches != 2 {
@@ -80,14 +78,6 @@ func TestPartialReferenceCatalogDoesNotFillMissingIdentity(t *testing.T) {
 	}
 	if s := sess.Env.Attributes.ContentID; !s.Completed || s.ReferenceEpisodes != 2 || s.MatchedEpisodes != 1 || s.UnresolvedEpisodes != 1 {
 		t.Fatalf("partial catalog summary: %+v", s)
-	}
-	root, err := sess.StagingRoot(h.cfg.Paths.StagingDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	matches, err := filepath.Glob(filepath.Join(root, "contentid", "references", "s01e03-*.srt"))
-	if err != nil || len(matches) != 0 {
-		t.Fatalf("unavailable reference staged: %v, %v", matches, err)
 	}
 }
 

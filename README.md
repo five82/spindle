@@ -121,9 +121,10 @@ references across the entire canonical TMDB season. This also requires the
 OpenSubtitles API key. Unknown or conflicting reference titles are excluded;
 unavailable references, uncertain matches, and classifier failures send titles
 to review rather than guessing from synopses or disc order. Full WhisperX
-transcripts remain available for commentary and subtitle verification, and the
-selected reference can be reused for display subtitles only after passing the
-normal cleanup, synchronization, and full-program verification checks. Duplicate
+transcripts remain available for commentary and subtitle verification. Display
+subtitles do not inherit the episode reference: the daemon and
+`spindle subtitle` rank candidates the same way, by match to the actual video
+source, and then clean, synchronize, and verify them. Duplicate
 episode assignments and runtime inconsistencies also trigger review; runtime
 alone never renumbers episodes or creates an episode range. Both classifiers
 report option probabilities and decision rules instead of generated

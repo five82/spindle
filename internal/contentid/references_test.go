@@ -106,17 +106,9 @@ func TestDialogueExcerptBoundsAndPreservesFullEvidence(t *testing.T) {
 	}
 }
 
-func TestReferenceRetryCleanupAndFullSubtitleHandoff(t *testing.T) {
+func TestReferenceAcquisitionKeepsSourceArtifactsAndRetryResetsIdentity(t *testing.T) {
 	sess := episodeTestSession(t, "Full source dialogue.")
 	h := episodeTestHandler(t, episodeTestClient(t, func(string) (string, float64) { return "E01", 1 }))
-	dir, err := sess.StageDir(h.cfg.Paths.StagingDir, "contentid", "references")
-	if err != nil {
-		t.Fatal(err)
-	}
-	stale := filepath.Join(dir, "s01e01-999.srt")
-	if err := os.WriteFile(stale, []byte("stale reference"), 0600); err != nil {
-		t.Fatal(err)
-	}
 	original, err := os.ReadFile(sess.Env.Assets.Transcript[0].Path)
 	if err != nil {
 		t.Fatal(err)
@@ -130,17 +122,9 @@ func TestReferenceRetryCleanupAndFullSubtitleHandoff(t *testing.T) {
 	if err := h.classifyEpisodes(context.Background(), sess, episodeTestSeason()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Fatalf("stale reference survived: %v", err)
-	}
 	for i := 1; i <= 2; i++ {
-		cached, err := os.ReadFile(filepath.Join(h.cfg.OpenSubtitlesCacheDir(), fmt.Sprintf("%d.srt", 100+i)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		staged, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("s01e%02d-%d.srt", i, 100+i)))
-		if err != nil || !bytes.Equal(cached, staged) {
-			t.Fatalf("full reference handoff: %v", err)
+		if _, err := os.Stat(filepath.Join(h.cfg.OpenSubtitlesCacheDir(), fmt.Sprintf("%d.srt", 100+i))); err != nil {
+			t.Fatalf("full reference not cached for subtitle adoption: %v", err)
 		}
 	}
 	got, err := os.ReadFile(sess.Env.Assets.Transcript[0].Path)
@@ -156,14 +140,14 @@ func TestReferenceRetryCleanupAndFullSubtitleHandoff(t *testing.T) {
 		}
 	}
 
-	// Configuration failure also invalidates the old handoff and identity.
+	// Configuration failure also invalidates the old identity.
 	h.osClient = nil
 	var degraded *stage.ErrDegraded
 	if err := h.classifyEpisodes(context.Background(), sess, episodeTestSeason()); !errors.As(err, &degraded) {
 		t.Fatalf("unconfigured acquisition: %v", err)
 	}
-	if matches, _ := filepath.Glob(filepath.Join(dir, "*.srt")); len(matches) != 0 || sess.Env.Episodes[0].Episode != 0 || !sess.Env.Episodes[0].NeedsReview {
-		t.Fatalf("stale handoff/identity survived: %v %+v", matches, sess.Env.Episodes[0])
+	if sess.Env.Episodes[0].Episode != 0 || !sess.Env.Episodes[0].NeedsReview {
+		t.Fatalf("stale identity survived: %+v", sess.Env.Episodes[0])
 	}
 }
 

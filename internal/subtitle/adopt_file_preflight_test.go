@@ -13,7 +13,9 @@ import (
 )
 
 func TestAdoptForFilePreflightAndSearchFailures(t *testing.T) {
-	empty := emptySearchClient(t)
+	emptyServer := newCandidateSearchServer(t, `{"data":[]}`)
+	t.Cleanup(emptyServer.Close)
+	empty := opensubtitles.New(opensubtitles.Params{APIKey: "key", BaseURL: emptyServer.URL}, discardLogger())
 	h := New(&config.Config{}, nil, empty)
 	base := AdoptFileRequest{VideoPath: "movie.mkv", WorkDir: t.TempDir(), TMDBID: 42}
 	for _, tc := range []struct {

@@ -138,9 +138,10 @@ Analyze the `rip_cache` section from the audit output:
    - Use `analysis.episode_stats.sequence_contiguous` and `episode_range` to
      investigate gaps, not to force a permutation. A contiguous sequence alone
      does not prove disc completeness.
-   - Check that retries clear old staged references before acquisition, even
-     when configuration/catalog validation fails. Subtitle adoption may reuse
-     only the current attempt's full reference; it must still verify it.
+   - Check that a retry, including one where configuration/catalog validation
+     fails, resets prior episode identities. References are not handed to
+     subtitle adoption: adoption ranks its own search, sharing only the
+     OpenSubtitles download cache.
    - Check that all uncertainty/safety reasons survive into per-episode review
      flags and final routing (an item-level warning alone does not route TV),
      along with review flags and assets written by
