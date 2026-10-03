@@ -139,7 +139,7 @@ func TestVideoProgressGroupsEncoderDetail(t *testing.T) {
 	}
 	// Status, stage, and files columns align so durations share a column.
 	lines := strings.Split(got, "\n")
-	if !strings.HasPrefix(lines[0], "  ✓ Done    Ripping      0/2 files 1m 0s") || !strings.HasPrefix(lines[1], "  ◉ Running Encoding     0/2 files") {
+	if !strings.HasPrefix(lines[0], "  ✓ Done    Ripping      0/2 files 1m 0s") || !strings.HasPrefix(lines[1], "  ◉ Running Encoding     1/2 files") {
 		t.Fatalf("misaligned rows:\n%s", got)
 	}
 }

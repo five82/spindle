@@ -39,7 +39,7 @@ func TestOverviewStableSkeletonAndConcurrentWork(t *testing.T) {
 		}}
 	got := overviewFor(t, item)
 	sectionOrder(t, got, "Pipeline", "Media", "Output", "episode list", "created")
-	for _, want := range []string{"Running Ripping", "1/2 files", "0/2 files", "Reading title 03", "47/100 frames", "Needs Encoding + Subtitling"} {
+	for _, want := range []string{"Ripping      2/2 files", "Encoding     1/2 files", "1/2 ripped; 0/2 encoded", "Reading title 03", "47/100 frames", "Needs Encoding + Subtitling"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q: %s", want, got)
 		}
@@ -144,7 +144,7 @@ func TestCountsNeverUseManifestPosition(t *testing.T) {
 	for _, key := range []string{"a", "b", "c"} {
 		item := spindle.QueueItem{Episodes: []spindle.EpisodeStatus{{Key: "a"}, {Key: "b", RippedPath: "rip"}, {Key: "c"}}, Tasks: []spindle.Task{{Type: "encoding", State: "running", ActiveAssetKey: key, Progress: spindle.TaskProgress{Percent: 49}}, {Type: "ripping", State: "running", ActiveAssetKey: key}}}
 		got := strings.Join(strings.Fields(overviewFor(t, item)), " ")
-		if !strings.Contains(got, "Encoding 0/3 files") || !strings.Contains(got, "Ripping 1/3 files") {
+		if !strings.Contains(got, "Encoding 1/3 files") || !strings.Contains(got, "Ripping 2/3 files") {
 			t.Fatal(got)
 		}
 	}

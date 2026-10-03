@@ -120,6 +120,11 @@ func (m *Model) renderTaskRow(b *strings.Builder, item spindle.QueueItem, task s
 	if totals.Planned > 0 {
 		files := ""
 		if n, ok := stageThroughput(info.totals, item, totals); ok {
+			// A working stage names the file in hand (the second of five
+			// reads 2/5); Output carries the completed counts.
+			if task.State == "running" && task.ActiveAssetKey != "" && n < totals.Planned {
+				n++
+			}
 			files = fmt.Sprintf("%d/%d files", n, totals.Planned)
 		}
 		row += fmt.Sprintf(" %-*s", len(fmt.Sprintf("%d/%d files", totals.Planned, totals.Planned)), files)
