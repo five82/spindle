@@ -407,16 +407,19 @@ type GrainTreatmentEntry struct {
 
 // EpisodeStats holds episode identification coverage and resolved-only probabilities.
 type EpisodeStats struct {
-	Count              int     `json:"count"`
-	Matched            int     `json:"matched"`
-	Unresolved         int     `json:"unresolved"`
-	PlaceholderOnly    bool    `json:"placeholder_only,omitempty"`
-	ProbabilityMin     float64 `json:"probability_min,omitempty"`
-	ProbabilityMax     float64 `json:"probability_max,omitempty"`
-	ProbabilityMean    float64 `json:"probability_mean,omitempty"`
-	Below090           int     `json:"below_090"`
-	SequenceContiguous bool    `json:"sequence_contiguous"`
-	EpisodeRange       string  `json:"episode_range,omitempty"`
+	Count           int     `json:"count"`
+	Matched         int     `json:"matched"`
+	Unresolved      int     `json:"unresolved"`
+	PlaceholderOnly bool    `json:"placeholder_only,omitempty"`
+	ProbabilityMin  float64 `json:"probability_min,omitempty"`
+	ProbabilityMax  float64 `json:"probability_max,omitempty"`
+	ProbabilityMean float64 `json:"probability_mean,omitempty"`
+	// Below090 counts resolved identities that violate their acceptance rule:
+	// direct matches below 0.90, or slot-corroborated ones below the 0.50 floor.
+	Below090           int    `json:"below_090"`
+	SlotCorroborated   int    `json:"slot_corroborated,omitempty"`
+	SequenceContiguous bool   `json:"sequence_contiguous"`
+	EpisodeRange       string `json:"episode_range,omitempty"`
 }
 
 // MediaStats holds duration and size ranges across all files.

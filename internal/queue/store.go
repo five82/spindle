@@ -79,6 +79,9 @@ func (s *Store) Close() error {
 
 // retryOnBusy retries fn with exponential backoff when SQLite returns BUSY.
 // 5 attempts, 10ms initial delay, 200ms max delay, doubling per attempt.
+// Each attempt can itself block for the connection's busy timeout, so the
+// final error reports the total wait: it is the only measure of how long
+// another writer held the lock.
 func retryOnBusy(fn func() error) error {
 	const (
 		maxAttempts = 5
@@ -86,6 +89,7 @@ func retryOnBusy(fn func() error) error {
 		maxWait     = 200 * time.Millisecond
 	)
 
+	start := time.Now()
 	wait := initialWait
 	for attempt := range maxAttempts {
 		err := fn()
@@ -96,7 +100,7 @@ func retryOnBusy(fn func() error) error {
 			return err
 		}
 		if attempt == maxAttempts-1 {
-			return fmt.Errorf("database busy after %d attempts: %w", maxAttempts, err)
+			return fmt.Errorf("database busy after %d attempts over %s: %w", maxAttempts, time.Since(start).Round(time.Millisecond), err)
 		}
 		time.Sleep(wait)
 		wait *= 2

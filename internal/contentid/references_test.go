@@ -89,19 +89,22 @@ func TestDialogueExcerptBoundsAndPreservesFullEvidence(t *testing.T) {
 		{Start: 1990, End: 2000, Text: "Ending"},
 	}
 	before := append([]srtutil.Cue(nil), cues...)
-	if got := dialogueExcerpt(cues, 6000); got != "Left & boundary Middle dialogue Right boundary" {
-		t.Fatalf("excerpt = %q", got)
+	if got, midpoint, truncated := dialogueExcerpt(cues, 6000); got != "Left & boundary Middle dialogue Right boundary" || midpoint != 1000 || truncated {
+		t.Fatalf("excerpt = %q midpoint=%v truncated=%v", got, midpoint, truncated)
 	}
 	if !reflect.DeepEqual(before, cues) {
 		t.Fatal("full-program evidence was mutated")
 	}
 	for _, cap := range []int{3000, 6000} {
-		text := dialogueExcerpt([]srtutil.Cue{{End: 10, Text: strings.Repeat("\u20ac", 3000)}}, cap+1)
-		if len(text) != cap || !utf8.ValidString(text) {
+		text, _, truncated := dialogueExcerpt([]srtutil.Cue{{End: 10, Text: strings.Repeat("\u20ac", 3000)}}, cap+1)
+		if len(text) != cap || !utf8.ValidString(text) || !truncated {
 			t.Fatalf("UTF-8 byte cap: %d bytes, valid=%v", len(text), utf8.ValidString(text))
 		}
 	}
-	if dialogueExcerpt(nil, 6000) != "" || dialogueExcerpt([]srtutil.Cue{{End: 2000}}, 6000) != "" {
+	if text, _, _ := dialogueExcerpt(nil, 6000); text != "" {
+		t.Fatal("empty excerpt invented evidence")
+	}
+	if text, _, _ := dialogueExcerpt([]srtutil.Cue{{End: 2000}}, 6000); text != "" {
 		t.Fatal("empty excerpt invented evidence")
 	}
 }

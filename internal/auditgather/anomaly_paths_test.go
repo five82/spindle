@@ -30,7 +30,7 @@ func TestDetectAnomaliesReportsOperationalFailures(t *testing.T) {
 		"item failed at ripping: drive lost": "critical", "item needs review: inspect source": "warning",
 		"1 error(s) in item log": "critical", "1 warning(s) in item log": "warning",
 		"1 episode(s) explicitly flagged for review": "warning", "1 unresolved episode(s)": "warning",
-		"3 resolved episode(s) below the 0.90 acceptance probability": "critical", "non-contiguous episode sequence: 1,3": "warning",
+		"3 resolved episode(s) below their acceptance probability (0.90 direct, 0.50 slot-corroborated)": "critical", "non-contiguous episode sequence: 1,3": "warning",
 		"encoding validation failed": "critical", "encoding error: encode crashed": "critical", "encoding warning: slow disk": "warning",
 		"1 failed ripped asset(s)": "critical", "2 failed encoded asset(s)": "critical", "1 failed transcript asset(s)": "critical",
 		"1 media probe(s) failed": "warning",

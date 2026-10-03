@@ -12,44 +12,56 @@ import (
 )
 
 func TestEpisodeProbabilityAnomaliesDistinguishAcceptanceFromAbstention(t *testing.T) {
-	for _, p := range []float64{0, 0.65, 0.75, 0.85, 0.899, 0.90, 1} {
+	for _, p := range []float64{0, 0.49, 0.5, 0.65, 0.75, 0.85, 0.899, 0.90, 1} {
 		for _, resolved := range []bool{false, true} {
-			t.Run(fmt.Sprintf("p=%g/resolved=%v", p, resolved), func(t *testing.T) {
-				ep := ripspec.Episode{Key: "s01_001", MatchProbability: p, NeedsReview: !resolved}
-				if resolved {
-					ep.Episode = 1
+			for _, slot := range []bool{false, true} {
+				if slot && !resolved {
+					continue
 				}
-				r := &Report{
-					StageGate: StageGate{PhaseEpisodeID: true},
-					Envelope:  &ripspec.Envelope{Episodes: []ripspec.Episode{ep}},
-				}
-				a := computeAnalysis(r)
-				wantBelow := 0
-				if resolved && p < 0.90 {
-					wantBelow = 1
-				}
-				if a.EpisodeStats.Below090 != wantBelow {
-					t.Fatalf("stats = %+v, want below090=%d", a.EpisodeStats, wantBelow)
-				}
-				critical, unresolved := 0, 0
-				for _, anomaly := range a.Anomalies {
-					if anomaly.Severity == "critical" {
-						critical++
-						if !strings.Contains(anomaly.Message, "resolved episode(s) below the 0.90 acceptance probability") {
-							t.Errorf("unexpected critical anomaly: %+v", anomaly)
+				t.Run(fmt.Sprintf("p=%g/resolved=%v/slot=%v", p, resolved, slot), func(t *testing.T) {
+					ep := ripspec.Episode{Key: "s01_001", MatchProbability: p, NeedsReview: !resolved, SlotCorroborated: slot}
+					if resolved {
+						ep.Episode = 1
+					}
+					r := &Report{
+						StageGate: StageGate{PhaseEpisodeID: true},
+						Envelope:  &ripspec.Envelope{Episodes: []ripspec.Episode{ep}},
+					}
+					a := computeAnalysis(r)
+					// Slot corroboration lowers the acceptance bar to 0.50, never removes it.
+					wantBelow, floor := 0, 0.90
+					if slot {
+						floor = 0.50
+					}
+					if resolved && p < floor {
+						wantBelow = 1
+					}
+					if a.EpisodeStats.Below090 != wantBelow {
+						t.Fatalf("stats = %+v, want below090=%d", a.EpisodeStats, wantBelow)
+					}
+					critical, unresolved := 0, 0
+					for _, anomaly := range a.Anomalies {
+						if anomaly.Severity == "critical" {
+							critical++
+							if !strings.Contains(anomaly.Message, "resolved episode(s) below their acceptance probability") {
+								t.Errorf("unexpected critical anomaly: %+v", anomaly)
+							}
+						}
+						if anomaly.Message == "1 unresolved episode(s)" {
+							unresolved++
+							if anomaly.Severity != "warning" {
+								t.Errorf("abstention severity = %s", anomaly.Severity)
+							}
 						}
 					}
-					if anomaly.Message == "1 unresolved episode(s)" {
-						unresolved++
-						if anomaly.Severity != "warning" {
-							t.Errorf("abstention severity = %s", anomaly.Severity)
-						}
+					if critical != wantBelow || (!resolved && unresolved != 1) || (resolved && unresolved != 0) {
+						t.Fatalf("unexpected anomalies: %+v", a.Anomalies)
 					}
-				}
-				if critical != wantBelow || (!resolved && unresolved != 1) || (resolved && unresolved != 0) {
-					t.Fatalf("unexpected anomalies: %+v", a.Anomalies)
-				}
-			})
+					if slot != (a.EpisodeStats.SlotCorroborated == 1) {
+						t.Fatalf("slot count: %+v", a.EpisodeStats)
+					}
+				})
+			}
 		}
 	}
 }
@@ -135,7 +147,7 @@ func TestJevEpisodeEvidenceSurvivesAuditJSONAndDigest(t *testing.T) {
 		digest := RenderDigest(report, "/tmp/audit.json")
 		for _, want := range []string{
 			"method=whisperx_jev_reference_choice references=opensubtitles (20)", "matched=2 unresolved=2 review=2 | completed=true",
-			"resolved episode probability min=0.90 mean=0.94 max=0.98 | resolved <0.90: 0",
+			"resolved episode probability min=0.90 mean=0.94 max=0.98 | below acceptance rule: 0",
 			"3 episode(s) explicitly flagged for review", "2 unresolved episode(s)",
 			"candidate=none", "match_probability=0.99", "probability_threshold=0.9",
 			"reference_file_id=77", "file_name=First.srt", "reference_search", "omitted",
@@ -145,6 +157,40 @@ func TestJevEpisodeEvidenceSurvivesAuditJSONAndDigest(t *testing.T) {
 			if !strings.Contains(digest, want) {
 				t.Errorf("digest missing %q:\n%s", want, digest)
 			}
+		}
+	}
+}
+
+// Item 4 (TNG S2D1): E02 accepted at 0.85 by slot corroboration must read as a
+// deliberate, visible decision, not as a clean match or an acceptance-rule bug.
+func TestSlotCorroboratedEpisodeIsVisibleNotCritical(t *testing.T) {
+	r := &Report{
+		StageGate: StageGate{PhaseEpisodeID: true, MediaType: "tv"},
+		Envelope: &ripspec.Envelope{Episodes: []ripspec.Episode{
+			{Key: "s02_003", Season: 2, Episode: 3, MatchProbability: 0.99},
+			{Key: "s02_004", Season: 2, Episode: 2, EpisodeTitle: "Where Silence Has Lease", MatchProbability: 0.85, SlotCorroborated: true},
+			{Key: "s02_005", Season: 2, Episode: 1, MatchProbability: 0.99},
+		}},
+	}
+	r.Analysis = computeAnalysis(r)
+	if es := r.Analysis.EpisodeStats; es.SlotCorroborated != 1 || es.Below090 != 0 || !es.SequenceContiguous {
+		t.Fatalf("stats %+v", es)
+	}
+	var info bool
+	for _, a := range r.Analysis.Anomalies {
+		if a.Severity == "critical" {
+			t.Fatalf("slot identity flagged critical: %+v", a)
+		}
+		info = info || (a.Severity == "info" && strings.Contains(a.Message, "1 episode(s) accepted below 0.90"))
+	}
+	if !info {
+		t.Fatalf("slot decision not surfaced: %+v", r.Analysis.Anomalies)
+	}
+	var b strings.Builder
+	writeDigestEpisodeID(&b, r)
+	for _, want := range []string{"3 matched (1 slot-corroborated)", `S02E02 probability=0.85 "Where Silence Has Lease" SLOT-CORROBORATED`} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("digest missing %q:\n%s", want, b.String())
 		}
 	}
 }

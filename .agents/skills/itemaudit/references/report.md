@@ -50,9 +50,11 @@ where anomalies exist.
   `entries` only for decisions with different outcomes, notable parameter
   variations, or anomalous confidence/scores
 - For episode decisions, show candidate, probability, the 0.90 rule, and
-  match/review reason. Distinguish an accepted identity below threshold (a bug)
-  from an unresolved candidate below threshold (correct abstention requiring
-  review); `candidate=none` carries P(none).
+  match/review reason. Distinguish an accepted identity below its rule (a bug)
+  from a slot-corroborated identity (accepted at or above 0.50 because its
+  winner filled the disc's only open slot) and from an unresolved candidate
+  below threshold (correct abstention requiring review); `candidate=none`
+  carries P(none).
 
 **Episode manifest:**
 
@@ -71,7 +73,8 @@ where anomalies exist.
 in the reference named; apply them there. This list is the reporting-time
 reminder, not a second definition:
 
-- Subtitle or transcript wording (SKILL.md scope)
+- Subtitle or transcript wording quality (SKILL.md scope); text read as
+  evidence supports a finding about a decision, never one about the text
 - A subtitle skip as CRITICAL on its own; report a genuine no-verified-candidate
   skip once as a WARNING (encode-and-subtitles.md Phase 6.2)
 - Non-sequential disc title ordering — disc layout varies by manufacturer and is
@@ -154,7 +157,7 @@ reminder, not a second definition:
 #### Episode Identification (if phase_episode_id)
 - Content ID method: <envelope.attributes.content_id.method>
 - References/completion: <content_id.reference_source, usable reference_episodes, completed; reference_search selected/omitted reasons and file IDs; completion does not mean every title cleared review>
-- Probability overview: <analysis.episode_stats.probability_min/max/mean and below_090 for resolved identities; unresolved count; content_id.review_episodes snapshot>
+- Probability overview: <analysis.episode_stats.probability_min/max/mean, below_090 (acceptance-rule violations), and slot_corroborated for resolved identities; unresolved count; content_id.review_episodes snapshot>
 - Episode manifest: <full per-episode table with match_probability, canonical numbers/titles, and current review flags/reasons; pre-episodeid placeholders are an inventory, not failed matches>
 - Structural safety: <runtime, overlap, and sequence reasons; sequence_contiguous and episode_range; review routing and concurrent asset/flag preservation>
 - Verification scope: <decision/metadata integrity only; semantic identity and file completeness are not independently established by probability>
@@ -183,9 +186,9 @@ reminder, not a second definition:
 - Source: <per-title adoption outcome from subtitle_generation_results[].source — opensubtitles/none; for skips, the subtitle_source rejection reasons>
 - Tracks: <count and config from media probes>
 - Stream layout and labels: <from analysis.final_validation: passed, or the failed_checks naming the stream count, codec, language tag, label, or forced/default flag>
-- Validation result: <aggregate subtitle_generation_results.validation_result; list structured review_issues only when they affected routing, without inspecting cue text>
+- Validation result: <aggregate subtitle_generation_results.validation_result; list structured review_issues only when they affected routing; no wording-quality judgments>
 - Subtitle mux/output: <mux status and the apply stage's subtitle layout verdict; skipped titles legitimately have no subtitle stream>
-- Content review: <not performed; subtitle text is out of scope. For skips, name the upstream cause; recommend subtitle-specific recovery only for a genuine no-verified-candidate outcome>
+- Content review: <subtitle quality not reviewed (out of scope); note any text read as decision evidence. For skips, name the upstream cause; recommend subtitle-specific recovery only for a genuine no-verified-candidate outcome>
 
 #### Commentary (if phase_commentary)
 - Decisions: <from analysis.decision_groups; for Jev include P(commentary) and its 0.65 rule, not the episode-identification 0.90 gate>
@@ -237,13 +240,16 @@ After running `spindle queue audit`, check only the phases flagged as `true` in
       usable OpenSubtitles references, completion, and matched/unresolved/review
       counts
 - [ ] Traced `reference_search` selection/omission and file IDs; checked title
-      trust, retry identity reset, and full-transcript sharing without
-      reading cue text; did not mistake dialogue agreement for label
-      verification
-- [ ] Reviewed every manifest entry's `match_probability` against 0.90;
-      distinguished rejected candidates and `none` from accepted identities
+      trust, retry identity reset, and full-transcript sharing; did not
+      mistake dialogue agreement for label verification
+- [ ] Reviewed every manifest entry's `match_probability` against 0.90
+      (0.50 for `slot_corroborated` entries, after checking the slot rule
+      held); distinguished rejected candidates and `none` from accepted
+      identities
 - [ ] Traced unresolved outcomes to catalog/reference/evidence/classifier
-      reasons without inspecting transcript text or assuming extras
+      reasons without assuming extras; for a close call, read the runner-up
+      and P(none), then compared source and reference excerpts when those
+      left the cause open (re-transcription only with operator approval)
 - [ ] Checked runtime, overlap, sequence, and canonical-numbering safeguards;
       did not infer completeness from high probability
 - [ ] Verified current per-episode review flags, concurrent encoding assets, and
@@ -279,9 +285,10 @@ After running `spindle queue audit`, check only the phases flagged as `true` in
 
 - [ ] Read the apply stage's subtitle layout verdict (adopted titles only;
       `source=none` skips legitimately have no stream)
-- [ ] Checked only aggregate adoption/validation outcomes and routing
-- [ ] Did not open, extract, sample, quote, compare, or judge
-      subtitle/transcript content
+- [ ] Checked adoption/validation outcomes and routing; read candidate or
+      reference text only to diagnose an adoption decision
+- [ ] Did not judge subtitle wording, line breaks, reading speed, or
+      translation; quoted only the lines needed as decision evidence
 - [ ] If TV: checked per-episode subtitle asset status
 
 ### External Validation (phase_external_validation)

@@ -259,12 +259,14 @@ audits:
 
 ### Phase 6: Subtitle Pipeline Integrity (when `phase_subtitles` is true)
 
-Analyze only structural subtitle evidence from `media[].probe.streams`
+Start from structural subtitle evidence in `media[].probe.streams`
 (codec_type=subtitle), `analysis.subtitle_summary`, and
-`envelope.assets.subtitled`. Do not open SRT files, inspect cue text, read
-transcripts for subtitle quality, or compare wording against audio/references.
-Keep this phase compact; subtitle content review is an operator action outside
-this audit.
+`envelope.assets.subtitled`. Subtitle quality review (wording, line breaks,
+reading speed) is an operator action outside this audit. Read candidate,
+reference, or transcript text only to diagnose an adoption decision - for
+example, whether a rejected candidate belongs to another episode or a cut with
+different timing - and keep findings about that decision. Keep this phase
+compact.
 
 **For movies** or **per-episode for TV**:
 
@@ -280,8 +282,8 @@ this audit.
    - Never treat Matroska's subtitle `tags.DURATION` as the subtitle's absolute
      end timestamp. It is the cue span (`last cue end - first cue start`). For a
      suspected tail gap, use ffprobe packet metadata for the subtitle stream and
-     calculate `max(pts_time + duration_time)`. Do not inspect packet payloads
-     or cue text. A gap from that timestamp to video duration is not itself a
+     calculate `max(pts_time + duration_time)`; packet timing, not cue text,
+     answers this. A gap from that timestamp to video duration is not itself a
      finding: valid display subtitles stop before long credits, and sparse
      WhisperX end-credit hallucinations can extend the raw reference. For an
      adopted track, trust a `reference_tail_gap_s` at or below the 600-second

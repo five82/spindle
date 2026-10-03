@@ -428,8 +428,8 @@ func writeDigestEpisodeID(b *strings.Builder, r *Report) {
 			cid.MatchedEpisodes, cid.UnresolvedEpisodes, cid.ReviewEpisodes, cid.Completed)
 	}
 	if es := statsOrNil(r); es != nil {
-		fmt.Fprintf(b, "Stats: %d matched, %d unresolved | resolved episode probability min=%.2f mean=%.2f max=%.2f | resolved <0.90: %d | contiguous=%v range=%s\n",
-			es.Matched, es.Unresolved, es.ProbabilityMin, es.ProbabilityMean, es.ProbabilityMax,
+		fmt.Fprintf(b, "Stats: %d matched (%d slot-corroborated), %d unresolved | resolved episode probability min=%.2f mean=%.2f max=%.2f | below acceptance rule: %d | contiguous=%v range=%s\n",
+			es.Matched, es.SlotCorroborated, es.Unresolved, es.ProbabilityMin, es.ProbabilityMean, es.ProbabilityMax,
 			es.Below090, es.SequenceContiguous, es.EpisodeRange)
 	}
 	for _, ep := range r.Envelope.Episodes {
@@ -444,6 +444,9 @@ func writeDigestEpisodeID(b *strings.Builder, r *Report) {
 			ep.Key, ep.TitleID, se, ep.MatchProbability)
 		if ep.EpisodeTitle != "" {
 			line += fmt.Sprintf(" %q", ep.EpisodeTitle)
+		}
+		if ep.SlotCorroborated {
+			line += " SLOT-CORROBORATED"
 		}
 		if ep.NeedsReview {
 			line += " REVIEW: " + ep.ReviewReason

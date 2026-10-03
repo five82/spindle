@@ -84,9 +84,16 @@ Analyze the `rip_cache` section from the audit output:
      omit the episode, not select a suspect fallback.
    - `contentid_matches` records catalog/usable-candidate counts and excerpt
      limits. `episode_match` records the candidate and reference file ID with
-     its probability. There is no synopsis, similarity, disc-position, or
-     forced hole-filling fallback. Title checks cannot independently certify
-     every external label, and matching dialogue cannot repair a bad label.
+     its probability. There is no synopsis or similarity fallback, and disc
+     position never assigns an identity on its own. The one sequence rule is
+     slot corroboration: a title whose winner is below 0.90 but at or above
+     0.50 is accepted (`slot_corroborated=true`, decision reason "below-threshold
+     winner fills the only open slot in the disc's consecutive episode run")
+     only when every such winner fills a gap strictly inside the accepted run
+     and together they make it contiguous without overlap. A `none` winner,
+     an edge extension, a duplicate, or any disagreeing winner leaves all
+     close calls for review. Title checks cannot independently certify every
+     external label, and matching dialogue cannot repair a bad label.
    - Read `transcribed_episodes`, `matched_episodes`, `unresolved_episodes`, and
      `review_episodes`. `completed=true` means the classification pass finished,
      not that every title matched or cleared review. Current per-episode review
@@ -97,10 +104,16 @@ Analyze the `rip_cache` section from the audit output:
    `analysis.episode_stats.probability_min/max/mean`, `below_090`, `unresolved`,
    `placeholder_only`, and `sequence_contiguous` for the overview, then inspect
    every `envelope.episodes[]` entry.
-   - Probability aggregates and `below_090` cover resolved identities only. A
-     resolved identity below 0.90 (including zero) is **CRITICAL**: it violates
-     the acceptance rule. A probability of exactly 0.90 is accepted; it is not
-     Jev's separate confidence statistic.
+   - Probability aggregates and `below_090` cover resolved identities only.
+     `below_090` counts acceptance-rule violations: a direct identity below
+     0.90, or a slot-corroborated one below 0.50 (including zero). Either is
+     **CRITICAL**. Exactly 0.90 (direct) or 0.50 (slot) is accepted; neither
+     is Jev's separate confidence statistic.
+   - `episode_stats.slot_corroborated` counts slot-accepted identities (INFO
+     anomaly; `SLOT-CORROBORATED` in the digest manifest). Verify each one:
+     its `episode_match` winner is the gap number, the accepted run around it
+     is contiguous, and its runtime passes the structural check. A slot
+     identity whose winner, run, or runtime does not support it is a code bug.
    - `episode=0` means unresolved. A positive stored `match_probability` on such
      an entry is a rejected candidate's probability, not an accepted identity.
      Zero can mean abstention or unavailable evidence/classification;
@@ -114,6 +127,23 @@ Analyze the `rip_cache` section from the audit output:
      route to review. Missing references are excluded choices, not synopsis
      fallbacks. An omitted reference for an unused episode is not itself a
      delivered-output defect.
+   - For a below-threshold abstention, split the remaining mass using
+     `episode_match` `runner_up_probability` and `none_probability`. A
+     substantial runner-up episode means two references share distinctive
+     middle-excerpt content (a content cause; the abstention is correct and
+     the code is not at fault). A substantial `none` means thin overlap: compare
+     `excerpt_midpoint_s` between the source and the candidate's
+     `reference_search` entry (a large gap means the two windows cover
+     different scenes), and check `excerpt_bytes`/`excerpt_truncated` for a
+     sparse or capped excerpt. When those fields leave the cause open, compare
+     the excerpts themselves: references stay in the OpenSubtitles cache
+     (`<file_id>.srt`; rebuild the excerpt as half the last cue end +/-150 s,
+     first 3000 bytes), and the source transcript is in staging while the item
+     is live. Staging cleanup deletes transcripts; re-transcribing from the rip
+     cache is read-only for the queue but costs GPU time, so ask the operator
+     first. An ordered run of the same lines with the winner, against only
+     shared names with the runner-up, means the classifier was distracted - a
+     classifier/instruction issue, not a correct abstention to accept as is.
 
 3. **Canonical match outcomes live in `episodes[]`**:
    - Review `season`, `episode`, `episode_end`, `episode_title`,
@@ -123,10 +153,10 @@ Analyze the `rip_cache` section from the audit output:
      or shift later episode numbers. High probability may identify only the
      dominant episode in a composite; it does not prove that the entire file is
      one episode.
-   - Do not read transcript/subtitle cue text to verify a match. This read-only
-     metadata audit can verify decision integrity and structural evidence, not
-     independently prove semantic episode identity; state that limit when
-     relevant.
+   - Probability and reference labels alone do not prove semantic identity.
+     When identity is in doubt, compare the source excerpt with the candidate's
+     reference excerpt (see the abstention bullet above); otherwise state that
+     only decision integrity and structural evidence were verified.
 
 4. **Structural safety and persistence**:
    - Inspect overlaps/duplicate assignments, missing source or TMDB runtimes,

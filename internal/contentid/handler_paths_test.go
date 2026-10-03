@@ -1,14 +1,17 @@
 package contentid
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -302,5 +305,145 @@ func TestClassifyAPIFailureAndCancellation(t *testing.T) {
 	h := episodeTestHandler(t, nil)
 	if err := h.classifyEpisodes(ctx, sess, episodeTestSeason()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel: %v", err)
+	}
+}
+
+// Item 4 (TNG S2D1 title 9): E02 at 0.85 with E11 holding 0.14 abstained, but
+// the log kept only the winner, so a competing episode was indistinguishable
+// from thin evidence without re-transcribing the title.
+func TestClassifyAbstentionLogsRunnerUpAndExcerptShape(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"answers": map[string]any{"decision": map[string]any{
+			"type": "choice", "choice": "E02", "confidence": 0.85,
+			"probabilities": map[string]float64{"E02": 0.85, "E01": 0.14, "none": 0.01},
+		}}})
+	}))
+	t.Cleanup(server.Close)
+	sess := episodeTestSession(t, "Source dialogue.")
+	var buf bytes.Buffer
+	sess.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
+	h := episodeTestHandler(t, llm.New(config.LLMConfig{APIKey: "test", BaseURL: server.URL}, nil))
+	if err := h.classifyEpisodes(context.Background(), sess, episodeTestSeason()); err != nil {
+		t.Fatal(err)
+	}
+	if ep := sess.Env.Episodes[0]; ep.Episode != 0 || !ep.NeedsReview || ep.MatchProbability != 0.85 {
+		t.Fatalf("abstention: %+v", ep)
+	}
+	var match, reference map[string]any
+	for line := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case entry["decision_type"] == "episode_match":
+			match = entry
+		case entry["decision_type"] == "reference_search" && entry["episode"] == float64(2):
+			reference = entry
+		}
+	}
+	if match["candidate"] != "E02" || match["runner_up"] != "E01" || match["runner_up_probability"] != 0.14 || match["none_probability"] != 0.01 {
+		t.Fatalf("competitor not logged: %v", match)
+	}
+	// One 0-2700s cue: midpoint 1350s, the whole 16-byte line in the window.
+	if match["excerpt_bytes"] != float64(16) || match["excerpt_midpoint_s"] != float64(1350) || match["excerpt_truncated"] != false {
+		t.Fatalf("source excerpt shape not logged: %v", match)
+	}
+	if reference["excerpt_bytes"] != float64(len("Reference Second dialogue.")) || reference["excerpt_midpoint_s"] != float64(1350) || reference["excerpt_truncated"] != false {
+		t.Fatalf("reference excerpt shape not logged: %v", reference)
+	}
+}
+
+func slotTestSeason() *tmdb.Season {
+	season := &tmdb.Season{}
+	for n, name := range []string{"One", "Two", "Three", "Four", "Five"} {
+		season.Episodes = append(season.Episodes, tmdb.Episode{EpisodeNumber: n + 1, Name: name, Runtime: 45, AirDate: "2001-01-01"})
+	}
+	return season
+}
+
+// Item 4 (TNG S2D1): titles matched E05, E04, E03, E01 and title 9 abstained
+// at E02=0.85. The disc's run 1-5 has one open slot and the classifier's
+// winner is that slot, so the identity is corroborated rather than reviewed.
+func TestClassifySlotCorroboratesBelowThresholdWinner(t *testing.T) {
+	sess := episodeTestSession(t, "five", "four", "three", "two", "one")
+	sess.Env.Metadata.DiscNumber = 1
+	winners := map[string]string{"five": "E05", "four": "E04", "three": "E03", "two": "E02", "one": "E01"}
+	h := episodeTestHandler(t, episodeTestClient(t, func(text string) (string, float64) {
+		if text == "two" {
+			return "E02", 0.85
+		}
+		return winners[text], 0.99
+	}), slotTestSeason())
+	if err := h.classifyEpisodes(context.Background(), sess, slotTestSeason()); err != nil {
+		t.Fatal(err)
+	}
+	ep := sess.Env.Episodes[3]
+	if ep.Episode != 2 || ep.EpisodeTitle != "Two" || ep.MatchProbability != 0.85 || !ep.SlotCorroborated || ep.NeedsReview {
+		t.Fatalf("slot not corroborated: %+v", ep)
+	}
+	for i, other := range sess.Env.Episodes {
+		if i != 3 && (other.SlotCorroborated || other.NeedsReview) {
+			t.Fatalf("direct match marked as slot or review: %+v", other)
+		}
+	}
+	if s := sess.Env.Attributes.ContentID; s.MatchedEpisodes != 5 || s.UnresolvedEpisodes != 0 || s.ReviewEpisodes != 0 || !s.SequenceContiguous {
+		t.Fatalf("summary %+v", s)
+	}
+	// A rerun must clear the slot marker along with the identity it justified.
+	h = episodeTestHandler(t, episodeTestClient(t, func(string) (string, float64) { return "none", 0.99 }), slotTestSeason())
+	if err := h.classifyEpisodes(context.Background(), sess, slotTestSeason()); err != nil {
+		t.Fatal(err)
+	}
+	if ep := sess.Env.Episodes[3]; ep.SlotCorroborated || ep.Episode != 0 {
+		t.Fatalf("stale slot identity: %+v", ep)
+	}
+}
+
+func TestSlotFillsRequireClassifierAgreementInsideTheRun(t *testing.T) {
+	details := map[string]tmdb.Episode{}
+	for _, ep := range slotTestSeason().Episodes {
+		details[fmt.Sprintf("E%02d", ep.EpisodeNumber)] = ep
+	}
+	low := func(winner string, p float64) titleOutcome {
+		return titleOutcome{reason: belowThresholdReason, winner: winner, peak: p}
+	}
+	abstain := titleOutcome{reason: "no reference has distinctive overlapping dialogue", winner: "none", peak: 0.9}
+	for _, tt := range []struct {
+		name     string
+		accepted []int
+		pending  []titleOutcome
+		fills    bool
+	}{
+		{"single interior gap", []int{1, 3, 4, 5}, []titleOutcome{low("E02", 0.85)}, true},
+		{"floor is inclusive", []int{1, 3, 4, 5}, []titleOutcome{low("E02", slotProbabilityFloor)}, true},
+		{"other abstentions do not block", []int{1, 3, 4, 5}, []titleOutcome{low("E02", 0.85), abstain}, true},
+		{"two winners close two gaps", []int{1, 3, 5}, []titleOutcome{low("E02", 0.6), low("E04", 0.7)}, true},
+		{"below floor", []int{1, 3, 4, 5}, []titleOutcome{low("E02", 0.49)}, false},
+		{"winner is not the gap", []int{1, 3, 4, 5}, []titleOutcome{low("E04", 0.85)}, false},
+		{"edge extension is not a slot", []int{1, 2, 3, 4}, []titleOutcome{low("E05", 0.85)}, false},
+		{"second gap left open", []int{1, 3, 5}, []titleOutcome{low("E02", 0.85)}, false},
+		{"one bad winner blocks all", []int{1, 3, 5}, []titleOutcome{low("E02", 0.85), low("E01", 0.85)}, false},
+		{"none abstention never fills", []int{1, 3, 4, 5}, []titleOutcome{abstain}, false},
+		{"no accepted run", nil, []titleOutcome{low("E02", 0.85)}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var episodes []ripspec.Episode
+			for _, n := range tt.accepted {
+				episodes = append(episodes, ripspec.Episode{Episode: n})
+			}
+			outcomes := make([]titleOutcome, len(episodes))
+			var want []int
+			for _, o := range tt.pending {
+				if tt.fills && o.reason == belowThresholdReason {
+					want = append(want, len(episodes))
+				}
+				episodes = append(episodes, ripspec.Episode{})
+				outcomes = append(outcomes, o)
+			}
+			if got := slotFills(episodes, outcomes, details); !slices.Equal(got, want) {
+				t.Fatalf("slotFills = %v, want %v", got, want)
+			}
+		})
 	}
 }

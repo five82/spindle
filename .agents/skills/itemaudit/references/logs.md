@@ -8,7 +8,9 @@ daemon log file has rotated away or is missing.
 1. **Decision anomalies** (from `analysis.decision_groups`):
    - Scores that contradict the decision's own acceptance rule. Jev commentary
      uses P(commentary) >= 0.65; episode identification requires P(episode) >=
-     0.90. Neither uses Jev's separate confidence statistic.
+     0.90, or >= 0.50 with `slot_corroborated=true` when the winner fills the
+     disc's only open episode slot. Neither uses Jev's separate confidence
+     statistic.
    - Unexpected fallbacks (encoding retries)
    - Decisions that contradict expected behavior for the content type
    - Look up groups by `decision_type` to find specific categories
@@ -219,8 +221,9 @@ daemon log file has rotated away or is missing.
      0.65, episode identification 0.90. Both use typed Jev Choice; probability
      comparisons and fixed decision reasons are intentional, not missing
      generated explanations. There is no chat pair-verification fallback.
-   - Exclude subtitle/transcript wording from this review; use decisions,
-     failure events, track metadata, and applicable external disc evidence.
+   - Do not judge subtitle/transcript wording here; use decisions, failure
+     events, track metadata, and applicable external disc evidence, and read
+     the text a decision saw only when diagnosing that decision.
 
 5. **TV episode pipeline checks** (TV only, from `analysis.decision_groups`,
    `logs.warnings`, and native `transitions`):
@@ -244,7 +247,15 @@ daemon log file has rotated away or is missing.
      `probability_threshold`, and `decision_reason` in each entry's
      extras/reason. When `candidate=none`, the logged probability belongs to
      `none`, not an episode. On evidence/API failure it is zero, not a
-     successful negative classification.
+     successful negative classification. `slot_corroborated` and
+     `slot_probability_floor` mark a below-threshold winner accepted for
+     filling the disc's only open slot (`decision_result=matched`).
+     `runner_up`/`runner_up_probability`
+     (best episode other than the candidate) and `none_probability` say where
+     the rest of the mass went; `excerpt_bytes`, `excerpt_midpoint_s`, and
+     `excerpt_truncated` describe the source excerpt (6000-byte cap).
+     `reference_search` carries the same three excerpt fields for each
+     reference (3000-byte cap).
    - TV title exclusions carry their evidence:
      `outlier_bar_seconds`/`weighted_median_seconds` on `gross_runtime_outlier`,
      `expected_runtimes_seconds` on

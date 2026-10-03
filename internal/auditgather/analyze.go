@@ -804,6 +804,15 @@ func computeEpisodeStats(episodes []ripspec.Episode) *EpisodeStats {
 		if ep.Episode > 0 {
 			stats.Matched++
 			probabilities = append(probabilities, ep.MatchProbability)
+			// Mirrors contentid's 0.90 threshold and 0.50 slot-corroboration floor.
+			floor := 0.90
+			if ep.SlotCorroborated {
+				stats.SlotCorroborated++
+				floor = 0.50
+			}
+			if ep.MatchProbability < floor {
+				stats.Below090++
+			}
 			for n := ep.Episode; n <= ep.EpisodeLast(); n++ {
 				episodeNumbers = append(episodeNumbers, n)
 			}
@@ -822,9 +831,6 @@ func computeEpisodeStats(episodes []ripspec.Episode) *EpisodeStats {
 		var sum float64
 		for _, p := range probabilities {
 			sum += p
-			if p < 0.90 {
-				stats.Below090++
-			}
 		}
 		stats.ProbabilityMean = math.Round(sum/float64(len(probabilities))*1000) / 1000
 	}
@@ -1101,7 +1107,14 @@ func detectAnomalies(r *Report, a *Analysis) []Anomaly {
 			anomalies = append(anomalies, Anomaly{
 				Severity: "critical",
 				Category: "episodes",
-				Message:  fmt.Sprintf("%d resolved episode(s) below the 0.90 acceptance probability", a.EpisodeStats.Below090),
+				Message:  fmt.Sprintf("%d resolved episode(s) below their acceptance probability (0.90 direct, 0.50 slot-corroborated)", a.EpisodeStats.Below090),
+			})
+		}
+		if a.EpisodeStats.SlotCorroborated > 0 {
+			anomalies = append(anomalies, Anomaly{
+				Severity: "info",
+				Category: "episodes",
+				Message:  fmt.Sprintf("%d episode(s) accepted below 0.90 because the classifier's winner filled the disc's only open slot", a.EpisodeStats.SlotCorroborated),
 			})
 		}
 		if !a.EpisodeStats.SequenceContiguous && a.EpisodeStats.Matched > 0 {

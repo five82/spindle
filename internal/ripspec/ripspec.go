@@ -79,8 +79,11 @@ type Episode struct {
 	TitleHash        string  `json:"title_hash,omitempty"`
 	OutputBasename   string  `json:"output_basename,omitempty"`
 	MatchProbability float64 `json:"match_probability,omitempty"`
-	NeedsReview      bool    `json:"needs_review,omitempty"`
-	ReviewReason     string  `json:"review_reason,omitempty"`
+	// SlotCorroborated marks an identity accepted below the probability
+	// threshold because its winner filled the disc's only open episode slot.
+	SlotCorroborated bool   `json:"slot_corroborated,omitempty"`
+	NeedsReview      bool   `json:"needs_review,omitempty"`
+	ReviewReason     string `json:"review_reason,omitempty"`
 }
 
 // Asset represents a single file artifact at a pipeline stage.

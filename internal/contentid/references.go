@@ -34,6 +34,7 @@ func (h *Handler) fetchReferences(ctx context.Context, sess *stage.Session, seas
 		results, err := h.osClient.Search(ctx, sess.Env.Metadata.ID, sess.Env.Metadata.SeasonNumber, ep.EpisodeNumber, []string{"en"})
 		selected := selectReference(results, season, ep.EpisodeNumber)
 		result, reason, fileID := "omitted", "no unambiguous canonical title in a single-file English full-subtitle candidate", 0
+		excerptBytes, excerptMidpoint, excerptTruncated := 0, 0.0, false
 		if err == nil && selected != nil {
 			fileID = selected.Files[0].FileID
 			cache := filepath.Join(h.cfg.OpenSubtitlesCacheDir(), fmt.Sprintf("%d.srt", fileID))
@@ -45,7 +46,9 @@ func (h *Handler) fetchReferences(ctx context.Context, sess *stage.Session, seas
 					data, err = os.ReadFile(cache)
 				}
 			}
-			text := dialogueExcerpt(srtutil.Parse(strings.TrimPrefix(string(data), "\ufeff")), 3000)
+			var text string
+			text, excerptMidpoint, excerptTruncated = dialogueExcerpt(srtutil.Parse(strings.TrimPrefix(string(data), "\ufeff")), 3000)
+			excerptBytes = len(text)
 			if err == nil && text == "" {
 				err = fmt.Errorf("reference has no middle-excerpt dialogue")
 			}
@@ -63,7 +66,8 @@ func (h *Handler) fetchReferences(ctx context.Context, sess *stage.Session, seas
 				"error_hint", err.Error(), "impact", "episode omitted from classifier choices", "episode", ep.EpisodeNumber)
 		}
 		attrs := []any{"decision_type", logs.DecisionReferenceSearch, "decision_result", result, "decision_reason", reason,
-			"season", sess.Env.Metadata.SeasonNumber, "episode", ep.EpisodeNumber, "episode_title", ep.Name, "reference_file_id", fileID}
+			"season", sess.Env.Metadata.SeasonNumber, "episode", ep.EpisodeNumber, "episode_title", ep.Name, "reference_file_id", fileID,
+			"excerpt_bytes", excerptBytes, "excerpt_midpoint_s", excerptMidpoint, "excerpt_truncated", excerptTruncated}
 		if selected != nil {
 			attrs = append(attrs, "release", selected.Release, "file_name", selected.Files[0].FileName)
 		}
@@ -116,24 +120,27 @@ var excerptTags = regexp.MustCompile(`<[^>]*>|\{[^}]*\}`)
 
 // Only the classifier input is excerpted. Shared SRT/word-timestamp artifacts
 // remain full length for commentary analysis and display-subtitle verification.
-func dialogueExcerpt(cues []srtutil.Cue, byteCap int) string {
+// The window midpoint and truncation are returned for logging: a near-threshold
+// match is undiagnosable once staging (and its transcripts) is cleaned up.
+func dialogueExcerpt(cues []srtutil.Cue, byteCap int) (text string, midpoint float64, truncated bool) {
 	end := 0.0
 	for _, cue := range cues {
 		end = max(end, cue.End)
 	}
-	lo, hi := max(0, end/2-150), end/2+150
+	midpoint = end / 2
+	lo, hi := max(0, midpoint-150), midpoint+150
 	var parts []string
 	for _, cue := range cues {
 		if cue.End >= lo && cue.Start <= hi {
 			parts = append(parts, html.UnescapeString(excerptTags.ReplaceAllString(cue.Text, "")))
 		}
 	}
-	text := strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
+	text = strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
 	if len(text) > byteCap {
-		text = text[:byteCap]
+		text, truncated = text[:byteCap], true
 		for !utf8.ValidString(text) {
 			text = text[:len(text)-1]
 		}
 	}
-	return text
+	return text, midpoint, truncated
 }

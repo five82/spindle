@@ -2,7 +2,7 @@
 name: itemaudit
 description:
   Diagnose a Spindle queue item or daemon issue from audit artifacts. Use for
-  root-cause investigation, not for subtitle wording review or manual disc
+  root-cause investigation, not for subtitle quality review or manual disc
   orchestration.
 user-invocable: true
 argument-hint: [item_id]
@@ -22,11 +22,21 @@ checks, and reprocess/re-audit when the source is available. If reprocessing is
 blocked, report exactly what remains unverified. Follow repository daemon,
 deployment, and queue rules.
 
-**Subtitle content is out of scope.** Never read, extract, sample, quote,
-compare, or judge subtitle/transcript cue text. Check only pipeline integrity,
-metadata, routing, muxing, stream format, dispositions, and labels. For wording
-problems, suggest `spindle subtitle <mkv>` or the whisperx-subtitles skill; do
-not run modifying commands during an audit.
+**Subtitle quality review is out of scope; text as decision evidence is not.**
+Never judge subtitle wording, phrasing, line breaks, reading speed, or
+translation, and never raise a finding whose subject is the text itself. For
+wording problems, suggest `spindle subtitle <mkv>` or the whisperx-subtitles
+skill; do not run modifying commands during an audit.
+
+When a pipeline decision depends on text - episode-ID matches and abstentions,
+subtitle candidate rejection/adoption (sync offsets, wrong-episode references),
+commentary classification - read the transcript, reference, or subtitle text
+that decision saw, after the decision logs (`runner_up_probability`,
+`none_probability`, excerpt fields) have narrowed the question. Findings stay
+about the decision (wrong reference, misaligned windows, a competitor sharing a
+name), not text quality. Quote only the few aligned lines that show the
+evidence. Never conclude "no defect" for a text-driven decision you could not
+inspect; say what remains unverified instead.
 
 ## Start with the evidence
 

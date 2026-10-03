@@ -120,7 +120,11 @@ five-minute middle dialogue excerpts with title-vetted English OpenSubtitles
 references across the entire canonical TMDB season. This also requires the
 OpenSubtitles API key. Unknown or conflicting reference titles are excluded;
 unavailable references, uncertain matches, and classifier failures send titles
-to review rather than guessing from synopses or disc order. Full WhisperX
+to review rather than guessing from synopses or disc order. The one exception
+uses the disc's consecutive episodes as corroboration, not as a guess: a title
+whose best match is below the 0.90 threshold but at least 0.50 is accepted
+when that match is the only episode missing inside the run the other titles
+matched. Full WhisperX
 transcripts remain available for commentary and subtitle verification. Display
 subtitles do not inherit the episode reference: the daemon and
 `spindle subtitle` rank candidates the same way, by match to the actual video
