@@ -356,12 +356,12 @@ func TestParseMSG(t *testing.T) {
 		},
 		{
 			name:       "copy complete summary",
-			line:       `MSG:5036,0,2,"Copy complete. 1 titles saved, 0 failed.","Copy complete. %1 titles saved, %2 failed.","1","0"`,
+			line:       `MSG:5037,260,2,"Copy complete. 1 titles saved, 1 failed.","Copy complete. %1 titles saved, %2 failed.","1","1"`,
 			wantOK:     true,
-			wantCode:   5036,
-			wantFlags:  0,
-			wantMsg:    "Copy complete. 1 titles saved, 0 failed.",
-			wantParams: []string{"1", "0"},
+			wantCode:   5037,
+			wantFlags:  260,
+			wantMsg:    "Copy complete. 1 titles saved, 1 failed.",
+			wantParams: []string{"1", "1"},
 		},
 		{
 			name:      "error flag set",
@@ -422,7 +422,7 @@ func TestParseMSG(t *testing.T) {
 func TestSplitRobotFieldsUnlimitedQuotedCommas(t *testing.T) {
 	// MSG lines can have many comma-separated params; unlimited splitting
 	// must preserve quoted commas as literal characters inside a field.
-	fields := splitRobotFields(`5036,0,2,"Copy complete. 1 titles saved, 0 failed.","%1 saved, %2 failed","1","0"`, 0)
+	fields := splitRobotFields(`5037,260,2,"Copy complete. 1 titles saved, 0 failed.","%1 saved, %2 failed","1","0"`, 0)
 	if len(fields) != 7 {
 		t.Fatalf("expected 7 fields, got %d: %v", len(fields), fields)
 	}

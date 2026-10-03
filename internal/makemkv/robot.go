@@ -16,9 +16,13 @@ const (
 	msgFlagDebug   = 0x04
 )
 
-// MakeMKV MSG code for the final "Copy complete" summary line.
-// Format params: %1 = titles saved, %2 = titles failed.
-const msgCodeCopyComplete = 5036
+// MakeMKV MSG codes for the final "Copy complete" summary line. A clean rip
+// prints 5036 ("%1 titles saved.", one param); any failure prints 5037
+// ("%1 titles saved, %2 failed.", two params).
+const (
+	msgCodeCopyComplete       = 5036
+	msgCodeCopyCompleteFailed = 5037
+)
 
 // ripMessage is a parsed MSG line from makemkvcon rip output.
 type ripMessage struct {

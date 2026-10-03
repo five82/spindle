@@ -133,7 +133,7 @@ type ripOutcome struct {
 
 	errorMsgs        []ripMessage
 	warningMsgs      []ripMessage
-	savedCount       int // -1 = unknown (no MSG:5036 seen)
+	savedCount       int // -1 = unknown (no MSG:5036/5037 seen)
 	failedCount      int
 	lastErrorText    string
 	savingTitle      bool
@@ -193,12 +193,16 @@ func (o *ripOutcome) observe(line string) {
 			"title_id", o.titleID,
 		)
 	}
-	if msg.code == msgCodeCopyComplete && len(msg.params) >= 2 {
+	switch {
+	case msg.code == msgCodeCopyComplete && len(msg.params) >= 1:
 		if n, err := strconv.Atoi(msg.params[0]); err == nil {
-			o.savedCount = n
+			o.savedCount, o.failedCount = n, 0
 		}
-		if n, err := strconv.Atoi(msg.params[1]); err == nil {
-			o.failedCount = n
+	case msg.code == msgCodeCopyCompleteFailed && len(msg.params) >= 2:
+		saved, errSaved := strconv.Atoi(msg.params[0])
+		failed, errFailed := strconv.Atoi(msg.params[1])
+		if errSaved == nil && errFailed == nil {
+			o.savedCount, o.failedCount = saved, failed
 		}
 	}
 }

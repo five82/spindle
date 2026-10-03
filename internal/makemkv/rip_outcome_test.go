@@ -33,12 +33,12 @@ func TestRipOutcomeVerdict(t *testing.T) {
 	completeLines := []string{
 		`PRGT:5024,0,"Saving to MKV file"`,
 		`PRGV:0,990,1000`,
-		`MSG:5036,0,2,"Copy complete. 1 titles saved, 0 failed.","Copy complete. %1 titles saved, %2 failed.","1","0"`,
+		`MSG:5036,260,1,"Copy complete. 1 titles saved.","Copy complete. %1 titles saved.","1"`,
 	}
 	zeroSavedLines := []string{
 		`PRGT:5024,0,"Saving to MKV file"`,
 		`MSG:5003,1,0,"Error while reading title","Error while reading title"`,
-		`MSG:5036,0,2,"Copy complete. 0 titles saved, 1 failed.","Copy complete. %1 titles saved, %2 failed.","0","1"`,
+		`MSG:5037,260,2,"Copy complete. 0 titles saved, 1 failed.","Copy complete. %1 titles saved, %2 failed.","0","1"`,
 	}
 
 	tests := []struct {
@@ -101,13 +101,26 @@ func TestRipOutcomeVerdict(t *testing.T) {
 }
 
 func TestRipOutcomeObserveSummaryCounts(t *testing.T) {
-	o := newRipOutcome(0, nil, discardSlog())
-	if o.savedCount != -1 || o.failedCount != -1 {
-		t.Fatalf("initial counts = %d/%d, want -1/-1", o.savedCount, o.failedCount)
+	tests := []struct {
+		name       string
+		line       string
+		wantSaved  int
+		wantFailed int
+	}{
+		// makemkvcon prints the one-param 5036 form on every clean rip;
+		// matching only a two-param summary left the counts unknown forever.
+		{"clean summary", `MSG:5036,260,1,"Copy complete. 1 titles saved.","Copy complete. %1 titles saved.","1"`, 1, 0},
+		{"failed summary", `MSG:5037,260,2,"Copy complete. 2 titles saved, 1 failed.","Copy complete. %1 titles saved, %2 failed.","2","1"`, 2, 1},
+		{"other message", `MSG:5003,1,0,"Error while reading title","Error while reading title"`, -1, -1},
 	}
-	o.observe(`MSG:5036,0,2,"Copy complete. 2 titles saved, 1 failed.","Copy complete. %1 titles saved, %2 failed.","2","1"`)
-	if o.savedCount != 2 || o.failedCount != 1 {
-		t.Fatalf("counts = %d/%d, want 2/1", o.savedCount, o.failedCount)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := newRipOutcome(0, nil, discardSlog())
+			o.observe(tt.line)
+			if o.savedCount != tt.wantSaved || o.failedCount != tt.wantFailed {
+				t.Fatalf("counts = %d/%d, want %d/%d", o.savedCount, o.failedCount, tt.wantSaved, tt.wantFailed)
+			}
+		})
 	}
 }
 

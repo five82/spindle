@@ -194,6 +194,11 @@ daemon log file has rotated away or is missing.
      status, and Jev decision before accepting a missing-E1 conclusion. An
      unresolved title is not a probable extra; high episode probability alone
      does not prove complete file coverage.
+   - `makemkv_rip_complete` carries MakeMKV's final summary: `saved_count`
+     and `failed_count` from MSG 5036 (clean, one param) or 5037 (with
+     failures). A completed rip has `saved_count>=1`; `-1` means no summary
+     line was seen (a truncated run, or a binary older than the 5036 parse
+     fix, when every rip logged `-1`). A zero-saved summary fails the rip.
    - Title-level TV deduplication only runs on Blu-ray segment maps: DVD maps
      are title-local and TitleHash is metadata-only, so identification refuses
      to dedup non-Blu-ray titles at all. A `duplicate_detection` decision

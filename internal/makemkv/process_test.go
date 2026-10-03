@@ -20,7 +20,7 @@ info)
   ;;
 mkv)
   if [ "$MODE" = fail ]; then exit 2; fi
-  printf '%s\n' 'PRGT:5024,0,"Saving"' 'PRGV:100,100,65536' 'MSG:5036,0,2,"Copy complete","%1 titles saved, %2 failed",1,0'
+  printf '%s\n' 'PRGT:5024,0,"Saving"' 'PRGV:100,100,65536' 'MSG:5036,260,1,"Copy complete. 1 titles saved.","Copy complete. %1 titles saved.","1"'
   if [ "$MODE" != empty ]; then printf 'mkv' > "$6/new.mkv"; fi
   ;;
 esac
